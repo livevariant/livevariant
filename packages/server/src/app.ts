@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import {
   capArmPriors,
   decodeConfig,
@@ -38,6 +39,21 @@ export function createApp(options: AppOptions): Hono {
     options.rng ?? mulberry32(randomSeed())
   );
   const app = new Hono();
+
+  // Browser-called endpoints must be CORS-open: the SDK runs on customer
+  // sites (/choose, /reward) and the dashboard is a different origin than
+  // the serving domain (/stats, /recompute). Wildcard is safe here: no
+  // cookies are involved anywhere, and /stats authorizes via the bearer
+  // secret, not the origin.
+  const openCors = cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "OPTIONS"],
+    allowHeaders: ["content-type", "authorization"]
+  });
+  app.use("/choose", openCors);
+  app.use("/reward", openCors);
+  app.use("/stats/*", openCors);
+  app.use("/recompute/*", openCors);
 
   /** Query params prefixed c_ carry context: ?c_device=mobile&c_country=nl */
   function ctxFromQuery(query: Record<string, string>): Record<string, string> {

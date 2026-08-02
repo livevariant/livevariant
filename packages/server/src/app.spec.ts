@@ -215,6 +215,32 @@ describe("JS mode (choose/reward)", () => {
   });
 });
 
+describe("cors", () => {
+  it("preflights and allows browser calls on SDK and stats endpoints", async () => {
+    const { encoded } = await makeTest();
+    const preflight = await app.request("/choose", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://customer-site.example",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type"
+      }
+    });
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
+    expect(preflight.headers.get("access-control-allow-headers")).toMatch(
+      /content-type/i
+    );
+    const stats = await app.request(`/stats/${encoded}`, {
+      headers: {
+        origin: "https://livevariant.com",
+        authorization: `Bearer ${SECRET}`
+      }
+    });
+    expect(stats.status).toBe(200);
+    expect(stats.headers.get("access-control-allow-origin")).toBe("*");
+  });
+});
+
 describe("stats and manage auth", () => {
   it("stats accepts only the bearer secret", async () => {
     const { encoded } = await makeTest();
