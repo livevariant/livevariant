@@ -142,6 +142,87 @@ describe("assignment", () => {
   });
 });
 
+describe("resilience: the page must render regardless", () => {
+  it("renders the control arm when the server errors", async () => {
+    const failing = (async () =>
+      new Response("boom", { status: 500 })) as unknown as typeof fetch;
+    const test = await createTest(CONFIG, {
+      serverUrl: "https://livevariant.link",
+      fetch: failing,
+      rewardEvents: false
+    });
+    expect(test.variant.name).toBe("control");
+    expect(test.fallback).toBe(true);
+    // A transient outage must not pin this visitor to control for good.
+    expect(localStorage.getItem(`lv:a:${test.testId}`)).toBeNull();
+    test.dispose();
+  });
+
+  it("renders the control arm when the server is unreachable", async () => {
+    const unreachable = (async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch;
+    const test = await createTest(CONFIG, {
+      serverUrl: "https://livevariant.link",
+      fetch: unreachable,
+      rewardEvents: false
+    });
+    expect(test.variant.name).toBe("control");
+    expect(test.fallback).toBe(true);
+    test.dispose();
+  });
+
+  it("gives up on a hanging server and renders control", async () => {
+    const hanging = ((_input: RequestInfo | URL, init?: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new DOMException("aborted", "AbortError"))
+        );
+      })) as unknown as typeof fetch;
+    const started = Date.now();
+    const test = await createTest(CONFIG, {
+      serverUrl: "https://livevariant.link",
+      fetch: hanging,
+      rewardEvents: false,
+      timeoutMs: 50
+    });
+    expect(test.variant.name).toBe("control");
+    expect(test.fallback).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    test.dispose();
+  });
+
+  it("renders control when the server answers with a nonsense arm", async () => {
+    const nonsense = (async () =>
+      Response.json({ armIndex: 99 })) as unknown as typeof fetch;
+    const test = await createTest(CONFIG, {
+      serverUrl: "https://livevariant.link",
+      fetch: nonsense,
+      rewardEvents: false
+    });
+    expect(test.variant.index).toBe(0);
+    expect(test.fallback).toBe(true);
+    test.dispose();
+  });
+
+  it("never rejects from trackConversion", async () => {
+    const server = fakeServer();
+    const test = await createTest(CONFIG, options(server));
+    const flaky = createTest(CONFIG, {
+      serverUrl: "https://livevariant.link",
+      fetch: (async () => {
+        throw new TypeError("Failed to fetch");
+      }) as unknown as typeof fetch,
+      rewardEvents: false
+    });
+    const offline = await flaky;
+    // A customer may await this inside their own checkout flow.
+    await expect(offline.trackConversion(5)).resolves.toBeUndefined();
+    test.dispose();
+    offline.dispose();
+  });
+});
+
 describe("external id resolution", () => {
   it("prefers the GA client id from the _ga cookie", async () => {
     document.cookie = "_ga=GA1.1.1234567890.1699999999";

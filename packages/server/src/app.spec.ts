@@ -571,13 +571,13 @@ describe("robust aggregation", () => {
   });
 
   it("rate limits callers that send no address headers", async () => {
+    const store = new MemoryStore();
     const limited = createApp({
-      store: new MemoryStore(),
+      store,
       rng: mulberry32(2),
       rateLimitPerMinute: 3
     });
-    const { testId } = await makeTest();
-    let lastStatus = 200;
+    const { encoded, testId } = await makeTest();
     for (let i = 0; i < 6; i++) {
       const res = await limited.request("/choose", {
         method: "POST",
@@ -587,12 +587,16 @@ describe("robust aggregation", () => {
           alg: "ts",
           idHash: hex(`noip${i}`)
         }),
-        // No cf-connecting-ip and no x-forwarded-for at all.
+        // No cf-connecting-ip and no x-forwarded-for at all: without a
+        // fallback bucket these would skip the limiter entirely.
         headers: { "content-type": "application/json" }
       });
-      lastStatus = res.status;
+      expect(res.status).toBe(200);
     }
-    expect(lastStatus).toBe(429);
+    const s = await limited.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect((await s.json()).totalAssignments).toBe(3);
   });
 
   it("requires the stats secret to quarantine", async () => {
@@ -603,6 +607,68 @@ describe("robust aggregation", () => {
       headers: { "content-type": "application/json" }
     });
     expect(res.status).toBe(401);
+  });
+
+  it("keeps serving when rate limited, but stops recording", async () => {
+    const store = new MemoryStore();
+    const limited = createApp({
+      store,
+      rng: mulberry32(1),
+      rateLimitPerMinute: 3
+    });
+    const { encoded, testId } = await makeTest();
+    const statuses: number[] = [];
+    const arms: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      const res = await limited.request("/choose", {
+        method: "POST",
+        body: JSON.stringify({
+          testId,
+          armCount: 2,
+          alg: "ts",
+          idHash: hex(`burst${i}`)
+        }),
+        headers: {
+          "content-type": "application/json",
+          "cf-connecting-ip": "203.0.113.88"
+        }
+      });
+      statuses.push(res.status);
+      arms.push((await res.json()).armIndex);
+    }
+    // Every visitor still gets a variant: a busy carrier NAT must not
+    // leave real users staring at an unrendered page.
+    expect(statuses.every(s => s === 200)).toBe(true);
+    expect(arms.every(a => a === 0 || a === 1)).toBe(true);
+    // Only the requests under the limit were recorded.
+    const s = await limited.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect((await s.json()).totalAssignments).toBe(3);
+  });
+
+  it("accepts and drops a rate-limited reward instead of erroring", async () => {
+    const store = new MemoryStore();
+    const limited = createApp({
+      store,
+      rng: mulberry32(1),
+      rateLimitPerMinute: 2
+    });
+    const { testId } = await makeTest();
+    const idHash = hex("rewarded");
+    let last: Response | undefined;
+    for (let i = 0; i < 5; i++) {
+      last = await limited.request("/reward", {
+        method: "POST",
+        body: JSON.stringify({ testId, idHash, amount: 1 }),
+        headers: {
+          "content-type": "application/json",
+          "cf-connecting-ip": "203.0.113.99"
+        }
+      });
+    }
+    expect(last!.status).toBe(200);
+    expect(await last!.json()).toEqual({ rewarded: false, first: false });
   });
 
   it("rate limits a single source across the write endpoints", async () => {
@@ -630,7 +696,9 @@ describe("robust aggregation", () => {
       });
       lastStatus = res.status;
     }
-    expect(lastStatus).toBe(429);
+    // Serving degrades rather than failing, so the limit shows up as
+    // records not written, not as errors.
+    expect(lastStatus).toBe(200);
   });
 });
 

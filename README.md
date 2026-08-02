@@ -53,6 +53,16 @@ Serve and click redirects append `_lvt`/`_lvid`/`_lvvar` so the SDK on the
 destination site can adopt the assignment (`decorateRedirects: false` opts
 out).
 
+### The SDK never breaks a page
+
+`createTest` resolves even when LiveVariant is unreachable, slow, or
+answering with something unusable: it renders the first arm (your
+control) and sets `test.fallback = true`. Fallback views are deliberately
+not cached and not recorded, so an outage cannot pin a visitor to control
+for good or quietly distort a test's numbers. Assignment requests give up
+after `timeoutMs` (2s default), and `trackConversion()` never rejects,
+because a customer may await it inside their own checkout.
+
 ### Trust model
 
 Configs are unauthenticated by design: the URL is the test. That has two
@@ -66,8 +76,18 @@ consequences worth stating plainly.
 - **JS-mode serving is unauthenticated.** `/choose` and `/reward` take a
   public `testId`, so the server pins each test's shape (arm count,
   algorithm, dimension) on first sight and rejects callers that disagree,
-  and `LV_RATE_LIMIT_PER_MINUTE` (default 120 per source per minute)
-  bounds stuffing.
+  and `LV_RATE_LIMIT_PER_MINUTE` (default 600 per source per minute per
+  test) bounds stuffing.
+
+  The limiter sheds **writes, not serves**. Over the limit, `/choose`
+  still returns a variant and simply records nothing, and `/reward`
+  accepts and drops. Serving is a cheap read; the write is what costs and
+  what an attacker wants, and model integrity is the source cap's job
+  (below), not the limiter's. Redirect serving (`/s`, `/c`) is never
+  limited at all, so email and link campaigns are unaffected by
+  throughput. This matters because the bucket is an address prefix:
+  carrier-grade NAT can put thousands of genuine visitors behind one /24,
+  and they must all still see a variant.
 
   Rather than authenticate every visitor, results are made **robust** to a
   minority of adversarial records: each assignment carries an opaque,

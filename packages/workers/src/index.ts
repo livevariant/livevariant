@@ -253,7 +253,7 @@ export default {
               .map(h => h.trim())
               .filter(Boolean)
           : undefined,
-        rateLimitPerMinute: Number(env.LV_RATE_LIMIT_PER_MINUTE ?? "120")
+        rateLimitPerMinute: Number(env.LV_RATE_LIMIT_PER_MINUTE ?? "600")
       });
       apps.set(env, app);
     }

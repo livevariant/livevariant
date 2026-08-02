@@ -55,6 +55,12 @@ export interface CreateTestOptions {
   rewardEvents?: string[] | false;
   /** Defaults to window.localStorage; pass null to disable caching. */
   storage?: Storage | null;
+  /**
+   * How long to wait for the assignment before rendering the first arm.
+   * An A/B tool must never hold up a page, so a slow or unreachable
+   * server degrades to the control variant rather than blocking.
+   */
+  timeoutMs?: number;
   /** Injectable for tests. */
   fetch?: typeof globalThis.fetch;
   window?: Window;
@@ -73,6 +79,12 @@ export interface Variant {
 export interface LiveTest {
   testId: string;
   variant: Variant;
+  /**
+   * True when the server could not be reached (or answered with
+   * something unusable) and the first arm was rendered as a fallback.
+   * Nothing was recorded, so these views are not in the test's numbers.
+   */
+  fallback: boolean;
   /** Reports a conversion for this visitor (server accumulates amounts). */
   trackConversion(amount?: number): Promise<void>;
   /** Serve/click/pixel URLs for this test on the configured server. */
@@ -80,6 +92,9 @@ export interface LiveTest {
   /** Stops the GA dataLayer watcher. */
   dispose(): void;
 }
+
+/** Assignment requests give up after this long and render control. */
+const DEFAULT_TIMEOUT_MS = 2_000;
 
 interface CachedAssignment {
   armIndex: number;
@@ -134,13 +149,16 @@ export async function createTest(
     ? await effectiveBucketPriors(resolved, testId)
     : undefined;
 
-  const armIndex = await resolveAssignment();
+  const { armIndex, fallback } = await resolveAssignment();
   const arm = resolved.arms[armIndex] ?? resolved.arms[0];
 
-  async function resolveAssignment(): Promise<number> {
+  async function resolveAssignment(): Promise<{
+    armIndex: number;
+    fallback: boolean;
+  }> {
     if (handoff) {
       // The server already assigned this visitor during the redirect.
-      return handoff.armIndex;
+      return { armIndex: handoff.armIndex, fallback: false };
     }
     const cacheKey = `lv:a:${testId}`;
     if (storage) {
@@ -151,16 +169,32 @@ export async function createTest(
           // The cache is per-id: a login that changes the external id must
           // fall through to the server, which owns the sticky record.
           if (cached.idHash === idHash) {
-            return cached.armIndex;
+            return { armIndex: cached.armIndex, fallback: false };
           }
         } catch {
           storage.removeItem(cacheKey);
         }
       }
     }
+    try {
+      return await chooseFromServer(cacheKey);
+    } catch {
+      // Unreachable, too slow, or an unusable answer: render the first
+      // arm. A failed experiment must never become a broken page. The
+      // result is deliberately NOT cached, so a transient outage cannot
+      // pin this visitor to the control variant for good.
+      return { armIndex: 0, fallback: true };
+    }
+  }
+
+  async function chooseFromServer(cacheKey: string): Promise<{
+    armIndex: number;
+    fallback: boolean;
+  }> {
     const response = await fetchImpl(`${options.serverUrl}/choose`, {
       method: "POST",
       headers: { "content-type": "application/json" },
+      signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       body: JSON.stringify({
         testId,
         armCount: resolved.arms.length,
@@ -177,28 +211,44 @@ export async function createTest(
       })
     });
     if (!response.ok) {
-      throw new Error(`choose failed: ${response.status}`);
+      return { armIndex: 0, fallback: true };
     }
     const { armIndex: chosen } = (await response.json()) as {
       armIndex: number;
     };
+    // A nonsense index (a proxy rewriting the body, a future server
+    // version) must not index past the arms and render nothing.
+    if (
+      !Number.isInteger(chosen) ||
+      chosen < 0 ||
+      chosen >= resolved.arms.length
+    ) {
+      return { armIndex: 0, fallback: true };
+    }
     storage?.setItem(
       cacheKey,
       JSON.stringify({ armIndex: chosen, idHash } satisfies CachedAssignment)
     );
-    return chosen;
+    return { armIndex: chosen, fallback: false };
   }
 
+  /**
+   * Minimal by design: the server's assignment record carries its own
+   * serving snapshot. Never rejects, because a customer's page may await
+   * this inside its own checkout flow and a lost conversion must not
+   * become a lost sale.
+   */
   async function trackConversion(amount = 1): Promise<void> {
-    // Minimal by design: the server's assignment record carries its own
-    // serving snapshot.
-    const response = await fetchImpl(`${options.serverUrl}/reward`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ testId, idHash, amount })
-    });
-    if (!response.ok) {
-      throw new Error(`reward failed: ${response.status}`);
+    try {
+      await fetchImpl(`${options.serverUrl}/reward`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+        body: JSON.stringify({ testId, idHash, amount })
+      });
+    } catch {
+      // Dropped: the bandit tolerates missing rewards, pages don't
+      // tolerate exceptions.
     }
   }
 
@@ -218,6 +268,7 @@ export async function createTest(
 
   return {
     testId,
+    fallback,
     variant: {
       index: armIndex,
       name: arm.name,

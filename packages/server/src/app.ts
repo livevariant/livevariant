@@ -400,9 +400,13 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const r = body.data;
-    if (await rateLimited(c, r.testId)) {
-      return c.json({ error: "rate limit exceeded" }, 429);
-    }
+    // Over the limit we still SERVE, we just don't record. Choosing an
+    // arm is a cheap read against derived state; the write is what costs
+    // (it spins a Durable Object) and what an attacker wants. Failing the
+    // request instead would leave real visitors behind a busy carrier NAT
+    // with no variant at all, and model integrity is the source cap's
+    // job, not the limiter's.
+    const limited = await rateLimited(c, r.testId);
     // The caller supplies both the priors and their cap, so the cap can't
     // be trusted to bound them: clamp to the server's own ceiling, which
     // is what keeps a hostile prior from pinning an arm (linear priors are
@@ -436,7 +440,8 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const { armIndex } = await service.assign(params, {
-      idHash: r.idHash ?? null,
+      // A null idHash is the existing "choose but record nothing" path.
+      idHash: limited ? null : (r.idHash ?? null),
       ctxKey: r.ctxKey ?? null,
       featIdx: r.featIdx ?? [0],
       srcHash: await sourceHash(r.testId, clientIp(c), Date.now())
@@ -456,7 +461,10 @@ export function createApp(options: AppOptions): Hono {
     }
     const r = body.data;
     if (await rateLimited(c, r.testId)) {
-      return c.json({ error: "rate limit exceeded" }, 429);
+      // Accept and drop rather than 429: a manual trackConversion() in a
+      // customer's page must not reject because a noisy neighbour shares
+      // their address prefix.
+      return c.json({ rewarded: false, first: false });
     }
     const result = await service.reward(r.testId, r.idHash, r.amount);
     return c.json({ rewarded: result !== null, first: result?.first ?? false });
