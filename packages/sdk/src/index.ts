@@ -19,6 +19,7 @@ export { gaClientId, resolveExternalId } from "./identity.js";
 export {
   DEFAULT_REWARD_EVENTS,
   eventNameOf,
+  resetDataLayerInterception,
   watchDataLayer,
   type GaWatcher
 } from "./ga.js";

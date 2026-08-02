@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { TestConfig } from "@livevariant/core";
 import { createTest, type CreateTestOptions } from "./index.js";
 import { gaClientId } from "./identity.js";
-import { eventNameOf } from "./ga.js";
+import { eventNameOf, resetDataLayerInterception } from "./ga.js";
 
 /**
  * Real-browser tests (chromium via vitest browser mode): cookies, storage,
@@ -67,8 +67,10 @@ function options(
 }
 
 function clearDataLayer(): void {
-  // Remove any wrapper/trap earlier tests installed.
+  // Remove any wrapper/trap earlier tests installed, and the shared
+  // interception state that goes with it.
   delete (window as any).dataLayer;
+  resetDataLayerInterception(window);
 }
 
 beforeEach(() => {
@@ -201,6 +203,30 @@ describe("GA auto-reward", () => {
     await new Promise(resolve => setTimeout(resolve, 10));
     expect(server.rewardCalls).toHaveLength(1);
     test.dispose();
+  });
+
+  it("supports multiple concurrent tests before gtag loads", async () => {
+    // Two tests on one page, both created before window.dataLayer exists:
+    // they must share the property trap, not overwrite each other.
+    const server = fakeServer();
+    const testA = await createTest(
+      CONFIG,
+      options(server, { rewardEvents: undefined, externalId: "uA" })
+    );
+    const testB = await createTest(
+      { ...CONFIG, name: "second test" },
+      options(server, { rewardEvents: undefined, externalId: "uB" })
+    );
+    expect(testA.testId).not.toBe(testB.testId);
+    (window as any).dataLayer = (window as any).dataLayer || [];
+    (window as any).dataLayer.push({ event: "purchase" });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    // One purchase event -> one reward per live test.
+    expect(server.rewardCalls).toHaveLength(2);
+    const rewardedTests = new Set(server.rewardCalls.map(r => r.testId));
+    expect(rewardedTests).toEqual(new Set([testA.testId, testB.testId]));
+    testA.dispose();
+    testB.dispose();
   });
 
   it("understands gtag-style Arguments entries", () => {

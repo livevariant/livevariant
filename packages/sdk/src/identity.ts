@@ -37,7 +37,9 @@ export function resolveExternalId(options: {
     return `ga:${fromGa}`;
   }
   const fromUrl = new URLSearchParams(options.locationSearch).get("id");
-  if (fromUrl) {
+  // Bounded: the param is attacker-influenceable (anyone can craft a
+  // link), so an oversized value must not flow into hashing or storage.
+  if (fromUrl && fromUrl.length <= 512) {
     return fromUrl;
   }
   const existing = options.storage?.getItem(STORAGE_ID_KEY);

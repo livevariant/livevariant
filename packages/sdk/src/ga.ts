@@ -3,6 +3,10 @@
  * funnel every event through window.dataLayer.push, so wrapping it makes
  * the site's existing GA events available as reward signals with no extra
  * wiring. The original push is always called untouched.
+ *
+ * The interception is a per-window singleton with a listener registry:
+ * multiple watchers (several tests on one page, plus autoTrack) share one
+ * wrapper/property-trap instead of overwriting each other's.
  */
 
 /** GA4 event names treated as conversions when the config names none. */
@@ -51,37 +55,50 @@ function consentDeniedOf(entry: unknown): boolean | null {
 }
 
 export interface GaWatcher {
-  /** Stops intercepting (restores nothing; the wrapper becomes inert). */
+  /** Unregisters this watcher's listener; the shared wrapper stays. */
   stop(): void;
 }
 
-/**
- * Watches the dataLayer for reward events, handling both load orders: an
- * existing dataLayer is wrapped immediately, a later-created one is caught
- * by a property trap on window. Consent denial (Google consent mode)
- * disables callbacks until consent is granted again.
- */
-export function watchDataLayer(
-  target: Window,
-  rewardEvents: string[],
-  onReward: (eventName: string) => void
-): GaWatcher {
-  const wanted = new Set(rewardEvents);
-  let stopped = false;
-  let analyticsDenied = false;
+interface InterceptorState {
+  listeners: Set<(name: string) => void>;
+  analyticsDenied: boolean;
+  /** Names already seen, replayed to late-registering watchers. */
+  pastEvents: string[];
+}
+
+const PAST_EVENTS_CAP = 50;
+const interceptors = new WeakMap<Window, InterceptorState>();
+
+function ensureInterceptor(w: Window & DataLayerWindow): InterceptorState {
+  const existing = interceptors.get(w);
+  if (existing) {
+    return existing;
+  }
+  const state: InterceptorState = {
+    listeners: new Set(),
+    analyticsDenied: false,
+    pastEvents: []
+  };
+  interceptors.set(w, state);
 
   function inspect(entry: unknown): void {
     const denied = consentDeniedOf(entry);
     if (denied !== null) {
-      analyticsDenied = denied;
+      state.analyticsDenied = denied;
       return;
     }
-    if (stopped || analyticsDenied) {
+    if (state.analyticsDenied) {
       return;
     }
     const name = eventNameOf(entry);
-    if (name && wanted.has(name)) {
-      onReward(name);
+    if (!name) {
+      return;
+    }
+    if (state.pastEvents.length < PAST_EVENTS_CAP) {
+      state.pastEvents.push(name);
+    }
+    for (const listener of state.listeners) {
+      listener(name);
     }
   }
 
@@ -101,7 +118,6 @@ export function watchDataLayer(
     return layer;
   }
 
-  const w = target as Window & DataLayerWindow;
   if (Array.isArray(w.dataLayer)) {
     wrap(w.dataLayer);
   } else {
@@ -111,14 +127,42 @@ export function watchDataLayer(
       configurable: true,
       get: () => inner,
       set: value => {
-        inner = Array.isArray(value) && !stopped ? wrap(value) : value;
+        inner = Array.isArray(value) ? wrap(value) : value;
       }
     });
   }
+  return state;
+}
 
-  return {
-    stop() {
-      stopped = true;
+/**
+ * Registers a watcher on the shared dataLayer interception for `target`.
+ * Events that arrived before registration are replayed to the new
+ * listener, so a purchase already queued in the dataLayer still counts.
+ */
+export function watchDataLayer(
+  target: Window,
+  rewardEvents: string[],
+  onReward: (eventName: string) => void
+): GaWatcher {
+  const wanted = new Set(rewardEvents);
+  const listener = (name: string): void => {
+    if (wanted.has(name)) {
+      onReward(name);
     }
   };
+  const state = ensureInterceptor(target as Window & DataLayerWindow);
+  for (const name of state.pastEvents) {
+    listener(name);
+  }
+  state.listeners.add(listener);
+  return {
+    stop() {
+      state.listeners.delete(listener);
+    }
+  };
+}
+
+/** Test hook: forgets a window's interception state entirely. */
+export function resetDataLayerInterception(target: Window): void {
+  interceptors.delete(target);
 }
