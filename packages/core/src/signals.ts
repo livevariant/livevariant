@@ -115,18 +115,29 @@ export function requestSignals(input: {
 }
 
 /**
- * True when a request is a proxied asset fetch rather than a person.
- * Mail providers fetch email images from their own infrastructure, so
- * deriving geo from those would record Google's datacenter instead of
- * the reader's country. Better to have no context than wrong context.
+ * True when a request is likely a proxied asset fetch rather than a
+ * person. Mail providers fetch email images from their own
+ * infrastructure, so deriving geo from those would record Google's
+ * datacenter instead of the reader's country.
+ *
+ * Only a page navigation is treated as a person; an image request, a
+ * wildcard Accept, and a request with no headers at all are all treated
+ * as proxies. The asymmetry is deliberate: a mail proxy sending a bare
+ * wildcard Accept would otherwise pass as a reader and silently poison a
+ * contextual test with datacenter geo, whereas guessing "proxy" for a
+ * real visitor costs only their context. No context beats confidently
+ * wrong context.
+ *
+ * This is for the redirect paths, where mail proxies actually land. A
+ * /choose call is page JavaScript, so a person is already established
+ * and this question does not arise.
  */
 export function isAssetFetch(headers: {
   accept?: string;
   secFetchDest?: string;
 }): boolean {
   if (headers.secFetchDest) {
-    return headers.secFetchDest === "image";
+    return headers.secFetchDest !== "document";
   }
-  const accept = headers.accept?.toLowerCase() ?? "";
-  return accept.includes("image/") && !accept.includes("text/html");
+  return !(headers.accept?.toLowerCase().includes("text/html") ?? false);
 }

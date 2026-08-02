@@ -40,10 +40,17 @@ export const chooseRequestSchema = z
     /**
      * The config's `from` dimensions, forwarded so the server can fill
      * them the same way it does for redirects. JS mode never sends the
-     * config, and the server cannot read `ctx.dims` without it. Nothing
-     * here is a secret: it is public config, and a caller who lies about
-     * it only moves their own traffic to a different bucket, which is the
-     * same latitude they already have over `ctxKey`.
+     * config, and the server cannot read `ctx.dims` without it.
+     *
+     * That means the `values` allowlist here is the caller's copy, not the
+     * authoritative one, so a hand-written client can drop it and mint
+     * bucket keys the config never sanctioned. This grants nothing new:
+     * `ctxKey` is already an opaque 64-hex string of the caller's
+     * choosing, so JS mode has always been able to mint arbitrary buckets,
+     * and the redirect path (which does hold the config) still enforces
+     * the allowlist. Forged buckets are self-isolating, carry only their
+     * own traffic, and show up in the `/stats` bucket list for the
+     * creator to quarantine.
      */
     autoDims: z.array(ctxDimSchema).max(8).optional(),
     /** Caller-supplied values for those dimensions, before signals. */

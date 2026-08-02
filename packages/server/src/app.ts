@@ -436,8 +436,10 @@ export function createApp(options: AppOptions): Hono {
     // derived dimensions on top of that hash rather than into the map.
     // Redirect mode takes the same path (see resolveIdentity), which is
     // what keeps one context in one bucket across both channels.
-    const request = requestContext(c);
-    const signals = request.assetFetch ? {} : requestSignals(request);
+    // Not gated on isAssetFetch: this is a POST from page JavaScript, so
+    // a real visitor is already established. Mail proxies fetch images,
+    // they do not run scripts.
+    const signals = requestSignals(requestContext(c));
     const autoCtx = deriveAutoCtx(r.autoDims, signals, r.autoCtx ?? null);
     const { armIndex } = await service.assign(params, {
       idHash: r.idHash ?? null,

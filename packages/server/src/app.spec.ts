@@ -20,6 +20,9 @@ import { MemoryStore } from "./store/memory.js";
 
 const SECRET = "test-stats-secret";
 
+/** What a browser sends when a person clicks a link. */
+const BROWSER_ACCEPT = "text/html,application/xhtml+xml,image/webp,*/*;q=0.8";
+
 /** Deterministic 64-hex id for tests that mint many visitors. */
 function hex(seed: string): string {
   let h = 0;
@@ -655,15 +658,13 @@ describe("auto-context from the platform", () => {
   function cfRequest(
     path: string,
     cf: Record<string, string> | null,
-    headers: Record<string, string> = {},
-    body?: unknown
+    headers: Record<string, string> = {}
   ): Request {
     const req = new Request(`http://localhost${path}`, {
-      headers: body
-        ? { ...headers, "content-type": "application/json" }
-        : headers,
-      method: body ? "POST" : "GET",
-      body: body ? JSON.stringify(body) : undefined
+      // A browser navigating always says so, and only a navigation is
+      // taken for a person. Tests send it too, or they would all look
+      // like mail proxies.
+      headers: { accept: BROWSER_ACCEPT, ...headers }
     });
     if (cf) {
       Object.defineProperty(req, "cf", { value: cf });
@@ -749,6 +750,24 @@ describe("auto-context from the platform", () => {
     expect(Object.keys(s.buckets)).toHaveLength(0);
   });
 
+  it("derives nothing from a proxy that only sends a wildcard accept", async () => {
+    // The realistic mail-proxy shape: no sec-fetch-dest, no text/html,
+    // just */*. Treating it as a reader would file a datacenter's country
+    // as if it were the recipient's.
+    const { encoded } = await makeTest(AUTO);
+    const res = await app.request(
+      cfRequest(
+        `/s/${encoded}?id=wildcard`,
+        { country: "US", city: "Mountain View" },
+        { accept: "*/*" }
+      )
+    );
+    expect(res.status).toBe(302);
+    const s = await stats(encoded);
+    expect(s.totalAssignments).toBe(1);
+    expect(s.bySignal).toEqual({});
+  });
+
   it("works with no platform geo at all", async () => {
     // Self-hosted on plain Node there is no `cf`; header-derived signals
     // still work and a geo dimension simply stays unfilled.
@@ -790,7 +809,9 @@ describe("algorithm suggestion from observed traffic", () => {
       ctx: { dims: [{ key: "country", from: "country" }] }
     });
     for (const [i, country] of ["NL", "DE", "FR"].entries()) {
-      const req = new Request(`http://localhost/s/${encoded}?id=sug${i}`);
+      const req = new Request(`http://localhost/s/${encoded}?id=sug${i}`, {
+        headers: { accept: BROWSER_ACCEPT }
+      });
       Object.defineProperty(req, "cf", { value: { country } });
       await app.request(req);
     }
@@ -807,7 +828,9 @@ describe("algorithm suggestion from observed traffic", () => {
       ctx: { dims: [{ key: "city", from: "city" }] }
     });
     for (let i = 0; i < 12; i++) {
-      const req = new Request(`http://localhost/s/${encoded}?id=city${i}`);
+      const req = new Request(`http://localhost/s/${encoded}?id=city${i}`, {
+        headers: { accept: BROWSER_ACCEPT }
+      });
       Object.defineProperty(req, "cf", { value: { city: `town${i}` } });
       await app.request(req);
     }
@@ -840,7 +863,9 @@ describe("auto-context across serving channels", () => {
   }
 
   function cfGet(path: string, cf: Record<string, string> | null): Request {
-    const req = new Request(`http://localhost${path}`);
+    const req = new Request(`http://localhost${path}`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
     if (cf) {
       Object.defineProperty(req, "cf", { value: cf });
     }

@@ -146,9 +146,13 @@ Two details worth knowing:
   derived one are composed identically, so a campaign that emails people
   and then tracks them with the SDK on the landing page learns from all
   of its traffic at once instead of splitting it in half.
-- **Proxied image fetches derive nothing.** Mail providers fetch email
-  images from their own infrastructure, so that geo is a datacenter, not
-  the reader. No context beats confidently wrong context.
+- **Proxied fetches derive nothing.** Mail providers fetch email images
+  from their own infrastructure, so that geo is a datacenter, not the
+  reader. Only a page navigation counts as a person: an image request, a
+  bare `Accept: */*`, and a request with no headers are all treated as
+  proxies. Guessing "proxy" for a real visitor costs only their context,
+  while the reverse silently files datacenter geo as real. No context
+  beats confidently wrong context.
 
 All signals are recorded on every assignment, not only the ones a test
 uses as context, so `/stats` returns a `bySignal` breakdown even for a

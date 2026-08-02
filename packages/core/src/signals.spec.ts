@@ -105,7 +105,11 @@ describe("isAssetFetch", () => {
     ).toBe(false);
   });
 
-  it("assumes a person when the request says nothing", () => {
-    expect(isAssetFetch({})).toBe(false);
+  it("does not take a bare */* for a person", () => {
+    // The gap that matters: a mail proxy that sends no sec-fetch-dest and
+    // a wildcard Accept would otherwise be recorded as the reader, and a
+    // datacenter's country would enter the test as if it were real.
+    expect(isAssetFetch({ accept: "*/*" })).toBe(true);
+    expect(isAssetFetch({})).toBe(true);
   });
 });
