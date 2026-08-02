@@ -70,23 +70,6 @@ export interface StateStore {
   /** Merges a patch into the policy; creator-authorized callers only. */
   updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy>;
 
-  /**
-   * Records one more contribution from a source and reports whether it is
-   * still within the cap. Live-path guard only: the authority on what
-   * counts is capContributions at recompute/stats time.
-   */
-  noteSource(
-    testId: string,
-    srcHash: string
-  ): Promise<{ sourceCount: number; totalCount: number }>;
-
-  /**
-   * Count of requests from `bucket` in the current minute. Kept by the
-   * store because on Workers a per-isolate counter would let the real
-   * global rate exceed the configured limit many times over.
-   */
-  noteRequest(testId: string, bucket: string): Promise<{ count: number }>;
-
   getAssignment(
     testId: string,
     idHash: string

@@ -14,23 +14,31 @@ import type { AssignmentRecord } from "./state.js";
  */
 
 export interface CapPolicy {
-  /** A source may contribute at most this share of a test's records. */
-  maxSourceShare: number;
-  /** ...but never less than this many, so small tests still work. */
-  minSourceFloor: number;
+  /**
+   * Optional automatic cap on one source's share of a test. OFF by
+   * default, because source buckets are address prefixes and the email
+   * path makes them meaningless: Gmail, Yahoo, and Outlook fetch images
+   * through their own infrastructure, so a large campaign's opens all
+   * share a handful of provider prefixes. Capping those would silently
+   * discard most of a real send. Creator exclusions below are the
+   * always-on mechanism; this one is for deployments that know their
+   * traffic is direct.
+   */
+  maxSourceShare?: number;
+  /** Floor for the automatic cap, so small tests still work. */
+  minSourceFloor?: number;
   /** Source hashes the creator has quarantined outright. */
   excludedSources?: string[];
   /** Time windows (ms epoch) the creator has quarantined. */
   excludedWindows?: Array<{ since: number; until: number }>;
 }
 
-export const DEFAULT_CAP_POLICY: CapPolicy = {
-  // Generous on purpose: carrier-grade NAT and corporate gateways put
-  // many genuine visitors behind one prefix, so the cap exists to blunt
-  // a 10x skew, not to allocate traffic fairly.
-  maxSourceShare: 0.05,
-  minSourceFloor: 50
-};
+/**
+ * Exclusions only: nothing is dropped unless the creator asked for it.
+ * Silent automatic exclusion is worse than no defence, because a wrong
+ * number presented confidently is worse than a noisy one.
+ */
+export const DEFAULT_CAP_POLICY: CapPolicy = {};
 
 export interface CapResult {
   /** Records that count toward derived state and reported stats. */
@@ -71,10 +79,13 @@ export function capContributions(
     perSource[key] = (perSource[key] ?? 0) + 1;
   }
 
-  const cap = Math.max(
-    policy.minSourceFloor,
-    Math.ceil(policy.maxSourceShare * ordered.length)
-  );
+  const cap =
+    policy.maxSourceShare === undefined
+      ? Infinity
+      : Math.max(
+          policy.minSourceFloor ?? 50,
+          Math.ceil(policy.maxSourceShare * ordered.length)
+        );
 
   const applied: AssignmentRecord[] = [];
   const seen: Record<string, number> = {};
@@ -123,8 +134,11 @@ export function sourceWithinCap(
   totalCount: number,
   policy: CapPolicy = DEFAULT_CAP_POLICY
 ): boolean {
+  if (policy.maxSourceShare === undefined) {
+    return true;
+  }
   const cap = Math.max(
-    policy.minSourceFloor,
+    policy.minSourceFloor ?? 50,
     Math.ceil(policy.maxSourceShare * totalCount)
   );
   return sourceCount <= cap;

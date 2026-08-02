@@ -48,8 +48,6 @@ export class TestStateDO extends DurableObject {
         store.pinShape(shape, authoritative),
       getPolicy: () => store.getPolicy(),
       updatePolicy: (_t, patch) => store.updatePolicy(patch),
-      noteSource: (_t, srcHash) => store.noteSource(srcHash),
-      noteRequest: (_t, bucket) => store.noteRequest(bucket, Date.now()),
       getAssignment: (_t, idHash) => store.getAssignment(idHash),
       putAssignmentIfAbsent: (_t, idHash, rec) =>
         store.putAssignmentIfAbsent(idHash, rec),
@@ -124,10 +122,6 @@ export class TestStateDO extends DurableObject {
     return this.service(testId).updatePolicy(testId, patch);
   }
 
-  noteRequest(testId: string, bucket: string): Promise<{ count: number }> {
-    return this.service(testId).noteRequest(testId, bucket);
-  }
-
   pinShape(shape: TestShape, authoritative: boolean): Promise<TestShape> {
     return this.store.pinShape(shape, authoritative);
   }
@@ -185,8 +179,6 @@ interface Env {
   TEST_STATE: DurableObjectNamespace<TestStateDO>;
   /** Comma-separated destination hosts; unset means allow-all. */
   LV_ALLOWED_DESTINATIONS?: string;
-  /** Per-IP per-minute cap on the public write endpoints. */
-  LV_RATE_LIMIT_PER_MINUTE?: string;
 }
 
 /** Counter keys arrive as c:{testId}:{scope}; the DO stores scopes. */
@@ -231,10 +223,6 @@ class DurableObjectBackend implements TestBackend {
   updatePolicy(testId: string, patch: TestPolicy) {
     return this.stub(testId).updatePolicy(testId, patch);
   }
-
-  noteRequest(testId: string, bucket: string) {
-    return this.stub(testId).noteRequest(testId, bucket);
-  }
 }
 
 // One app per env (i.e. per isolate in practice): route registration and
@@ -252,8 +240,7 @@ export default {
           ? env.LV_ALLOWED_DESTINATIONS.split(",")
               .map(h => h.trim())
               .filter(Boolean)
-          : undefined,
-        rateLimitPerMinute: Number(env.LV_RATE_LIMIT_PER_MINUTE ?? "600")
+          : undefined
       });
       apps.set(env, app);
     }

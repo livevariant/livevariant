@@ -12,7 +12,6 @@ import {
   newDerivedState,
   normalizeCtx,
   recomputeState,
-  sourceWithinCap,
   FEATURE_DIM,
   type ArmPrior,
   type AssignmentRecord,
@@ -127,8 +126,6 @@ export interface TestBackend {
   stats(params: ServingParams, armNames?: string[]): Promise<TestStats>;
   /** Creator-authorized quarantine; returns the merged policy. */
   updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy>;
-  /** Windowed request count for rate limiting; optional per backend. */
-  noteRequest?(testId: string, bucket: string): Promise<{ count: number }>;
 }
 
 export class TestService implements TestBackend {
@@ -145,10 +142,6 @@ export class TestService implements TestBackend {
   /** Creator-authorized quarantine; the caller checks the stats secret. */
   updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy> {
     return this.store.updatePolicy(testId, patch);
-  }
-
-  noteRequest(testId: string, bucket: string): Promise<{ count: number }> {
-    return this.store.noteRequest(testId, bucket);
   }
 
   /**
@@ -235,12 +228,7 @@ export class TestService implements TestBackend {
       // winner's request already updated the cache.
       return { armIndex: result.rec.armIndex, created: false };
     }
-    // Live cap: the record is always logged, but a source flooding this
-    // test stops moving the model immediately instead of waiting for a
-    // manual recompute. capContributions remains the authority.
-    if (await this.withinLiveCap(params.testId, identity.srcHash)) {
-      await this.recordPull(params, rec);
-    }
+    await this.recordPull(params, rec);
     return { armIndex, created: true };
   }
 
@@ -269,21 +257,6 @@ export class TestService implements TestBackend {
       );
     }
     return { armIndex: result.rec.armIndex, first: result.first };
-  }
-
-  /** True while this source is still under its share of the test. */
-  private async withinLiveCap(
-    testId: string,
-    srcHash: string | null | undefined
-  ): Promise<boolean> {
-    if (!srcHash) {
-      return true; // sourceless traffic is never capped as one bucket
-    }
-    const { sourceCount, totalCount } = await this.store.noteSource(
-      testId,
-      srcHash
-    );
-    return sourceWithinCap(sourceCount, totalCount);
   }
 
   /** Rebuilds the derived cache from the event log (alg changes, repair). */

@@ -17,7 +17,6 @@ export {
   type RewardRequest
 } from "./api-schemas.js";
 export { MemoryStore } from "./store/memory.js";
-export { pruneWindows } from "./rate-window.js";
 export {
   arrayToCounts,
   blobToLinearState,

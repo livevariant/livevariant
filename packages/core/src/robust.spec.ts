@@ -180,15 +180,42 @@ describe("capContributions", () => {
     expect(result.perSource).toEqual({ a: 2, b: 1 });
   });
 
-  it("uses the floor so small tests are never capped", () => {
-    const events = Array.from({ length: 40 }, (_, i) => rec(i, "one"));
-    // Default floor is 50, so 40 records from one source still count.
+  it("caps nothing by default, however lopsided the sources", () => {
+    // Off by default on purpose: source buckets are address prefixes, and
+    // mail providers fetch email images through their own infrastructure,
+    // so a large campaign's opens legitimately share a few prefixes.
+    // Capping those would silently discard most of a real send.
+    const events = Array.from({ length: 500 }, (_, i) => rec(i, "one-proxy"));
     const result = capContributions(events, DEFAULT_CAP_POLICY);
+    expect(result.applied).toHaveLength(500);
+    expect(result.excluded.total).toBe(0);
+  });
+
+  it("still honors creator exclusions with the default policy", () => {
+    const events = [rec(0, "good"), rec(1, "bad")];
+    const result = capContributions(events, {
+      ...DEFAULT_CAP_POLICY,
+      excludedSources: ["bad"]
+    });
+    expect(result.applied).toHaveLength(1);
+    expect(result.excluded.bySource).toBe(1);
+  });
+
+  it("uses the floor when a deployment opts into capping", () => {
+    const events = Array.from({ length: 40 }, (_, i) => rec(i, "one"));
+    const result = capContributions(events, {
+      maxSourceShare: 0.05,
+      minSourceFloor: 50
+    });
     expect(result.applied).toHaveLength(40);
   });
 });
 
-describe("sourceWithinCap (live path)", () => {
+describe("sourceWithinCap (opt-in)", () => {
+  it("allows everything when capping is off", () => {
+    expect(sourceWithinCap(10_000, 10_000, DEFAULT_CAP_POLICY)).toBe(true);
+  });
+
   it("agrees with the batch cap at the boundary", () => {
     expect(sourceWithinCap(25, 250, TIGHT)).toBe(true);
     expect(sourceWithinCap(26, 250, TIGHT)).toBe(false);

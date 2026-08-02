@@ -7,7 +7,6 @@ import {
   type TestShape
 } from "./types.js";
 import { derivedToArtifacts } from "./snapshot.js";
-import { pruneWindows } from "../rate-window.js";
 import { mergePolicy } from "./types.js";
 
 /** In-process store for tests and single-node development. */
@@ -18,8 +17,6 @@ export class MemoryStore implements StateStore {
   private shapes = new Map<string, TestShape>();
 
   private policies = new Map<string, TestPolicy>();
-  private sources = new Map<string, Map<string, number>>();
-  private sourceTotals = new Map<string, number>();
 
   async pinShape(
     testId: string,
@@ -42,44 +39,6 @@ export class MemoryStore implements StateStore {
     const merged = mergePolicy(this.policies.get(testId) ?? {}, patch);
     this.policies.set(testId, merged);
     return merged;
-  }
-
-  private requests = new Map<string, { count: number; windowStart: number }>();
-
-  async noteRequest(
-    testId: string,
-    bucket: string
-  ): Promise<{ count: number }> {
-    const key = `${testId}:${bucket}`;
-    const now = Date.now();
-    const entry = this.requests.get(key);
-    if (!entry || now - entry.windowStart >= 60_000) {
-      if (this.requests.size > 10_000) {
-        pruneWindows(this.requests, now);
-      }
-      this.requests.set(key, { count: 1, windowStart: now });
-      return { count: 1 };
-    }
-    entry.count += 1;
-    return { count: entry.count };
-  }
-
-  async noteSource(
-    testId: string,
-    srcHash: string
-  ): Promise<{ sourceCount: number; totalCount: number }> {
-    let perSource = this.sources.get(testId);
-    if (!perSource) {
-      perSource = new Map();
-      this.sources.set(testId, perSource);
-    }
-    const sourceCount = (perSource.get(srcHash) ?? 0) + 1;
-    perSource.set(srcHash, sourceCount);
-    // Running total: summing the map on every write would be O(sources)
-    // per assignment on the serving path.
-    const totalCount = (this.sourceTotals.get(testId) ?? 0) + 1;
-    this.sourceTotals.set(testId, totalCount);
-    return { sourceCount, totalCount };
   }
 
   async getAssignment(

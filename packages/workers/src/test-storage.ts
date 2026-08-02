@@ -1,5 +1,5 @@
 import type { AssignmentRecord } from "@livevariant/core";
-import { mergePolicy, pruneWindows } from "@livevariant/server";
+import { mergePolicy } from "@livevariant/server";
 
 /**
  * The per-test state logic that runs INSIDE the Durable Object, written
@@ -134,48 +134,6 @@ export class TestStorage {
     const merged = mergePolicy(await this.getPolicy(), patch);
     await this.storage.put(POLICY_KEY, merged);
     return merged;
-  }
-
-  /**
-   * Per-source tally for the live cap, kept in the object's memory rather
-   * than its storage: this is a guard that stops an in-flight flood from
-   * moving the model, not the authority on what counts (capContributions
-   * at recompute/stats time is). Persisting it would add storage ops to
-   * every assignment on the hot path to protect a number that may safely
-   * reset when the object is evicted.
-   */
-  private sourceCounts = new Map<string, number>();
-  private sourceTotal = 0;
-
-  async noteSource(
-    srcHash: string
-  ): Promise<{ sourceCount: number; totalCount: number }> {
-    const sourceCount = (this.sourceCounts.get(srcHash) ?? 0) + 1;
-    this.sourceCounts.set(srcHash, sourceCount);
-    this.sourceTotal += 1;
-    return { sourceCount, totalCount: this.sourceTotal };
-  }
-
-  /**
-   * Fixed-window request count. The DO is a single instance per test, so
-   * unlike an isolate-local map this is a true global counter.
-   */
-  private requestWindows = new Map<
-    string,
-    { count: number; windowStart: number }
-  >();
-
-  async noteRequest(bucket: string, now: number): Promise<{ count: number }> {
-    const entry = this.requestWindows.get(bucket);
-    if (!entry || now - entry.windowStart >= 60_000) {
-      if (this.requestWindows.size > 5_000) {
-        pruneWindows(this.requestWindows, now);
-      }
-      this.requestWindows.set(bucket, { count: 1, windowStart: now });
-      return { count: 1 };
-    }
-    entry.count += 1;
-    return { count: entry.count };
   }
 
   // Blob and version live in ONE key: two keys doubled the billed storage

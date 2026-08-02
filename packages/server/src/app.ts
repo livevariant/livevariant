@@ -6,7 +6,6 @@ import {
   decorateUrl,
   externalIdHash,
   mulberry32,
-  rateLimitBucket,
   sourceHash,
   randomSeed,
   verifyStatsSecret,
@@ -44,8 +43,6 @@ export interface AppOptions {
    * config's own origins are not a trust boundary).
    */
   allowedDestinations?: string[];
-  /** Requests per minute per client IP for the public write endpoints. */
-  rateLimitPerMinute?: number;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -84,29 +81,6 @@ export function createApp(options: AppOptions): Hono {
   app.use("/stats/*", openCors);
   app.use("/recompute/*", openCors);
   app.use("/exclude/*", openCors);
-
-  /**
-   * Per-IP-prefix limiter for the unauthenticated write endpoints, counted
-   * by the backend rather than in this isolate: on Workers every isolate
-   * would otherwise keep its own tally and the effective global limit
-   * would be a large multiple of what it claims. The test's Durable
-   * Object is a single instance, so counting there is exact and, since
-   * every write already reaches it, nearly free.
-   */
-  const rateLimit = options.rateLimitPerMinute ?? 0;
-  async function rateLimited(
-    c: { req: { header(name: string): string | undefined } },
-    testId: string
-  ): Promise<boolean> {
-    if (rateLimit <= 0 || !service.noteRequest) {
-      return false;
-    }
-    // rateLimitBucket always yields a bucket (unidentified callers share
-    // one), so omitting address headers cannot dodge the limiter.
-    const bucket = await rateLimitBucket(testId, clientIp(c), Date.now());
-    const { count } = await service.noteRequest(testId, bucket);
-    return count > rateLimit;
-  }
 
   /** Client address, as Cloudflare (or a proxy) reports it. */
   function clientIp(c: {
@@ -358,10 +332,7 @@ export function createApp(options: AppOptions): Hono {
   // No-JS conversion pixel for thank-you pages.
   app.get("/px/:cfg", async c => {
     const result = await decodeOr404(c.req.param("cfg"));
-    if (
-      !("error" in result) &&
-      !(await rateLimited(c, result.decoded.testId))
-    ) {
+    if (!("error" in result)) {
       const { decoded } = result;
       const externalId = c.req.query("id");
       const amount = Number(c.req.query("amount") ?? "1");
@@ -400,13 +371,6 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const r = body.data;
-    // Over the limit we still SERVE, we just don't record. Choosing an
-    // arm is a cheap read against derived state; the write is what costs
-    // (it spins a Durable Object) and what an attacker wants. Failing the
-    // request instead would leave real visitors behind a busy carrier NAT
-    // with no variant at all, and model integrity is the source cap's
-    // job, not the limiter's.
-    const limited = await rateLimited(c, r.testId);
     // The caller supplies both the priors and their cap, so the cap can't
     // be trusted to bound them: clamp to the server's own ceiling, which
     // is what keeps a hostile prior from pinning an arm (linear priors are
@@ -440,8 +404,7 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const { armIndex } = await service.assign(params, {
-      // A null idHash is the existing "choose but record nothing" path.
-      idHash: limited ? null : (r.idHash ?? null),
+      idHash: r.idHash ?? null,
       ctxKey: r.ctxKey ?? null,
       featIdx: r.featIdx ?? [0],
       srcHash: await sourceHash(r.testId, clientIp(c), Date.now())
@@ -460,12 +423,6 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const r = body.data;
-    if (await rateLimited(c, r.testId)) {
-      // Accept and drop rather than 429: a manual trackConversion() in a
-      // customer's page must not reject because a noisy neighbour shares
-      // their address prefix.
-      return c.json({ rewarded: false, first: false });
-    }
     const result = await service.reward(r.testId, r.idHash, r.amount);
     return c.json({ rewarded: result !== null, first: result?.first ?? false });
   });

@@ -8,7 +8,6 @@ import {
   type TestConfigInput
 } from "@livevariant/core";
 import { createApp } from "./app.js";
-import { pruneWindows } from "./rate-window.js";
 import { MemoryStore } from "./store/memory.js";
 
 /**
@@ -376,35 +375,6 @@ describe("cors", () => {
   });
 });
 
-describe("rate-limit window pruning", () => {
-  it("drops expired windows and leaves live ones alone", () => {
-    const now = 1_700_000_000_000;
-    const windows = new Map([
-      ["stale", { count: 5, windowStart: now - 90_000 }],
-      ["live", { count: 2, windowStart: now - 1_000 }]
-    ]);
-    pruneWindows(windows, now);
-    expect([...windows.keys()]).toEqual(["live"]);
-  });
-
-  it("never resets everyone's allowance at once", () => {
-    // All windows live: a blanket clear would hand every source a fresh
-    // allowance at the moment an attacker overflows the map.
-    const now = 1_700_000_000_000;
-    const windows = new Map(
-      Array.from({ length: 10 }, (_, i) => [
-        `ip${i}`,
-        { count: 9, windowStart: now - i * 100 }
-      ]) as Array<[string, { count: number; windowStart: number }]>
-    );
-    pruneWindows(windows, now);
-    expect(windows.size).toBe(5);
-    // The survivors are the most recent, so active limits keep counting.
-    expect(windows.has("ip0")).toBe(true);
-    expect(windows.has("ip9")).toBe(false);
-  });
-});
-
 describe("destination allowlist", () => {
   const allowed = { allowedDestinations: ["example.com"] };
 
@@ -482,23 +452,17 @@ describe("robust aggregation", () => {
     });
   }
 
-  it("caps a single source flooding a test, without touching real traffic", async () => {
+  it("records every visitor, however concentrated the source", async () => {
     const { encoded, testId } = await makeTest();
-    // 60 genuine visitors spread across 30 address prefixes.
-    for (let i = 0; i < 60; i++) {
-      await choose(testId, hex(`real${i}`), `198.51.${i % 30}.7`);
-    }
-    // One source stuffs 300 invented visitors.
-    for (let i = 0; i < 300; i++) {
-      await choose(testId, hex(`fake${i}`), "203.0.113.9");
+    // A mail provider fetching an email image proxies every open through
+    // its own infrastructure, so a real campaign's records legitimately
+    // share one prefix. Nothing may be dropped automatically.
+    for (let i = 0; i < 120; i++) {
+      await choose(testId, hex(`proxied${i}`), "203.0.113.9");
     }
     const s = await stats(encoded);
-    // The log keeps everything; the reported numbers do not.
-    expect(s.excluded.byCap).toBeGreaterThan(200);
-    const counted = s.arms.reduce((sum: number, a: any) => sum + a.pulls, 0);
-    expect(counted).toBeLessThan(150);
-    // Every genuine visitor still counts.
-    expect(counted).toBeGreaterThanOrEqual(60);
+    expect(s.totalAssignments).toBe(120);
+    expect(s.excluded.total).toBe(0);
   });
 
   it("reports a per-source breakdown so the creator can see the flood", async () => {
@@ -570,35 +534,6 @@ describe("robust aggregation", () => {
     expect((await stats(encoded)).excluded.bySource).toBe(3);
   });
 
-  it("rate limits callers that send no address headers", async () => {
-    const store = new MemoryStore();
-    const limited = createApp({
-      store,
-      rng: mulberry32(2),
-      rateLimitPerMinute: 3
-    });
-    const { encoded, testId } = await makeTest();
-    for (let i = 0; i < 6; i++) {
-      const res = await limited.request("/choose", {
-        method: "POST",
-        body: JSON.stringify({
-          testId,
-          armCount: 2,
-          alg: "ts",
-          idHash: hex(`noip${i}`)
-        }),
-        // No cf-connecting-ip and no x-forwarded-for at all: without a
-        // fallback bucket these would skip the limiter entirely.
-        headers: { "content-type": "application/json" }
-      });
-      expect(res.status).toBe(200);
-    }
-    const s = await limited.request(`/stats/${encoded}`, {
-      headers: { authorization: `Bearer ${SECRET}` }
-    });
-    expect((await s.json()).totalAssignments).toBe(3);
-  });
-
   it("requires the stats secret to quarantine", async () => {
     const { encoded } = await makeTest();
     const res = await app.request(`/exclude/${encoded}`, {
@@ -609,100 +544,6 @@ describe("robust aggregation", () => {
     expect(res.status).toBe(401);
   });
 
-  it("keeps serving when rate limited, but stops recording", async () => {
-    const store = new MemoryStore();
-    const limited = createApp({
-      store,
-      rng: mulberry32(1),
-      rateLimitPerMinute: 3
-    });
-    const { encoded, testId } = await makeTest();
-    const statuses: number[] = [];
-    const arms: number[] = [];
-    for (let i = 0; i < 8; i++) {
-      const res = await limited.request("/choose", {
-        method: "POST",
-        body: JSON.stringify({
-          testId,
-          armCount: 2,
-          alg: "ts",
-          idHash: hex(`burst${i}`)
-        }),
-        headers: {
-          "content-type": "application/json",
-          "cf-connecting-ip": "203.0.113.88"
-        }
-      });
-      statuses.push(res.status);
-      arms.push((await res.json()).armIndex);
-    }
-    // Every visitor still gets a variant: a busy carrier NAT must not
-    // leave real users staring at an unrendered page.
-    expect(statuses.every(s => s === 200)).toBe(true);
-    expect(arms.every(a => a === 0 || a === 1)).toBe(true);
-    // Only the requests under the limit were recorded.
-    const s = await limited.request(`/stats/${encoded}`, {
-      headers: { authorization: `Bearer ${SECRET}` }
-    });
-    expect((await s.json()).totalAssignments).toBe(3);
-  });
-
-  it("accepts and drops a rate-limited reward instead of erroring", async () => {
-    const store = new MemoryStore();
-    const limited = createApp({
-      store,
-      rng: mulberry32(1),
-      rateLimitPerMinute: 2
-    });
-    const { testId } = await makeTest();
-    const idHash = hex("rewarded");
-    let last: Response | undefined;
-    for (let i = 0; i < 5; i++) {
-      last = await limited.request("/reward", {
-        method: "POST",
-        body: JSON.stringify({ testId, idHash, amount: 1 }),
-        headers: {
-          "content-type": "application/json",
-          "cf-connecting-ip": "203.0.113.99"
-        }
-      });
-    }
-    expect(last!.status).toBe(200);
-    expect(await last!.json()).toEqual({ rewarded: false, first: false });
-  });
-
-  it("rate limits a single source across the write endpoints", async () => {
-    const store = new MemoryStore();
-    const limited = createApp({
-      store,
-      rng: mulberry32(1),
-      rateLimitPerMinute: 5
-    });
-    const { testId } = await makeTest();
-    let lastStatus = 200;
-    for (let i = 0; i < 8; i++) {
-      const res = await limited.request("/choose", {
-        method: "POST",
-        body: JSON.stringify({
-          testId,
-          armCount: 2,
-          alg: "ts",
-          idHash: hex(`rl${i}`)
-        }),
-        headers: {
-          "content-type": "application/json",
-          "cf-connecting-ip": "203.0.113.77"
-        }
-      });
-      lastStatus = res.status;
-    }
-    // Serving degrades rather than failing, so the limit shows up as
-    // records not written, not as errors.
-    expect(lastStatus).toBe(200);
-  });
-});
-
-describe("stats and manage auth", () => {
   it("stats accepts only the bearer secret", async () => {
     const { encoded } = await makeTest();
     expect((await app.request(`/stats/${encoded}`)).status).toBe(401);

@@ -75,39 +75,42 @@ consequences worth stating plainly.
   self-host serving its own campaigns.
 - **JS-mode serving is unauthenticated.** `/choose` and `/reward` take a
   public `testId`, so the server pins each test's shape (arm count,
-  algorithm, dimension) on first sight and rejects callers that disagree,
-  and `LV_RATE_LIMIT_PER_MINUTE` (default 600 per source per minute per
-  test) bounds stuffing.
+  algorithm, dimension) on first sight and rejects callers that disagree.
+  Someone who knows a testId can still add same-shape assignments, so
+  treat a public test's numbers accordingly.
 
-  The limiter sheds **writes, not serves**. Over the limit, `/choose`
-  still returns a variant and simply records nothing, and `/reward`
-  accepts and drops. Serving is a cheap read; the write is what costs and
-  what an attacker wants, and model integrity is the source cap's job
-  (below), not the limiter's. Redirect serving (`/s`, `/c`) is never
-  limited at all, so email and link campaigns are unaffected by
-  throughput. This matters because the bucket is an address prefix:
-  carrier-grade NAT can put thousands of genuine visitors behind one /24,
-  and they must all still see a variant.
+  Every assignment records an opaque source bucket: a per-test,
+  daily-rotating hash of the writer's address prefix (/24 or /48). The
+  address itself is never stored, and the hash is neither cross-test nor
+  long-lived. `/stats` breaks assignments down by bucket so you can see
+  where traffic came from, and `POST /exclude/:cfg` (stats secret)
+  quarantines a bucket or a time window and recomputes, which heals
+  history because derived state is a pure function of the event log.
 
-  Rather than authenticate every visitor, results are made **robust** to a
-  minority of adversarial records: each assignment carries an opaque,
-  per-test, daily-rotating hash of the writer's address prefix (/24 or
-  /48; the address itself is never stored), and no single source may
-  contribute more than `max(50, 5%)` of a test's records. Excess records
-  stay in the log but are excluded from the model and the reported
-  numbers, and `/stats` reports the exclusion tally plus a per-source
-  breakdown so you see the judgment instead of trusting it blindly.
+  Nothing is excluded automatically. There is an opt-in share cap in the
+  code, but it is off by default and should stay off for anything
+  touching email: Gmail, Yahoo, and Outlook fetch images through their
+  own infrastructure, so an entire campaign's opens legitimately share a
+  handful of provider prefixes, and link scanners add more. Automatically
+  capping those would silently discard most of a real send, and a
+  confidently wrong number is worse than a noisy one.
 
-  Because derived state is a pure function of the log, the policy is
-  **retroactive**: `POST /exclude/:cfg` (stats secret) quarantines a
-  source or time window and recomputes, so a test attacked yesterday is
-  cleaned up today.
+  There is no rate limiting. Serving must never fail for a real visitor,
+  and address-prefix limits punish exactly the shared infrastructure that
+  legitimate email and corporate traffic sits behind.
 
-  Honest caveats: a creator holding the stats secret could brute-force a
-  /24 back out of a source hash for their own traffic, and an attacker
-  distributed across many address ranges can still nudge a test. Carrier
-  NAT means many genuine visitors can share one prefix, which is why the
-  cap is a generous share with a floor rather than a tight quota.
+### Running tests in email
+
+Two things are not optional:
+
+- **Give every recipient a distinct `?id=`** (your ESP's merge tag).
+  Without it, every recipient shares one URL, the mail provider caches a
+  single fetch, everyone sees the same variant, and the whole campaign
+  records one assignment.
+- **Expect provider infrastructure in the numbers.** Image opens come
+  from the provider's proxy, not the recipient, and security scanners
+  prefetch links. Clicks and on-site conversions are the trustworthy
+  signals; raw opens are not, which is true of every email tool.
 
 ## Development
 
