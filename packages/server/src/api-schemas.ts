@@ -69,6 +69,19 @@ export const chooseRequestSchema = z
         });
       }
     }
+    // Every bucket's array is an arm-prior list with the same arity rule.
+    // A short one leaves the trailing arms on the uniform prior while arm
+    // 0 keeps a strong one, which biases selection for that bucket, and
+    // bucket keys are derivable by anyone who can see a serve URL.
+    for (const [key, priors] of Object.entries(body.bucketPriors ?? {})) {
+      if (priors.length !== body.armCount) {
+        issues.addIssue({
+          code: "custom",
+          path: ["bucketPriors", key],
+          message: `bucketPriors must have one entry per arm (${body.armCount})`
+        });
+      }
+    }
   });
 
 // Deliberately minimal: the assignment record carries its own serving

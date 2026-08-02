@@ -57,6 +57,35 @@ const MAX_PRIOR_STRENGTH = 50;
 /** Redirects and pixels must never be cached: they are per-visitor. */
 const NO_STORE = "no-store, private";
 
+/**
+ * Bounds a rate-limit map without the cliff a blanket clear() creates:
+ * dropping every window at once would hand a fresh allowance to everyone
+ * at the exact moment an attacker pushes the map over its limit. Expired
+ * windows are dead anyway, so they go first; only if that frees nothing
+ * do we evict the oldest live entries.
+ */
+export function pruneWindows(
+  windows: Map<string, { count: number; windowStart: number }>,
+  now: number,
+  windowMs = 60_000
+): void {
+  const before = windows.size;
+  for (const [key, entry] of windows) {
+    if (now - entry.windowStart >= windowMs) {
+      windows.delete(key);
+    }
+  }
+  if (windows.size < before) {
+    return;
+  }
+  const oldestFirst = [...windows.entries()].sort(
+    (a, b) => a[1].windowStart - b[1].windowStart
+  );
+  for (const [key] of oldestFirst.slice(0, Math.ceil(oldestFirst.length / 2))) {
+    windows.delete(key);
+  }
+}
+
 export function createApp(options: AppOptions): Hono {
   const service: TestBackend =
     options.backend ??
@@ -103,7 +132,7 @@ export function createApp(options: AppOptions): Hono {
     const entry = hits.get(ip);
     if (!entry || now - entry.windowStart >= 60_000) {
       if (hits.size > 10_000) {
-        hits.clear(); // bounded memory; the window is short anyway
+        pruneWindows(hits, now);
       }
       hits.set(ip, { count: 1, windowStart: now });
       return false;
@@ -269,8 +298,10 @@ export function createApp(options: AppOptions): Hono {
       return ctx.error;
     }
     const { decoded, params, identity } = ctx;
-    // Every arm must be servable before we record anything: otherwise a
-    // config with a text-only arm burns a pull and then 400s.
+    // EVERY arm must be servable and allowed before we record anything.
+    // Checking only the chosen arm afterwards would sticky-assign a
+    // visitor to an arm they can never be served, so every later visit
+    // returns the same assignment and the same error.
     const unservable = decoded.config.arms.find(
       arm => !(arm.formats.url ?? arm.formats.image)
     );
@@ -282,12 +313,15 @@ export function createApp(options: AppOptions): Hono {
         400
       );
     }
+    const disallowed = decoded.config.arms.find(
+      arm => !destinationAllowed((arm.formats.url ?? arm.formats.image)!)
+    );
+    if (disallowed) {
+      return c.json({ error: "destination not allowed by this server" }, 403);
+    }
     const { armIndex } = await service.assign(params, identity);
     const arm = decoded.config.arms[armIndex];
     const target = (arm.formats.url ?? arm.formats.image) as string;
-    if (!destinationAllowed(target)) {
-      return c.json({ error: "destination not allowed by this server" }, 403);
-    }
     // Handoff decoration applies to pages, not image assets.
     const decorated = arm.formats.url
       ? maybeDecorate(decoded, identity, armIndex, target)
@@ -304,27 +338,36 @@ export function createApp(options: AppOptions): Hono {
     }
     const { decoded, params, identity } = ctx;
     const to = c.req.query("to");
-    // Validate the destination BEFORE recording anything: a 400 that has
-    // already counted a conversion would silently skew the test.
+    // Validate every destination BEFORE recording anything: an error that
+    // has already counted a conversion would skew the test, and an error
+    // after a sticky assignment would repeat for that visitor forever.
     if (to !== undefined && !isAllowedRedirect(decoded.config, to)) {
       return c.json(
         { error: "?to= must be on an origin the test config references" },
         400
       );
     }
-    // A click implies a serve, so assign (sticky or fresh) before rewarding.
-    const { armIndex } = await service.assign(params, identity);
-    const arm = decoded.config.arms[armIndex];
-    const target = to ?? arm.redirectUrl ?? decoded.config.redirectUrl;
-    if (!target) {
+    const candidates =
+      to !== undefined
+        ? [to]
+        : decoded.config.arms.map(
+            arm => arm.redirectUrl ?? decoded.config.redirectUrl
+          );
+    if (candidates.some(target => target === undefined)) {
       return c.json(
         { error: "no redirect target: pass ?to= or set a redirectUrl" },
         400
       );
     }
-    if (!destinationAllowed(target)) {
+    if (!candidates.every(target => destinationAllowed(target as string))) {
       return c.json({ error: "destination not allowed by this server" }, 403);
     }
+    // A click implies a serve, so assign (sticky or fresh) before rewarding.
+    const { armIndex } = await service.assign(params, identity);
+    const arm = decoded.config.arms[armIndex];
+    const target = (to ??
+      arm.redirectUrl ??
+      decoded.config.redirectUrl) as string;
     if (identity.idHash) {
       await service.reward(decoded.testId, identity.idHash, 1);
     }

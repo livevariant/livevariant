@@ -7,7 +7,7 @@ import {
   mulberry32,
   type TestConfigInput
 } from "@livevariant/core";
-import { createApp } from "./app.js";
+import { createApp, pruneWindows } from "./app.js";
 import { MemoryStore } from "./store/memory.js";
 
 /**
@@ -295,6 +295,24 @@ describe("JS mode (choose/reward)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects bucket prior arrays that disagree with armCount", async () => {
+    const { testId } = await makeTest();
+    // A short bucket array would leave arms 1..n on the uniform prior
+    // while arm 0 keeps a strong one, and bucket keys are derivable by
+    // anyone who can see a serve URL.
+    const res = await app.request("/choose", {
+      method: "POST",
+      body: JSON.stringify({
+        testId,
+        armCount: 2,
+        alg: "bucketed",
+        bucketPriors: { ["a".repeat(64)]: [{ alpha: 20, beta: 1 }] }
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("rejects prior arrays that disagree with armCount", async () => {
     const { testId } = await makeTest();
     const res = await app.request("/choose", {
@@ -345,6 +363,102 @@ describe("cors", () => {
     });
     expect(stats.status).toBe(200);
     expect(stats.headers.get("access-control-allow-origin")).toBe("*");
+  });
+});
+
+describe("rate-limit window pruning", () => {
+  it("drops expired windows and leaves live ones alone", () => {
+    const now = 1_700_000_000_000;
+    const windows = new Map([
+      ["stale", { count: 5, windowStart: now - 90_000 }],
+      ["live", { count: 2, windowStart: now - 1_000 }]
+    ]);
+    pruneWindows(windows, now);
+    expect([...windows.keys()]).toEqual(["live"]);
+  });
+
+  it("never resets everyone's allowance at once", () => {
+    // All windows live: a blanket clear would hand every source a fresh
+    // allowance at the moment an attacker overflows the map.
+    const now = 1_700_000_000_000;
+    const windows = new Map(
+      Array.from({ length: 10 }, (_, i) => [
+        `ip${i}`,
+        { count: 9, windowStart: now - i * 100 }
+      ]) as Array<[string, { count: number; windowStart: number }]>
+    );
+    pruneWindows(windows, now);
+    expect(windows.size).toBe(5);
+    // The survivors are the most recent, so active limits keep counting.
+    expect(windows.has("ip0")).toBe(true);
+    expect(windows.has("ip9")).toBe(false);
+  });
+});
+
+describe("destination allowlist", () => {
+  const allowed = { allowedDestinations: ["example.com"] };
+
+  it("refuses a config whose arms leave the allowlist, without recording", async () => {
+    const gated = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(3),
+      ...allowed
+    });
+    const { encoded } = await makeTest({
+      arms: [
+        { name: "ok", formats: { url: "https://example.com/a" } },
+        { name: "offsite", formats: { url: "https://elsewhere.test/b" } }
+      ]
+    });
+    // Twice: a sticky assignment made before the check would pin this
+    // visitor to an arm they could never be served.
+    for (let i = 0; i < 2; i++) {
+      const res = await gated.request(`/s/${encoded}?id=u1`);
+      expect(res.status).toBe(403);
+    }
+    const s = await gated.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect((await s.json()).totalAssignments).toBe(0);
+  });
+
+  it("serves normally when every destination is on the allowlist", async () => {
+    const gated = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(3),
+      ...allowed
+    });
+    const { encoded } = await makeTest();
+    const res = await gated.request(`/s/${encoded}?id=u1`);
+    expect(res.status).toBe(302);
+    // Subdomains of an allowed host count too.
+    const sub = await makeTest({
+      arms: [
+        { name: "a", formats: { url: "https://cdn.example.com/a" } },
+        { name: "b", formats: { url: "https://example.com/b" } }
+      ]
+    });
+    expect((await gated.request(`/s/${sub.encoded}?id=u2`)).status).toBe(302);
+  });
+
+  it("blocks a disallowed click target before counting the conversion", async () => {
+    const gated = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(3),
+      ...allowed
+    });
+    const { encoded } = await makeTest({
+      redirectUrl: "https://elsewhere.test/thanks",
+      arms: [
+        { name: "a", formats: { url: "https://example.com/a" } },
+        { name: "b", formats: { url: "https://example.com/b" } }
+      ]
+    });
+    expect((await gated.request(`/c/${encoded}?id=u1`)).status).toBe(403);
+    const s = await gated.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect((await s.json()).totalAssignments).toBe(0);
   });
 });
 
