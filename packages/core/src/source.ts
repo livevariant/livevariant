@@ -1,10 +1,10 @@
 import { sha256Hex } from "./canonical.js";
 
 /**
- * Source bucketing for robust aggregation. Writes are unauthenticated by
- * design (the config is public), so instead of trying to authenticate
- * every visitor we bound how much any one traffic source can move a
- * test. The bucket is deliberately coarse and deliberately forgettable:
+ * Source bucketing. Writes are unauthenticated by design (the config is
+ * public), so each record carries a coarse, deliberately forgettable
+ * fingerprint of where it came from: enough for a creator to see a flood
+ * and quarantine it, not enough to identify anyone.
  *
  *   srcHash = sha256(testId | dateUTC | ipPrefix)
  *
@@ -100,12 +100,9 @@ export function utcDay(now: number): string {
 }
 
 /**
- * The bucket recorded on an assignment, for capping. Null when the
- * address is missing or unparseable, and deliberately so: capping is
- * about bounding ONE source's influence, and a deployment behind a proxy
- * that sets no address headers would otherwise land all of its genuine
- * traffic in a single bucket and cap itself into oblivion. Unidentified
- * records are exempt from the cap (see capContributions).
+ * The bucket recorded on an assignment. Null when the address is missing
+ * or unparseable, which simply means that record cannot be attributed to
+ * a source and cannot be quarantined by one.
  */
 export async function sourceHash(
   testId: string,

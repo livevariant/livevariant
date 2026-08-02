@@ -84,12 +84,10 @@ export {
   utcDay
 } from "./source.js";
 export {
-  DEFAULT_CAP_POLICY,
-  capContributions,
-  sourceWithinCap,
-  type CapPolicy,
-  type CapResult
-} from "./robust.js";
+  applyExclusions,
+  type ExclusionPolicy,
+  type ExclusionResult
+} from "./exclusions.js";
 export {
   recommendAlgorithm,
   type AlgorithmRecommendation

@@ -1,8 +1,7 @@
 import {
   bucketKey,
-  capContributions,
+  applyExclusions,
   chooseArm,
-  DEFAULT_CAP_POLICY,
   effectiveArmPriors,
   effectiveBucketPriors,
   effectiveLinearPriors,
@@ -17,7 +16,7 @@ import {
   type AssignmentRecord,
   type DecodedConfig,
   type DerivedState,
-  type CapPolicy,
+  type ExclusionPolicy,
   type LinearPrior,
   type Rng
 } from "@livevariant/core";
@@ -74,7 +73,7 @@ export interface RequestIdentity {
   idHash: string | null;
   ctxKey: string | null;
   featIdx: number[];
-  /** Opaque source bucket for robust aggregation; null when unknown. */
+  /** Opaque source bucket for the stats breakdown; null when unknown. */
   srcHash?: string | null;
 }
 
@@ -96,10 +95,9 @@ export async function resolveIdentity(
 
 const CAS_RETRIES = 5;
 
-/** The creator's quarantine list, in the shape core's capper expects. */
-function capPolicyFrom(policy: TestPolicy): CapPolicy {
+/** The creator's quarantine list, in the shape core expects. */
+function exclusionsFrom(policy: TestPolicy): ExclusionPolicy {
   return {
-    ...DEFAULT_CAP_POLICY,
     excludedSources: policy.excludedSources,
     excludedWindows: policy.excludedWindows
   };
@@ -266,9 +264,9 @@ export class TestService implements TestBackend {
       all.push(rec);
     }
     const policy = await this.store.getPolicy(params.testId);
-    // The policy is applied here, so it heals history: a test attacked
+    // Exclusions are applied here, so they heal history: a test attacked
     // before a source was quarantined is cleaned up by recomputing.
-    const events = capContributions(all, capPolicyFrom(policy)).applied;
+    const events = applyExclusions(all, exclusionsFrom(policy)).applied;
     const state = recomputeState(events, {
       alg: params.alg,
       armCount: params.armCount,
@@ -426,17 +424,13 @@ export interface TestStats {
   arms: ArmStats[];
   buckets: Record<string, { pulls: number[]; conversions: number[] }>;
   linearTheta?: number[][];
-  /**
-   * Records the cap policy removed, so the creator sees the judgment
-   * rather than silently trusting the numbers above.
-   */
+  /** What the creator's quarantine removed, so the numbers are auditable. */
   excluded: {
     total: number;
-    byCap: number;
     bySource: number;
     byWindow: number;
   };
-  /** Assignment count per opaque source bucket, before capping. */
+  /** Assignment count per opaque source bucket, before exclusions. */
   perSource: Record<string, number>;
 }
 
@@ -450,9 +444,9 @@ export async function buildStats(
   for await (const rec of store.scanAssignments(params.testId)) {
     all.push(rec);
   }
-  const capped = capContributions(
+  const kept = applyExclusions(
     all,
-    capPolicyFrom(await store.getPolicy(params.testId))
+    exclusionsFrom(await store.getPolicy(params.testId))
   );
   const arms: ArmStats[] = Array.from({ length: params.armCount }, (_, i) => ({
     name: armNames?.[i],
@@ -463,7 +457,7 @@ export async function buildStats(
   }));
   const buckets: TestStats["buckets"] = {};
   let total = 0;
-  for (const rec of capped.applied) {
+  for (const rec of kept.applied) {
     total++;
     const arm = arms[rec.armIndex];
     if (!arm) {
@@ -495,8 +489,8 @@ export async function buildStats(
     totalAssignments: total,
     arms,
     buckets,
-    excluded: capped.excluded,
-    perSource: capped.perSource
+    excluded: kept.excluded,
+    perSource: kept.perSource
   };
   if (params.alg === "linear") {
     const blob = await store.getBlob(linearKey(params.testId));

@@ -87,17 +87,16 @@ consequences worth stating plainly.
   quarantines a bucket or a time window and recomputes, which heals
   history because derived state is a pure function of the event log.
 
-  Nothing is excluded automatically. There is an opt-in share cap in the
-  code, but it is off by default and should stay off for anything
-  touching email: Gmail, Yahoo, and Outlook fetch images through their
-  own infrastructure, so an entire campaign's opens legitimately share a
-  handful of provider prefixes, and link scanners add more. Automatically
-  capping those would silently discard most of a real send, and a
-  confidently wrong number is worse than a noisy one.
-
-  There is no rate limiting. Serving must never fail for a real visitor,
-  and address-prefix limits punish exactly the shared infrastructure that
-  legitimate email and corporate traffic sits behind.
+  Nothing is excluded automatically, and there is no rate limiting.
+  Source buckets are address prefixes, and Gmail, Yahoo, and Outlook
+  fetch email images through their own infrastructure, so an entire
+  campaign's opens legitimately share a handful of provider prefixes
+  (link scanners add more). Any automatic rule would discard most of a
+  real send while reporting the remainder with full confidence, and a
+  confidently wrong number is worse than a noisy one. For the same
+  reason, serving is never rate limited: prefix limits punish exactly the
+  shared infrastructure that legitimate email and corporate traffic sits
+  behind.
 
 ### Running tests in email
 

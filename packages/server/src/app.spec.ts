@@ -442,7 +442,7 @@ describe("destination allowlist", () => {
   });
 });
 
-describe("robust aggregation", () => {
+describe("source visibility and creator quarantine", () => {
   /** One /choose from a given client address. */
   async function choose(testId: string, idHash: string, ip: string) {
     return app.request("/choose", {
@@ -456,7 +456,7 @@ describe("robust aggregation", () => {
     const { encoded, testId } = await makeTest();
     // A mail provider fetching an email image proxies every open through
     // its own infrastructure, so a real campaign's records legitimately
-    // share one prefix. Nothing may be dropped automatically.
+    // share one prefix. Nothing is ever dropped automatically.
     for (let i = 0; i < 120; i++) {
       await choose(testId, hex(`proxied${i}`), "203.0.113.9");
     }

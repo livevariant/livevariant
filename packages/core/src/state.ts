@@ -35,7 +35,8 @@ export interface AssignmentRecord {
   /**
    * Opaque, per-test, daily-rotating hash of the traffic source's address
    * prefix (see source.ts). Never an address, never cross-test. Used only
-   * to bound how much one source can move a test (see robust.ts).
+   * so a creator can see where traffic came from and quarantine what
+   * doesn't belong (see exclusions.ts).
    */
   srcHash?: string | null;
   /**
