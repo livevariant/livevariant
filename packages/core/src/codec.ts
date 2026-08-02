@@ -22,7 +22,12 @@ const IDENTITY_EXCLUDED = [
   "alg",
   "priors",
   "priorStrengthCap",
-  "minBucketPulls"
+  "minBucketPulls",
+  "decorateRedirects",
+  // Delivery details, not the test: turning the variant stamp on or
+  // switching param forwarding off mid-campaign must not reset history.
+  "variantParam",
+  "forwardParams"
 ] as const;
 
 /** Encoded configs beyond this length get a warning (URL ergonomics). */
@@ -60,6 +65,13 @@ export async function encodeConfig(
     warnings.push(
       `encoded config is ${encoded.length} chars; some tooling truncates ` +
         `URLs beyond ${CONFIG_SOFT_LIMIT}, consider hosting inline content`
+    );
+  }
+  if (!config.statsKeyHash) {
+    warnings.push(
+      "no statsKeyHash: this test will serve and learn, but its results " +
+        "can never be read, because no secret can match a hash that is " +
+        "not there"
     );
   }
   return { encoded, testId: await computeTestId(config), warnings };

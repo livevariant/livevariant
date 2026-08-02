@@ -1,0 +1,61 @@
+/**
+ * URL construction for a test, shared by the SDK and the web app (and the
+ * planned MCP builder) so every surface produces identical links. `base` is the serving
+ * origin (hosted: https://livevariant.link; self-host: wherever the server
+ * runs). The manage URL carries the stats secret in the FRAGMENT: it never
+ * leaves the browser, so it stays out of server and proxy logs.
+ */
+export interface TestUrls {
+  serve: string;
+  click: string;
+  pixel: string;
+  manage: string;
+  /**
+   * The same links with server-derived context switched off. Use these in
+   * email. Nothing that touches an inbox is reliably the reader: mail
+   * providers fetch images from their own infrastructure, and corporate
+   * link scanners follow links from datacenters while presenting browser
+   * headers, so derived geo there is a guess about a machine.
+   *
+   * It matters more than "some rows are wrong" because assignment is
+   * sticky: whichever request lands first fixes a recipient's bucket for
+   * good, and in an email with both an image and a link that is the
+   * image open. Opting out makes the behaviour declared instead of
+   * order-dependent.
+   */
+  noAuto: {
+    serve: string;
+    click: string;
+  };
+}
+
+/** Query flag that suppresses server-derived context on a serve link. */
+export const NO_AUTO_PARAM = "auto=0";
+
+export function buildTestUrls(
+  base: string,
+  encoded: string,
+  statsSecret?: string
+): TestUrls {
+  const origin = base.replace(/\/+$/, "");
+  return {
+    serve: `${origin}/s/${encoded}`,
+    click: `${origin}/c/${encoded}`,
+    pixel: `${origin}/px/${encoded}`,
+    manage: `${origin}/manage/${encoded}${statsSecret ? `#${statsSecret}` : ""}`,
+    noAuto: {
+      serve: `${origin}/s/${encoded}?${NO_AUTO_PARAM}`,
+      click: `${origin}/c/${encoded}?${NO_AUTO_PARAM}`
+    }
+  };
+}
+
+/**
+ * Whether a request asked for derived context to be left alone. Lenient
+ * about spelling because these links are pasted into ESP templates by
+ * hand, where a silent misread would look exactly like working code.
+ */
+export function autoContextDisabled(value: string | undefined): boolean {
+  const flag = value?.trim().toLowerCase();
+  return flag === "0" || flag === "false" || flag === "off" || flag === "no";
+}

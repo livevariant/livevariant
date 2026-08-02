@@ -1,0 +1,39 @@
+{
+  "name": "@livevariant/sdk",
+  "version": "0.0.1",
+  "description": "Browser SDK for LiveVariant: sticky variant assignment with client-side hashing (raw ids and context never leave the page), localStorage caching, and zero-setup conversion tracking via Google Analytics dataLayer interception",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/livevariant/livevariant.git",
+    "directory": "packages/sdk"
+  },
+  "keywords": [
+    "ab-testing",
+    "multi-armed-bandit",
+    "browser",
+    "analytics",
+    "experimentation"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@livevariant/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@livevariant/core": "0.0.1"
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ]
+}

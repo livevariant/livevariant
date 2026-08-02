@@ -44,3 +44,5 @@ vitest.config.*.timestamp*
 .env
 .env.*
 !.env.example
+__screenshots__
+.vitest-attachments

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AUTO_SIGNALS } from "./signals.js";
 
 /**
  * The test config IS the test: it travels base64url-encoded in serve URLs
@@ -6,12 +7,20 @@ import { z } from "zod";
  * identity. Keep this schema lean; every byte rides along on every request.
  */
 
+/**
+ * http(s) only. Plain z.url() accepts javascript:, data:, and mailto:,
+ * which would hand an XSS payload to any SDK consumer assigning
+ * variant.url to an href (and opaque schemes all report origin "null",
+ * which would collapse the click-redirect origin allowlist).
+ */
+const httpUrl = z.url({ protocol: /^https?$/ });
+
 const armFormatsSchema = z
   .object({
     /** Destination page for redirect-mode serving (landing page tests). */
-    url: z.url().optional(),
+    url: httpUrl.optional(),
     /** Image asset URL, for email hero images etc. */
-    image: z.url().optional(),
+    image: httpUrl.optional(),
     html: z.string().optional(),
     md: z.string().optional(),
     text: z.string().optional()
@@ -24,13 +33,22 @@ const armSchema = z.object({
   name: z.string().min(1),
   formats: armFormatsSchema,
   /** Overrides the test-level redirectUrl for click redirects. */
-  redirectUrl: z.url().optional()
+  redirectUrl: httpUrl.optional()
 });
 
-const ctxDimSchema = z.object({
+export const ctxDimSchema = z.object({
   key: z.string().min(1),
   /** Known values, if enumerable; omitted means free-form (hashed). */
-  values: z.array(z.string().min(1)).min(2).optional()
+  values: z.array(z.string().min(1)).min(2).optional(),
+  /**
+   * Fill this dimension from a signal the server derives, so the caller
+   * never has to pass it. This is what lets an email redirect be
+   * contextual: there is no JavaScript in an inbox, and the sender may
+   * not know the reader's country either. A caller-supplied `c_<key>`
+   * still wins, since you know your own users better than an IP
+   * database does.
+   */
+  from: z.enum(AUTO_SIGNALS).optional()
 });
 
 /**
@@ -82,13 +100,41 @@ export const testConfigSchema = z
     /** Max pseudo-observations any prior may contribute per arm. */
     priorStrengthCap: z.number().positive().default(50),
     /** Fallback click-redirect target when the arm has none. */
-    redirectUrl: z.url().optional(),
+    redirectUrl: httpUrl.optional(),
     /** GA4 event names the SDK auto-rewards on (dataLayer interception). */
     rewardEvents: z.array(z.string().min(1)).optional(),
     /** Bucketed alg: bucket pulls needed before leaving global fallback. */
     minBucketPulls: z.number().int().positive().default(100),
-    /** sha256 hex of the creator-held stats secret. */
-    statsKeyHash: z.string().regex(/^[0-9a-f]{64}$/)
+    /**
+     * Append _lvt/_lvid/_lvvar to redirect destinations so an SDK on the
+     * destination site can adopt the assignment (identity handoff).
+     */
+    decorateRedirects: z.boolean().default(true),
+    /**
+     * Stamp the served variant's name into this query parameter on
+     * redirect, e.g. "utm_content", so a test shows up in the customer's
+     * own analytics without them installing anything. Off unless set:
+     * writing into someone's attribution scheme uninvited is not a
+     * default anyone should get by accident.
+     */
+    variantParam: z.string().min(1).max(32).optional(),
+    /**
+     * Carry query parameters we do not recognize onto the redirect
+     * target. ESPs and ad platforms append their own attribution
+     * (utm_source, gclid), and swallowing it would break the customer's
+     * analytics exactly when the test starts mattering.
+     */
+    forwardParams: z.boolean().default(true),
+    /**
+     * sha256 hex of the creator-held stats secret. Optional so a test can
+     * be spelled out in query parameters with nothing but its variants,
+     * but a test without one has no readable stats at all: no secret can
+     * match, so /stats, /recompute and /exclude stay closed forever.
+     */
+    statsKeyHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional()
   })
   .superRefine((config, issues) => {
     const armCount = config.arms.length;
@@ -125,5 +171,6 @@ export const testConfigSchema = z
 export type TestConfig = z.infer<typeof testConfigSchema>;
 export type TestConfigInput = z.input<typeof testConfigSchema>;
 export type Arm = TestConfig["arms"][number];
+export type CtxDim = z.infer<typeof ctxDimSchema>;
 export type ArmPrior = z.infer<typeof armPriorSchema>;
 export type Priors = z.infer<typeof priorsSchema>;

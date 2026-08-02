@@ -8,9 +8,11 @@ export {
   utf8ToBase64Url
 } from "./canonical.js";
 export {
+  ctxDimSchema,
   testConfigSchema,
   type Arm,
   type ArmPrior,
+  type CtxDim,
   type Priors,
   type TestConfig,
   type TestConfigInput
@@ -38,10 +40,29 @@ export {
   type Rng
 } from "./rng.js";
 export {
+  AUTO_SIGNALS,
+  NETWORK_SIGNALS,
+  SIGNAL_CARDINALITY,
+  URL_SIGNALS,
+  urlSignals,
+  deviceClass,
+  isAssetFetch,
+  primaryLanguage,
+  requestSignals,
+  type AutoSignal,
+  type CloudflareGeo,
+  type RequestSignals
+} from "./signals.js";
+export {
   FEATURE_DIM,
   bucketKey,
+  composeBucketKey,
+  deriveAutoCtx,
+  mergeFeatureIndices,
+  externalIdHash,
   featureIndices,
-  normalizeCtx
+  normalizeCtx,
+  splitAutoDims
 } from "./context.js";
 export {
   capArmPriors,
@@ -74,3 +95,42 @@ export {
   type DerivedState,
   type StateInit
 } from "./state.js";
+export {
+  CONFIG_PARAMS,
+  RUNTIME_PARAMS,
+  configFromParams,
+  decorateDestination,
+  fallbackTarget,
+  isReservedParam,
+  passthroughParams
+} from "./params.js";
+export {
+  autoContextDisabled,
+  buildTestUrls,
+  NO_AUTO_PARAM,
+  type TestUrls
+} from "./urls.js";
+export {
+  UNKNOWN_SOURCE,
+  ipPrefix,
+  rateLimitBucket,
+  sourceHash,
+  utcDay
+} from "./source.js";
+export {
+  applyExclusions,
+  type ExclusionPolicy,
+  type ExclusionResult
+} from "./exclusions.js";
+export {
+  recommendAlgorithm,
+  recommendFromObserved,
+  type AlgorithmRecommendation
+} from "./recommend.js";
+export {
+  HANDOFF_PARAMS,
+  decorateUrl,
+  parseHandoff,
+  stripHandoffParams,
+  type Handoff
+} from "./handoff.js";

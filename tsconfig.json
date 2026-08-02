@@ -5,6 +5,18 @@
   "references": [
     {
       "path": "./packages/core"
+    },
+    {
+      "path": "./packages/server"
+    },
+    {
+      "path": "./packages/workers"
+    },
+    {
+      "path": "./packages/sdk"
+    },
+    {
+      "path": "./apps/web"
     }
   ],
   "compilerOptions": {

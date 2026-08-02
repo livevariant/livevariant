@@ -1,0 +1,24 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
+    "emitDeclarationOnly": false,
+    "declaration": true,
+    "forceConsistentCasingInFileNames": true,
+    // Workers runtime: its own type universe instead of dom/node. The
+    // workers-types package also declares the cloudflare:workers module.
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    {
+      "path": "../core/tsconfig.lib.json"
+    },
+    {
+      "path": "../server/tsconfig.lib.json"
+    }
+  ],
+  "exclude": ["src/**/*.spec.ts"]
+}

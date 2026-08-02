@@ -13,6 +13,7 @@ import { FEATURE_DIM } from "./context.js";
 import type { LinearPrior } from "./priors.js";
 import type { ArmPrior } from "./schema.js";
 import type { Rng } from "./rng.js";
+import type { RequestSignals } from "./signals.js";
 
 /**
  * Event-sourced state. The single source of truth is one AssignmentRecord
@@ -32,6 +33,29 @@ export interface AssignmentRecord {
   rewardTotal: number;
   /** ms epoch; also the replay order for recompute. */
   firstSeen: number;
+  /**
+   * Opaque, per-test, daily-rotating hash of the traffic source's address
+   * prefix (see source.ts). Never an address, never cross-test. Used only
+   * so a creator can see where traffic came from and quarantine what
+   * doesn't belong (see exclusions.ts).
+   */
+  srcHash?: string | null;
+  /**
+   * Coarse signals the server derived for this request (country, device,
+   * and friends). Stored readable, unlike the caller's own context, so
+   * stats can say "nl / mobile" instead of an opaque bucket hash. These
+   * are recorded whether or not the test uses them as context, since
+   * they cost nothing and make a test's numbers legible after the fact.
+   */
+  signals?: RequestSignals | null;
+  /**
+   * Serving snapshot: how this assignment was made. Makes /reward
+   * self-sufficient ({testId, idHash, amount} only): the derived-state
+   * update reads these instead of requiring the caller to echo them.
+   */
+  alg: "ts" | "bucketed" | "linear";
+  armCount: number;
+  dim: number;
 }
 
 export type DerivedState =
@@ -73,11 +97,39 @@ export function newDerivedState(init: StateInit): DerivedState {
   }
 }
 
+/**
+ * True when a record can be applied to this state. Records are written by
+ * request handlers, so a stale or hostile armIndex must never crash a
+ * replay: recompute is the creator's repair path and has to survive
+ * anything already in the log.
+ */
+function appliesTo(state: DerivedState, armIndex: number): boolean {
+  const armCount =
+    state.alg === "bucketed" ? state.global.length : state.arms.length;
+  return Number.isInteger(armIndex) && armIndex >= 0 && armIndex < armCount;
+}
+
+/**
+ * Feature indices clamped to the model's dimension. An index past `dim`
+ * reads undefined out of the matrix and silently turns the whole model
+ * into NaN, so a record written under a different dim is dropped here
+ * rather than poisoning the replay.
+ */
+function safeFeatIdx(dim: number, featIdx: number[] | null): number[] {
+  const indices = (featIdx ?? [0]).filter(
+    i => Number.isInteger(i) && i >= 0 && i < dim
+  );
+  return indices.length > 0 ? indices : [0];
+}
+
 /** Records a pull. Mutates state; callers own copy semantics. */
 export function applyAssignment(
   state: DerivedState,
   rec: Pick<AssignmentRecord, "armIndex" | "ctxKey" | "featIdx">
 ): void {
+  if (!appliesTo(state, rec.armIndex)) {
+    return;
+  }
   switch (state.alg) {
     case "ts":
       state.arms[rec.armIndex].pulls += 1;
@@ -93,7 +145,10 @@ export function applyAssignment(
       return;
     }
     case "linear":
-      linearObserve(state.arms[rec.armIndex], rec.featIdx ?? [0]);
+      linearObserve(
+        state.arms[rec.armIndex],
+        safeFeatIdx(state.dim, rec.featIdx)
+      );
       return;
   }
 }
@@ -103,6 +158,9 @@ export function applyFirstReward(
   state: DerivedState,
   rec: Pick<AssignmentRecord, "armIndex" | "ctxKey" | "featIdx">
 ): void {
+  if (!appliesTo(state, rec.armIndex)) {
+    return;
+  }
   switch (state.alg) {
     case "ts":
       state.arms[rec.armIndex].successes += 1;
@@ -118,7 +176,10 @@ export function applyFirstReward(
       return;
     }
     case "linear":
-      linearReward(state.arms[rec.armIndex], rec.featIdx ?? [0]);
+      linearReward(
+        state.arms[rec.armIndex],
+        safeFeatIdx(state.dim, rec.featIdx)
+      );
       return;
   }
 }
@@ -180,6 +241,11 @@ export function chooseArm(
       );
     }
     case "linear":
-      return chooseLinear(state.arms, input.featIdx ?? [0], rng, options.noise);
+      return chooseLinear(
+        state.arms,
+        safeFeatIdx(state.dim, input.featIdx ?? null),
+        rng,
+        options.noise
+      );
   }
 }
