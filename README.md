@@ -137,9 +137,13 @@ and therefore the same `testId`:
 ```
 https://livevariant.link/s?v=https://cdn.example.com/hero-1.jpg
                           &v=https://cdn.example.com/hero-2.jpg
-                          &kh=<statsKeyHash>
                           &id={{recipient_id}}
+                          &kh=<statsKeyHash>
 ```
+
+The fixed hash goes last so the fields a campaign manager actually edits
+sit at the front of the URL, where they are readable without scrolling
+past 64 characters of hex.
 
 Only `v` is required, twice or more. Everything else defaults, because
 nobody filling in a template field should have to know this system has an

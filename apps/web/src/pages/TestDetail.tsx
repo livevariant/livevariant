@@ -259,11 +259,11 @@ element.textContent = test.variant.text;`;
             <>
               <CopyField
                 label="Image src (serve)"
-                value={`${test.serverUrl}/s?v={{variant_1_url}}&v={{variant_2_url}}&kh=${statsKeyHash}&stamp=utm_content&auto=0&id={{recipient_id}}`}
+                value={`${test.serverUrl}/s?v={{variant_1_url}}&v={{variant_2_url}}&stamp=utm_content&auto=0&id={{recipient_id}}&kh=${statsKeyHash}`}
               />
               <CopyField
                 label="Link href (click)"
-                value={`${test.serverUrl}/c?v={{variant_1_url}}&v={{variant_2_url}}&r={{landing_url}}&kh=${statsKeyHash}&stamp=utm_content&auto=0&id={{recipient_id}}`}
+                value={`${test.serverUrl}/c?v={{variant_1_url}}&v={{variant_2_url}}&r={{landing_url}}&stamp=utm_content&auto=0&id={{recipient_id}}&kh=${statsKeyHash}`}
               />
             </>
           )}
