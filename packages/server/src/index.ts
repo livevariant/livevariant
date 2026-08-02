@@ -1,4 +1,5 @@
 export { createApp, type AppOptions } from "./app.js";
+export { createApi, type ApiOptions } from "./api.js";
 export {
   buildStats,
   paramsFromConfig,

@@ -52,3 +52,13 @@ jobs:
       - run: npx nx format:check --all
 
       - run: npx nx run-many -t build test lint typecheck
+
+      # The SKILL, the plugin bundles and the marketplace manifests are all
+      # generated from the tool registry. Regenerating must be a no-op, or a
+      # tool was added without `npm run generate` and the published skill
+      # documents a server that no longer matches.
+      - name: Agent assets are up to date
+        run: |
+          npm run generate
+          git diff --exit-code -- SKILL.md plugins .claude-plugin .agents \
+            || { echo "::error::Generated agent assets are stale. Run 'npm run generate' and commit."; exit 1; }

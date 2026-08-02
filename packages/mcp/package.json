@@ -1,18 +1,18 @@
 {
-  "name": "@livevariant/server",
+  "name": "@livevariant/mcp",
   "version": "0.0.1",
-  "description": "LiveVariant serving backend: Hono app with redirect/click/pixel endpoints, JS-mode choose/reward API, secret-gated stats and recompute, behind a pluggable StateStore (in-memory here; Cloudflare Durable Objects in @livevariant/workers)",
+  "description": "MCP server for LiveVariant: build, inspect and read bandit-driven A/B tests from Claude, ChatGPT, Copilot or any MCP client",
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/livevariant/livevariant.git",
-    "directory": "packages/server"
+    "directory": "packages/mcp"
   },
   "keywords": [
+    "mcp",
+    "model-context-protocol",
     "ab-testing",
     "multi-armed-bandit",
-    "hono",
-    "redirect",
     "experimentation"
   ],
   "type": "module",
@@ -30,13 +30,12 @@
     }
   },
   "bin": {
-    "livevariant-server": "./dist/main.js"
+    "livevariant-mcp": "./dist/main.js"
   },
   "dependencies": {
-    "@hono/node-server": "^2.0.12",
     "@livevariant/core": "0.0.1",
     "@livevariant/tools": "0.0.1",
-    "hono": "^4.12.33",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.4.3"
   },
   "files": [

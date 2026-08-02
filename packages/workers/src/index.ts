@@ -179,6 +179,12 @@ interface Env {
   TEST_STATE: DurableObjectNamespace<TestStateDO>;
   /** Comma-separated destination hosts; unset means allow-all. */
   LV_ALLOWED_DESTINATIONS?: string;
+  /**
+   * Public origin of the tool API and its docs. Unset leaves them
+   * unmounted, which is the right shape for livevariant.link: that domain
+   * carries bulk email traffic and has no business hosting a docs page.
+   */
+  LV_API_URL?: string;
 }
 
 /** Counter keys arrive as c:{testId}:{scope}; the DO stores scopes. */
@@ -240,7 +246,8 @@ export default {
           ? env.LV_ALLOWED_DESTINATIONS.split(",")
               .map(h => h.trim())
               .filter(Boolean)
-          : undefined
+          : undefined,
+        apiUrl: env.LV_API_URL
       });
       apps.set(env, app);
     }

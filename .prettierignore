@@ -3,3 +3,11 @@
 /coverage
 /.nx/cache
 /.nx/workspace-data
+
+# Generated from the tool registry by `npm run generate`. The generator is
+# authoritative: if prettier reformatted these, CI's regenerate-and-diff
+# check would fail against prettier's own output.
+/SKILL.md
+/plugins
+/.claude-plugin
+/.agents

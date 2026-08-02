@@ -1,0 +1,20 @@
+{
+  "name": "livevariant",
+  "interface": {
+    "displayName": "LiveVariant"
+  },
+  "plugins": [
+    {
+      "name": "livevariant",
+      "source": {
+        "source": "local",
+        "path": "./plugins/chatgpt"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "NONE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

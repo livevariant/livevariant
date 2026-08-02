@@ -1,19 +1,19 @@
 {
-  "name": "@livevariant/server",
+  "name": "@livevariant/tools",
   "version": "0.0.1",
-  "description": "LiveVariant serving backend: Hono app with redirect/click/pixel endpoints, JS-mode choose/reward API, secret-gated stats and recompute, behind a pluggable StateStore (in-memory here; Cloudflare Durable Objects in @livevariant/workers)",
+  "description": "LiveVariant's tool definitions: one registry describing every operation an assistant can perform, from which the MCP server, the REST API, the OpenAPI document and the agent SKILL are all generated",
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/livevariant/livevariant.git",
-    "directory": "packages/server"
+    "directory": "packages/tools"
   },
   "keywords": [
     "ab-testing",
     "multi-armed-bandit",
-    "hono",
-    "redirect",
-    "experimentation"
+    "mcp",
+    "openapi",
+    "agent-tools"
   ],
   "type": "module",
   "main": "./dist/index.js",
@@ -29,14 +29,8 @@
       "default": "./dist/index.js"
     }
   },
-  "bin": {
-    "livevariant-server": "./dist/main.js"
-  },
   "dependencies": {
-    "@hono/node-server": "^2.0.12",
     "@livevariant/core": "0.0.1",
-    "@livevariant/tools": "0.0.1",
-    "hono": "^4.12.33",
     "zod": "^4.4.3"
   },
   "files": [
