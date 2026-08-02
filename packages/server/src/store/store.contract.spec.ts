@@ -161,7 +161,5 @@ if (redisUrl) {
   afterAll(() => redis.close());
   contract("RedisStore", () => redis);
 } else {
-  describe.skip("RedisStore (set REDIS_URL to run)", () => {
-    it("skipped", () => {});
-  });
+  it.skip("RedisStore contract (set REDIS_URL to run)", () => undefined);
 }

@@ -27,6 +27,12 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./redis": {
+      "@livevariant/source": "./src/store/redis.ts",
+      "types": "./dist/store/redis.d.ts",
+      "import": "./dist/store/redis.js",
+      "default": "./dist/store/redis.js"
     }
   },
   "bin": {

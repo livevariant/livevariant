@@ -15,8 +15,18 @@ export {
   type ChooseRequest,
   type RewardRequest
 } from "./api-schemas.js";
+// RedisStore is intentionally NOT exported here: it drags the Node-only
+// redis client into every consumer, which breaks Workers bundling. It
+// lives at the "@livevariant/server/redis" subpath instead.
 export { MemoryStore } from "./store/memory.js";
-export { RedisStore } from "./store/redis.js";
+export {
+  arrayToCounts,
+  blobToLinearState,
+  countsToArray,
+  derivedToArtifacts,
+  pullDelta,
+  successDelta
+} from "./store/snapshot.js";
 export {
   counterKey,
   GLOBAL_SCOPE,

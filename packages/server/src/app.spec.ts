@@ -108,6 +108,19 @@ describe("click and reward", () => {
     );
   });
 
+  it("rejects ?to= redirects to origins the config does not reference", async () => {
+    const { encoded } = await makeTest();
+    const res = await app.request(
+      `/c/${encoded}?id=u9&to=${encodeURIComponent("https://evil.example/phish")}`
+    );
+    expect(res.status).toBe(400);
+    // Same-origin as a configured arm URL is allowed.
+    const ok = await app.request(
+      `/c/${encoded}?id=u9&to=${encodeURIComponent("https://example.com/other-page")}`
+    );
+    expect(ok.headers.get("location")).toBe("https://example.com/other-page");
+  });
+
   it("rewards a click once per id in derived stats", async () => {
     const { encoded } = await makeTest();
     await app.request(`/s/${encoded}?id=u1`);

@@ -1,5 +1,4 @@
 import {
-  applyFirstReward,
   bucketKey,
   chooseArm,
   effectiveArmPriors,

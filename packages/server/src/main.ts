@@ -2,7 +2,7 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { MemoryStore } from "./store/memory.js";
-import { RedisStore } from "./store/redis.js";
+import { RedisStore } from "./store/redis.js"; // direct path: keeps redis out of the package's main export graph
 
 /**
  * Self-host entrypoint: `livevariant-server` with REDIS_URL (recommended)

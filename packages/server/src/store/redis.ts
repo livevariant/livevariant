@@ -55,7 +55,9 @@ export class RedisStore implements StateStore {
   static async connect(url: string): Promise<RedisStore> {
     const client = createClient({ url });
     await client.connect();
-    return new RedisStore(client);
+    // createClient's options overload narrows the generics; the store only
+    // uses the common command surface.
+    return new RedisStore(client as RedisClient);
   }
 
   async close(): Promise<void> {

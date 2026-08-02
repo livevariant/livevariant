@@ -65,7 +65,38 @@ export function createApp(options: AppOptions): Hono {
     }
   }
 
-  /** Stats secret from ?key= or Authorization: Bearer. */
+  /**
+   * Click ?to= must land on an origin the config itself names. The click
+   * URL is public (it lives in every email), so an unvalidated ?to= would
+   * turn the serving domain into an open redirector for phishing; origins
+   * are creator-controlled because the config is hash-bound.
+   */
+  function isAllowedRedirect(
+    config: DecodedConfig["config"],
+    to: string
+  ): boolean {
+    let origin: string;
+    try {
+      origin = new URL(to).origin;
+    } catch {
+      return false;
+    }
+    const candidates = [config.redirectUrl];
+    for (const arm of config.arms) {
+      candidates.push(arm.formats.url, arm.formats.image, arm.redirectUrl);
+    }
+    return candidates.some(url => {
+      try {
+        return url !== undefined && new URL(url).origin === origin;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  /** Stats secret from ?key= or Authorization: Bearer (preferred for API
+   * calls: query keys end up in access logs; the manage URL accepts ?key=
+   * as a deliberate usability tradeoff). */
   async function authorized(
     c: {
       req: {
@@ -133,8 +164,14 @@ export function createApp(options: AppOptions): Hono {
       await service.reward(params, identity.idHash, 1);
     }
     const arm = decoded.config.arms[armIndex];
-    const target =
-      c.req.query("to") ?? arm.redirectUrl ?? decoded.config.redirectUrl;
+    const to = c.req.query("to");
+    if (to !== undefined && !isAllowedRedirect(decoded.config, to)) {
+      return c.json(
+        { error: "?to= must be on an origin the test config references" },
+        400
+      );
+    }
+    const target = to ?? arm.redirectUrl ?? decoded.config.redirectUrl;
     if (!target) {
       return c.json(
         { error: "no redirect target: pass ?to= or set a redirectUrl" },
