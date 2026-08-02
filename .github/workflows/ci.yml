@@ -19,6 +19,15 @@ jobs:
   main:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      # The server package's store contract tests run against a real Redis
+      # when REDIS_URL is set (and are skipped when it isn't, locally).
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+    env:
+      REDIS_URL: redis://localhost:6379
     steps:
       # Full history so the gitleaks scan covers every commit. No
       # partial-clone filter: gitleaks reads every historical blob, and the

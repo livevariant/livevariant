@@ -29,6 +29,18 @@ export function normalizeCtx(
   return Object.keys(ctx).length > 0 ? ctx : null;
 }
 
+/**
+ * The one id-hashing formula, shared by server and SDK: hashing with the
+ * testId makes ids unlinkable across tests, and hashing client-side (SDK)
+ * means the raw id never reaches the server at all.
+ */
+export async function externalIdHash(
+  testId: string,
+  externalId: string
+): Promise<string> {
+  return sha256Hex(`${testId}|${externalId}`);
+}
+
 /** Opaque per-test bucket key; the only context form the store ever sees. */
 export async function bucketKey(
   testId: string,

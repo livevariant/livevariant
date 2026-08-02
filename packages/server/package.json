@@ -1,0 +1,46 @@
+{
+  "name": "@livevariant/server",
+  "version": "0.0.1",
+  "description": "LiveVariant serving backend: Hono app with redirect/click/pixel endpoints, JS-mode choose/reward API, secret-gated stats and recompute, behind a pluggable state store (memory, Redis; Cloudflare Durable Objects planned)",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/livevariant/livevariant.git",
+    "directory": "packages/server"
+  },
+  "keywords": [
+    "ab-testing",
+    "multi-armed-bandit",
+    "hono",
+    "redirect",
+    "experimentation"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@livevariant/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "livevariant-server": "./dist/main.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.12",
+    "@livevariant/core": "0.0.1",
+    "hono": "^4.12.33",
+    "redis": "^6.2.0",
+    "zod": "^4.4.3"
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ]
+}

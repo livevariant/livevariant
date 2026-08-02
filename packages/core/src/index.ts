@@ -40,6 +40,7 @@ export {
 export {
   FEATURE_DIM,
   bucketKey,
+  externalIdHash,
   featureIndices,
   normalizeCtx
 } from "./context.js";
