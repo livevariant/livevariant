@@ -22,7 +22,8 @@ const IDENTITY_EXCLUDED = [
   "alg",
   "priors",
   "priorStrengthCap",
-  "minBucketPulls"
+  "minBucketPulls",
+  "decorateRedirects"
 ] as const;
 
 /** Encoded configs beyond this length get a warning (URL ergonomics). */

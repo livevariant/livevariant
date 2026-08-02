@@ -30,6 +30,9 @@ function rec(
     featIdx: [0],
     rewardTotal: 0,
     firstSeen: Date.now(),
+    alg: "ts",
+    armCount: 3,
+    dim: 16,
     ...extra
   };
 }

@@ -40,8 +40,11 @@ export const chooseRequestSchema = z.object({
     .optional()
 });
 
+// Deliberately minimal: the assignment record carries its own serving
+// snapshot, so rewards need no algorithm parameters. This is also what
+// keeps the redirect handoff token small (_lvt + _lvid suffice).
 export const rewardRequestSchema = z.object({
-  ...servingFields,
+  testId: hex64,
   idHash: hex64,
   amount: z.number().positive().max(1_000_000).default(1)
 });

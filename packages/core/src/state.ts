@@ -32,6 +32,14 @@ export interface AssignmentRecord {
   rewardTotal: number;
   /** ms epoch; also the replay order for recompute. */
   firstSeen: number;
+  /**
+   * Serving snapshot: how this assignment was made. Makes /reward
+   * self-sufficient ({testId, idHash, amount} only): the derived-state
+   * update reads these instead of requiring the caller to echo them.
+   */
+  alg: "ts" | "bucketed" | "linear";
+  armCount: number;
+  dim: number;
 }
 
 export type DerivedState =

@@ -87,6 +87,11 @@ export const testConfigSchema = z
     rewardEvents: z.array(z.string().min(1)).optional(),
     /** Bucketed alg: bucket pulls needed before leaving global fallback. */
     minBucketPulls: z.number().int().positive().default(100),
+    /**
+     * Append _lvt/_lvid/_lvvar to redirect destinations so an SDK on the
+     * destination site can adopt the assignment (identity handoff).
+     */
+    decorateRedirects: z.boolean().default(true),
     /** sha256 hex of the creator-held stats secret. */
     statsKeyHash: z.string().regex(/^[0-9a-f]{64}$/)
   })

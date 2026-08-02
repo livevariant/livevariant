@@ -55,7 +55,10 @@ function rec(armIndex: number): AssignmentRecord {
     ctxKey: null,
     featIdx: [0],
     rewardTotal: 0,
-    firstSeen: Date.now()
+    firstSeen: Date.now(),
+    alg: "ts",
+    armCount: 3,
+    dim: 16
   };
 }
 

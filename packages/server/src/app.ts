@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import {
   capArmPriors,
   decodeConfig,
+  decorateUrl,
   externalIdHash,
   mulberry32,
   randomSeed,
@@ -154,7 +155,17 @@ export function createApp(options: AppOptions): Hono {
         400
       );
     }
-    return c.redirect(target, 302);
+    // Identity handoff: decorate page destinations (not image assets) so
+    // an SDK on the destination site can adopt this assignment.
+    const decorated =
+      decoded.config.decorateRedirects && identity.idHash && arm.formats.url
+        ? decorateUrl(target, {
+            testId: decoded.testId,
+            idHash: identity.idHash,
+            armIndex
+          })
+        : target;
+    return c.redirect(decorated, 302);
   });
 
   // Click: rewards (id'd traffic) and redirects onward.
@@ -174,7 +185,7 @@ export function createApp(options: AppOptions): Hono {
     // A click implies a serve, so assign (sticky or fresh) before rewarding.
     const { armIndex } = await service.assign(params, identity);
     if (identity.idHash) {
-      await service.reward(params, identity.idHash, 1);
+      await service.reward(decoded.testId, identity.idHash, 1);
     }
     const arm = decoded.config.arms[armIndex];
     const to = c.req.query("to");
@@ -191,7 +202,15 @@ export function createApp(options: AppOptions): Hono {
         400
       );
     }
-    return c.redirect(target, 302);
+    const decorated =
+      decoded.config.decorateRedirects && identity.idHash
+        ? decorateUrl(target, {
+            testId: decoded.testId,
+            idHash: identity.idHash,
+            armIndex
+          })
+        : target;
+    return c.redirect(decorated, 302);
   });
 
   // No-JS conversion pixel for thank-you pages.
@@ -202,9 +221,8 @@ export function createApp(options: AppOptions): Hono {
       const externalId = c.req.query("id");
       const amount = Number(c.req.query("amount") ?? "1");
       if (externalId && Number.isFinite(amount) && amount > 0) {
-        const params = await paramsFromConfig(decoded);
         await service.reward(
-          params,
+          decoded.testId,
           await externalIdHash(decoded.testId, externalId),
           amount
         );
@@ -264,14 +282,7 @@ export function createApp(options: AppOptions): Hono {
       return c.json({ error: body.error.issues }, 400);
     }
     const r = body.data;
-    const params: ServingParams = {
-      testId: r.testId,
-      armCount: r.armCount,
-      alg: r.alg,
-      dim: r.dim ?? 16,
-      minBucketPulls: r.minBucketPulls ?? 100
-    };
-    const result = await service.reward(params, r.idHash, r.amount);
+    const result = await service.reward(r.testId, r.idHash, r.amount);
     return c.json({ rewarded: result !== null, first: result?.first ?? false });
   });
 

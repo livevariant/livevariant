@@ -27,7 +27,10 @@ function randomEvents(count: number, seed: number): AssignmentRecord[] {
       ctxKey: ctx ? JSON.stringify(ctx) : null,
       featIdx: featureIndices(ctx),
       rewardTotal: rng() < 0.3 ? 1 + Math.floor(rng() * 3) : 0,
-      firstSeen: 1_700_000_000_000 + i
+      firstSeen: 1_700_000_000_000 + i,
+      alg: "ts",
+      armCount: 3,
+      dim: 16
     });
   }
   return events;

@@ -14,6 +14,7 @@ import {
 } from "@livevariant/core";
 import { resolveExternalId } from "./identity.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
+import { captureHandoff, getHandoff } from "./handoff.js";
 
 export { gaClientId, resolveExternalId } from "./identity.js";
 export {
@@ -23,6 +24,17 @@ export {
   watchDataLayer,
   type GaWatcher
 } from "./ga.js";
+export {
+  captureHandoff,
+  getHandoff,
+  listHandoffs,
+  type StoredHandoff
+} from "./handoff.js";
+export {
+  autoTrack,
+  type AutoTrackOptions,
+  type AutoTracker
+} from "./auto-track.js";
 
 /**
  * LiveVariant browser SDK. Privacy contract: the raw external id and raw
@@ -88,13 +100,22 @@ export async function createTest(
       : config;
   const testId = await computeTestId(resolved);
 
-  const externalId = resolveExternalId({
-    explicit: options.externalId,
-    cookieString: win.document.cookie,
-    locationSearch: win.location.search,
-    storage
-  });
-  const idHash = await externalIdHash(testId, externalId);
+  // Redirect handoff first: if this visitor arrived through /s or /c,
+  // the server-side assignment (and its idHash) is authoritative.
+  captureHandoff(win, storage);
+  const handoff = getHandoff(storage, testId);
+
+  const idHash = handoff
+    ? handoff.idHash
+    : await externalIdHash(
+        testId,
+        resolveExternalId({
+          explicit: options.externalId,
+          cookieString: win.document.cookie,
+          locationSearch: win.location.search,
+          storage
+        })
+      );
 
   const ctx = normalizeCtx(resolved, options.context ?? null);
   const ctxKey = ctx ? await bucketKey(testId, ctx) : null;
@@ -104,6 +125,10 @@ export async function createTest(
   const arm = resolved.arms[armIndex] ?? resolved.arms[0];
 
   async function resolveAssignment(): Promise<number> {
+    if (handoff) {
+      // The server already assigned this visitor during the redirect.
+      return handoff.armIndex;
+    }
     const cacheKey = `lv:a:${testId}`;
     if (storage) {
       const raw = storage.getItem(cacheKey);
@@ -151,17 +176,12 @@ export async function createTest(
   }
 
   async function trackConversion(amount = 1): Promise<void> {
+    // Minimal by design: the server's assignment record carries its own
+    // serving snapshot.
     const response = await fetchImpl(`${options.serverUrl}/reward`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        testId,
-        armCount: resolved.arms.length,
-        alg: resolved.alg ?? "ts",
-        dim: FEATURE_DIM,
-        idHash,
-        amount
-      })
+      body: JSON.stringify({ testId, idHash, amount })
     });
     if (!response.ok) {
       throw new Error(`reward failed: ${response.status}`);

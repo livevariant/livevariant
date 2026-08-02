@@ -54,10 +54,27 @@ async function stats(encoded: string): Promise<any> {
 }
 
 describe("redirect serving", () => {
-  it("302s to an arm url", async () => {
-    const { encoded } = await makeTest();
+  it("302s to an arm url with handoff decoration for id'd traffic", async () => {
+    const { encoded, testId } = await makeTest();
     const res = await app.request(`/s/${encoded}?id=user1`);
     expect(res.status).toBe(302);
+    const location = new URL(res.headers.get("location")!);
+    expect(location.origin + location.pathname).toMatch(
+      /^https:\/\/example\.com\/(a|b)$/
+    );
+    expect(location.searchParams.get("_lvt")).toBe(testId);
+    expect(location.searchParams.get("_lvid")).toMatch(/^[0-9a-f]{64}$/);
+    expect(["0", "1"]).toContain(location.searchParams.get("_lvvar"));
+  });
+
+  it("leaves anonymous and opted-out redirects undecorated", async () => {
+    const { encoded } = await makeTest();
+    const anon = await app.request(`/s/${encoded}`);
+    expect(anon.headers.get("location")).toMatch(
+      /^https:\/\/example\.com\/(a|b)$/
+    );
+    const optedOut = await makeTest({ decorateRedirects: false });
+    const res = await app.request(`/s/${optedOut.encoded}?id=user1`);
     expect(res.headers.get("location")).toMatch(
       /^https:\/\/example\.com\/(a|b)$/
     );
@@ -100,10 +117,17 @@ describe("click and reward", () => {
     const explicit = await app.request(
       `/c/${encoded}?id=u1&to=${encodeURIComponent("https://example.com/custom")}`
     );
-    expect(explicit.headers.get("location")).toBe("https://example.com/custom");
+    const explicitUrl = new URL(explicit.headers.get("location")!);
+    expect(explicitUrl.origin + explicitUrl.pathname).toBe(
+      "https://example.com/custom"
+    );
+    // Click redirects carry the handoff too, so on-site conversions after
+    // a click attribute correctly.
+    expect(explicitUrl.searchParams.get("_lvid")).toMatch(/^[0-9a-f]{64}$/);
 
     const fallback = await app.request(`/c/${encoded}?id=u1`);
-    expect(fallback.headers.get("location")).toBe(
+    const fallbackUrl = new URL(fallback.headers.get("location")!);
+    expect(fallbackUrl.origin + fallbackUrl.pathname).toBe(
       armIndex === 0
         ? "https://example.com/thanks-a" // arm-level override
         : "https://example.com/thanks" // config-level fallback
@@ -120,7 +144,9 @@ describe("click and reward", () => {
     const ok = await app.request(
       `/c/${encoded}?id=u9&to=${encodeURIComponent("https://example.com/other-page")}`
     );
-    expect(ok.headers.get("location")).toBe("https://example.com/other-page");
+    expect(ok.headers.get("location")).toMatch(
+      /^https:\/\/example\.com\/other-page\?_lvt=/
+    );
   });
 
   it("rewards a click once per id in derived stats", async () => {
@@ -139,6 +165,29 @@ describe("click and reward", () => {
       0
     );
     expect(rewardTotal).toBe(2); // both clicks accumulate on the record
+  });
+});
+
+describe("handoff (email -> landing page -> SDK reward flow)", () => {
+  it("rewards via the idHash handed off in the redirect URL", async () => {
+    const { encoded, testId } = await makeTest();
+    // Serve: recipient r1 is redirected with _lvid decoration.
+    const serve = await app.request(`/s/${encoded}?id=r1`);
+    const idHash = new URL(serve.headers.get("location")!).searchParams.get(
+      "_lvid"
+    )!;
+    // The SDK on the destination site later rewards with ONLY the token
+    // contents: no algorithm params, no config.
+    const reward = await app.request("/reward", {
+      method: "POST",
+      body: JSON.stringify({ testId, idHash, amount: 5 }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(await reward.json()).toEqual({ rewarded: true, first: true });
+    const s = await stats(encoded);
+    expect(s.arms.reduce((sum: number, a: any) => sum + a.rewardTotal, 0)).toBe(
+      5
+    );
   });
 });
 

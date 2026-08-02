@@ -80,3 +80,10 @@ export {
   recommendAlgorithm,
   type AlgorithmRecommendation
 } from "./recommend.js";
+export {
+  HANDOFF_PARAMS,
+  decorateUrl,
+  parseHandoff,
+  stripHandoffParams,
+  type Handoff
+} from "./handoff.js";

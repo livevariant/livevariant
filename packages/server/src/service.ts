@@ -134,7 +134,11 @@ export class TestService {
       ctxKey: identity.ctxKey,
       featIdx: identity.featIdx,
       rewardTotal: 0,
-      firstSeen: Date.now()
+      firstSeen: Date.now(),
+      // Serving snapshot: lets /reward run from the record alone.
+      alg: params.alg,
+      armCount: params.armCount,
+      dim: params.dim
     };
     const result = await this.store.putAssignmentIfAbsent(
       params.testId,
@@ -150,18 +154,35 @@ export class TestService {
     return { armIndex, created: true };
   }
 
-  /** Accumulates reward; only the first per assignment touches the cache. */
+  /**
+   * Accumulates reward; only the first per assignment touches the cache.
+   * Needs no serving params: the assignment record carries its own
+   * serving snapshot, so callers (SDK, pixel, handoff rewards) send just
+   * testId + idHash + amount.
+   */
   async reward(
-    params: ServingParams,
+    testId: string,
     idHash: string,
     amount: number
   ): Promise<{ armIndex: number; first: boolean } | null> {
-    const result = await this.store.addReward(params.testId, idHash, amount);
+    const result = await this.store.addReward(testId, idHash, amount);
     if (!result) {
       return null;
     }
-    if (result.first) {
-      await this.recordFirstReward(params, result.rec);
+    // Records written before the serving-snapshot fields existed can't
+    // update the cache here; a recompute reconciles them.
+    if (result.first && result.rec.alg !== undefined) {
+      const rec = result.rec;
+      await this.recordFirstReward(
+        {
+          testId,
+          armCount: rec.armCount,
+          alg: rec.alg,
+          dim: rec.dim,
+          minBucketPulls: 0 // unused on the reward path
+        },
+        rec
+      );
     }
     return { armIndex: result.rec.armIndex, first: result.first };
   }
