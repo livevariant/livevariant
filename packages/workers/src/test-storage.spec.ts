@@ -21,6 +21,15 @@ function mockStorage(): StorageLike {
     async delete(key) {
       return map.delete(key);
     },
+    async deleteMany(keys) {
+      let deleted = 0;
+      for (const key of keys) {
+        if (map.delete(key)) {
+          deleted++;
+        }
+      }
+      return deleted;
+    },
     async list<T>({
       prefix,
       startAfter,

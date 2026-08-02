@@ -19,6 +19,7 @@ export class TestStateDO extends DurableObject {
     get: key => this.ctx.storage.get(key),
     put: (key, value) => this.ctx.storage.put(key, value),
     delete: key => this.ctx.storage.delete(key),
+    deleteMany: keys => this.ctx.storage.delete(keys),
     list: async options => this.ctx.storage.list(options)
   });
 
@@ -143,9 +144,18 @@ class DurableObjectStore implements StateStore {
   }
 }
 
+// One app per env (i.e. per isolate in practice): route registration and
+// middleware chains are not free, and the binding object is stable across
+// requests, so rebuilding the app each request is pure waste.
+const apps = new WeakMap<Env, ReturnType<typeof createApp>>();
+
 export default {
   fetch(request: Request, env: Env): Response | Promise<Response> {
-    const app = createApp({ store: new DurableObjectStore(env.TEST_STATE) });
+    let app = apps.get(env);
+    if (!app) {
+      app = createApp({ store: new DurableObjectStore(env.TEST_STATE) });
+      apps.set(env, app);
+    }
     return app.fetch(request);
   }
 };

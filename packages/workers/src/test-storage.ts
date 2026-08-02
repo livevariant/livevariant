@@ -11,6 +11,8 @@ export interface StorageLike {
   get<T>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
   delete(key: string): Promise<boolean>;
+  /** Batch form: one round-trip for many keys (DO storage supports this). */
+  deleteMany(keys: string[]): Promise<number>;
   list<T>(options: {
     prefix: string;
     startAfter?: string;
@@ -118,8 +120,10 @@ export class TestStorage {
     const stale = await this.storage.list<number[]>({
       prefix: COUNTER_PREFIX
     });
-    for (const key of stale.keys()) {
-      await this.storage.delete(key);
+    if (stale.size > 0) {
+      // Single round-trip: a test with many context buckets would
+      // otherwise pay one await per stale scope.
+      await this.storage.deleteMany([...stale.keys()]);
     }
     for (const [scope, values] of counters) {
       await this.storage.put(COUNTER_PREFIX + scope, values);
