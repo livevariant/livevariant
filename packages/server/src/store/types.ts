@@ -30,6 +30,25 @@ export interface TestPolicy {
   excludedWindows?: Array<{ since: number; until: number }>;
 }
 
+/**
+ * Merges a policy patch, ignoring keys the caller left undefined. A plain
+ * spread would set them to undefined and silently drop exclusions the
+ * creator had already made: POST /exclude with only `windows` would wipe
+ * every quarantined source.
+ */
+export function mergePolicy(
+  current: TestPolicy,
+  patch: TestPolicy
+): TestPolicy {
+  const merged: TestPolicy = { ...current };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) {
+      (merged as Record<string, unknown>)[key] = value;
+    }
+  }
+  return merged;
+}
+
 export interface StateStore {
   // ------------------------------------------------ events (source of truth)
 

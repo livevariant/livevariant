@@ -6,6 +6,7 @@ import {
   decorateUrl,
   externalIdHash,
   mulberry32,
+  rateLimitBucket,
   sourceHash,
   randomSeed,
   verifyStatsSecret,
@@ -100,11 +101,9 @@ export function createApp(options: AppOptions): Hono {
     if (rateLimit <= 0 || !service.noteRequest) {
       return false;
     }
-    const ip = clientIp(c);
-    const bucket = await sourceHash(testId, ip, Date.now());
-    if (!bucket) {
-      return false;
-    }
+    // rateLimitBucket always yields a bucket (unidentified callers share
+    // one), so omitting address headers cannot dodge the limiter.
+    const bucket = await rateLimitBucket(testId, clientIp(c), Date.now());
     const { count } = await service.noteRequest(testId, bucket);
     return count > rateLimit;
   }

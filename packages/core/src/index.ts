@@ -76,7 +76,13 @@ export {
   type StateInit
 } from "./state.js";
 export { buildTestUrls, type TestUrls } from "./urls.js";
-export { ipPrefix, sourceHash, utcDay } from "./source.js";
+export {
+  UNKNOWN_SOURCE,
+  ipPrefix,
+  rateLimitBucket,
+  sourceHash,
+  utcDay
+} from "./source.js";
 export {
   DEFAULT_CAP_POLICY,
   capContributions,

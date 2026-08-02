@@ -28,6 +28,7 @@ export {
 } from "./store/snapshot.js";
 export {
   counterKey,
+  mergePolicy,
   GLOBAL_SCOPE,
   linearKey,
   type StateStore,

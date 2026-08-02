@@ -8,6 +8,7 @@ import {
 } from "./types.js";
 import { derivedToArtifacts } from "./snapshot.js";
 import { pruneWindows } from "../rate-window.js";
+import { mergePolicy } from "./types.js";
 
 /** In-process store for tests and single-node development. */
 export class MemoryStore implements StateStore {
@@ -18,6 +19,7 @@ export class MemoryStore implements StateStore {
 
   private policies = new Map<string, TestPolicy>();
   private sources = new Map<string, Map<string, number>>();
+  private sourceTotals = new Map<string, number>();
 
   async pinShape(
     testId: string,
@@ -37,7 +39,7 @@ export class MemoryStore implements StateStore {
   }
 
   async updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy> {
-    const merged = { ...(this.policies.get(testId) ?? {}), ...patch };
+    const merged = mergePolicy(this.policies.get(testId) ?? {}, patch);
     this.policies.set(testId, merged);
     return merged;
   }
@@ -73,10 +75,10 @@ export class MemoryStore implements StateStore {
     }
     const sourceCount = (perSource.get(srcHash) ?? 0) + 1;
     perSource.set(srcHash, sourceCount);
-    let totalCount = 0;
-    for (const count of perSource.values()) {
-      totalCount += count;
-    }
+    // Running total: summing the map on every write would be O(sources)
+    // per assignment on the serving path.
+    const totalCount = (this.sourceTotals.get(testId) ?? 0) + 1;
+    this.sourceTotals.set(testId, totalCount);
     return { sourceCount, totalCount };
   }
 

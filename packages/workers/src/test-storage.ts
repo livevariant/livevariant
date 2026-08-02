@@ -1,5 +1,5 @@
 import type { AssignmentRecord } from "@livevariant/core";
-import { pruneWindows } from "@livevariant/server";
+import { mergePolicy, pruneWindows } from "@livevariant/server";
 
 /**
  * The per-test state logic that runs INSIDE the Durable Object, written
@@ -131,7 +131,7 @@ export class TestStorage {
   }
 
   async updatePolicy(patch: TestPolicy): Promise<TestPolicy> {
-    const merged = { ...(await this.getPolicy()), ...patch };
+    const merged = mergePolicy(await this.getPolicy(), patch);
     await this.storage.put(POLICY_KEY, merged);
     return merged;
   }

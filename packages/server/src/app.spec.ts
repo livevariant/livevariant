@@ -543,6 +543,58 @@ describe("robust aggregation", () => {
     expect(after.excluded.bySource).toBe(4);
   });
 
+  it("keeps existing exclusions when a patch omits them", async () => {
+    const { encoded, testId } = await makeTest();
+    for (let i = 0; i < 3; i++) {
+      await choose(testId, hex(`x${i}`), "203.0.113.5");
+    }
+    const before = await stats(encoded);
+    const source = Object.keys(before.perSource)[0];
+
+    const exclude = async (body: unknown) =>
+      app.request(`/exclude/${encoded}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${SECRET}`
+        }
+      });
+
+    await exclude({ sources: [source] });
+    // A later patch that only sets windows must not wipe the source
+    // exclusion a spread of undefined would have dropped.
+    const res = await exclude({ windows: [{ since: 0, until: 1 }] });
+    const { policy } = await res.json();
+    expect(policy.excludedSources).toEqual([source]);
+    expect((await stats(encoded)).excluded.bySource).toBe(3);
+  });
+
+  it("rate limits callers that send no address headers", async () => {
+    const limited = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(2),
+      rateLimitPerMinute: 3
+    });
+    const { testId } = await makeTest();
+    let lastStatus = 200;
+    for (let i = 0; i < 6; i++) {
+      const res = await limited.request("/choose", {
+        method: "POST",
+        body: JSON.stringify({
+          testId,
+          armCount: 2,
+          alg: "ts",
+          idHash: hex(`noip${i}`)
+        }),
+        // No cf-connecting-ip and no x-forwarded-for at all.
+        headers: { "content-type": "application/json" }
+      });
+      lastStatus = res.status;
+    }
+    expect(lastStatus).toBe(429);
+  });
+
   it("requires the stats secret to quarantine", async () => {
     const { encoded } = await makeTest();
     const res = await app.request(`/exclude/${encoded}`, {
