@@ -1,0 +1,210 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useParams } from "react-router";
+import { Check, Copy, RefreshCw } from "lucide-react";
+import { buildTestUrls } from "@livevariant/core";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { loadTests } from "@/lib/tests-store";
+
+interface ArmStats {
+  name?: string;
+  pulls: number;
+  conversions: number;
+  rewardTotal: number;
+  conversionRate: number | null;
+}
+
+interface Stats {
+  alg: string;
+  totalAssignments: number;
+  arms: ArmStats[];
+  buckets: Record<string, unknown>;
+}
+
+function CopyField({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="space-y-1">
+      <div className="text-sm font-medium">{label}</div>
+      <div className="flex items-center gap-2">
+        <code className="flex-1 truncate rounded bg-muted px-2 py-1.5 text-xs">
+          {value}
+        </code>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label={`Copy ${label}`}
+          onClick={() => {
+            void navigator.clipboard.writeText(value);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+        >
+          {copied ? <Check /> : <Copy />}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function TestDetail() {
+  const { testId } = useParams<{ testId: string }>();
+  const test = useMemo(
+    () => loadTests().find(t => t.testId === testId),
+    [testId]
+  );
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!test) {
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${test.serverUrl}/stats/${test.encoded}`, {
+        headers: { authorization: `Bearer ${test.statsSecret}` }
+      });
+      if (!res.ok) {
+        throw new Error(`stats request failed (${res.status})`);
+      }
+      setStats((await res.json()) as Stats);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [test]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  if (!test) {
+    return (
+      <div className="space-y-4 text-center">
+        <p className="text-muted-foreground">
+          This test isn't saved in this browser.
+        </p>
+        <Link to="/tests">
+          <Button variant="outline">Back to my tests</Button>
+        </Link>
+      </div>
+    );
+  }
+
+  const urls = buildTestUrls(test.serverUrl, test.encoded, test.statsSecret);
+  const snippet = `import { createTest } from "@livevariant/sdk";
+
+const test = await createTest("${test.encoded.slice(0, 24)}…", {
+  serverUrl: "${test.serverUrl}"
+});
+element.textContent = test.variant.text;`;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3">
+        <h1 className="text-2xl font-semibold">{test.name}</h1>
+        {stats && <Badge variant="secondary">{stats.alg}</Badge>}
+        <Button
+          className="ml-auto"
+          variant="outline"
+          size="sm"
+          disabled={loading}
+          onClick={() => void refresh()}
+        >
+          <RefreshCw className={loading ? "animate-spin" : ""} /> Refresh
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Results</CardTitle>
+          <CardDescription>
+            {stats
+              ? `${stats.totalAssignments} assignments · ${Object.keys(stats.buckets).length} context buckets`
+              : error
+                ? `Could not load stats: ${error}`
+                : "loading…"}
+          </CardDescription>
+        </CardHeader>
+        {stats && (
+          <CardContent>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-muted-foreground">
+                  <th className="py-2 font-medium">Variant</th>
+                  <th className="py-2 font-medium">Pulls</th>
+                  <th className="py-2 font-medium">Conversions</th>
+                  <th className="py-2 font-medium">Rate</th>
+                  <th className="py-2 font-medium">Reward</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.arms.map((arm, i) => (
+                  <tr key={i} className="border-b last:border-0">
+                    <td className="py-2">{arm.name ?? `arm ${i}`}</td>
+                    <td className="py-2">{arm.pulls}</td>
+                    <td className="py-2">{arm.conversions}</td>
+                    <td className="py-2">
+                      {arm.conversionRate === null
+                        ? "–"
+                        : `${(arm.conversionRate * 100).toFixed(1)}%`}
+                    </td>
+                    <td className="py-2">{arm.rewardTotal}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </CardContent>
+        )}
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>URLs</CardTitle>
+          <CardDescription>
+            Serve goes in your email or link; the pixel goes on the thank-you
+            page. The manage URL contains your stats secret in its #fragment:
+            share it only with people who may see results.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <CopyField
+            label="Serve"
+            value={`${urls.serve}?id={{recipient_id}}`}
+          />
+          <CopyField
+            label="Click"
+            value={`${urls.click}?id={{recipient_id}}`}
+          />
+          <CopyField
+            label="Pixel"
+            value={`${urls.pixel}?id={{recipient_id}}`}
+          />
+          <CopyField label="Manage (keep private)" value={urls.manage} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>SDK snippet</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
+            <code>{snippet}</code>
+          </pre>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

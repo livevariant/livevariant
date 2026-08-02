@@ -1,0 +1,28 @@
+{
+  "name": "@livevariant/web",
+  "version": "0.0.1",
+  "description": "livevariant.com: product website and account-free admin (test builder, stats) served as static assets by the Worker",
+  "license": "AGPL-3.0",
+  "private": true,
+  "type": "module",
+  "nx": {
+    "includedScripts": []
+  },
+  "dependencies": {
+    "@livevariant/core": "0.0.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.28.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router": "^8.3.0",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "tailwindcss": "^4.3.3"
+  }
+}
