@@ -111,6 +111,32 @@ describe("TestStorage", () => {
     expect((await ts.getBlob())?.version).toBe(1);
   });
 
+  it("pins a policy and enforces the live source cap in memory", async () => {
+    const ts = new TestStorage(mockStorage());
+    expect(await ts.getPolicy()).toEqual({});
+    const merged = await ts.updatePolicy({ excludedSources: ["bad"] });
+    expect(merged.excludedSources).toEqual(["bad"]);
+    expect((await ts.getPolicy()).excludedSources).toEqual(["bad"]);
+
+    // Source tallies are per-object memory, not storage: no hot-path cost.
+    const first = await ts.noteSource("src-a");
+    expect(first).toEqual({ sourceCount: 1, totalCount: 1 });
+    await ts.noteSource("src-b");
+    const third = await ts.noteSource("src-a");
+    expect(third).toEqual({ sourceCount: 2, totalCount: 3 });
+  });
+
+  it("counts requests in a fixed window for rate limiting", async () => {
+    const ts = new TestStorage(mockStorage());
+    const t0 = 1_700_000_000_000;
+    expect((await ts.noteRequest("ip-a", t0)).count).toBe(1);
+    expect((await ts.noteRequest("ip-a", t0 + 1_000)).count).toBe(2);
+    // A different source has its own window.
+    expect((await ts.noteRequest("ip-b", t0 + 1_000)).count).toBe(1);
+    // Past the window, the count restarts.
+    expect((await ts.noteRequest("ip-a", t0 + 61_000)).count).toBe(1);
+  });
+
   it("replaces derived state and wipes stale scopes", async () => {
     const ts = new TestStorage(mockStorage());
     await ts.incrCounters("stale", [9, 9]);

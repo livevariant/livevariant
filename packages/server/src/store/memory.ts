@@ -3,6 +3,7 @@ import {
   counterKey,
   linearKey,
   type StateStore,
+  type TestPolicy,
   type TestShape
 } from "./types.js";
 import { derivedToArtifacts } from "./snapshot.js";
@@ -13,6 +14,9 @@ export class MemoryStore implements StateStore {
   private counters = new Map<string, number[]>();
   private blobs = new Map<string, { data: string; version: number }>();
   private shapes = new Map<string, TestShape>();
+
+  private policies = new Map<string, TestPolicy>();
+  private sources = new Map<string, Map<string, number>>();
 
   async pinShape(
     testId: string,
@@ -25,6 +29,54 @@ export class MemoryStore implements StateStore {
     }
     this.shapes.set(testId, { ...shape });
     return shape;
+  }
+
+  async getPolicy(testId: string): Promise<TestPolicy> {
+    return this.policies.get(testId) ?? {};
+  }
+
+  async updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy> {
+    const merged = { ...(this.policies.get(testId) ?? {}), ...patch };
+    this.policies.set(testId, merged);
+    return merged;
+  }
+
+  private requests = new Map<string, { count: number; windowStart: number }>();
+
+  async noteRequest(
+    testId: string,
+    bucket: string
+  ): Promise<{ count: number }> {
+    const key = `${testId}:${bucket}`;
+    const now = Date.now();
+    const entry = this.requests.get(key);
+    if (!entry || now - entry.windowStart >= 60_000) {
+      if (this.requests.size > 10_000) {
+        this.requests.clear(); // bounded; the window is a minute anyway
+      }
+      this.requests.set(key, { count: 1, windowStart: now });
+      return { count: 1 };
+    }
+    entry.count += 1;
+    return { count: entry.count };
+  }
+
+  async noteSource(
+    testId: string,
+    srcHash: string
+  ): Promise<{ sourceCount: number; totalCount: number }> {
+    let perSource = this.sources.get(testId);
+    if (!perSource) {
+      perSource = new Map();
+      this.sources.set(testId, perSource);
+    }
+    const sourceCount = (perSource.get(srcHash) ?? 0) + 1;
+    perSource.set(srcHash, sourceCount);
+    let totalCount = 0;
+    for (const count of perSource.values()) {
+      totalCount += count;
+    }
+    return { sourceCount, totalCount };
   }
 
   async getAssignment(

@@ -46,6 +46,7 @@ the repository roadmap.
 | `POST /reward`         | JS mode: `{testId, idHash, amount}`                         |
 | `GET /stats/:cfg`      | Creator-only stats (Bearer stats secret)                    |
 | `POST /recompute/:cfg` | Creator-only: rebuild derived state from the event log      |
+| `POST /exclude/:cfg`   | Creator-only: quarantine traffic sources or time windows    |
 | `GET /manage/:cfg`     | Creator dashboard shell (secret travels in the `#fragment`) |
 
 Serve and click redirects append `_lvt`/`_lvid`/`_lvvar` so the SDK on the
@@ -65,9 +66,28 @@ consequences worth stating plainly.
 - **JS-mode serving is unauthenticated.** `/choose` and `/reward` take a
   public `testId`, so the server pins each test's shape (arm count,
   algorithm, dimension) on first sight and rejects callers that disagree,
-  and `LV_RATE_LIMIT_PER_MINUTE` (default 120/IP) bounds stuffing. A
-  determined attacker who knows a testId can still add same-shape
-  assignments; treat public test stats accordingly.
+  and `LV_RATE_LIMIT_PER_MINUTE` (default 120 per source per minute)
+  bounds stuffing.
+
+  Rather than authenticate every visitor, results are made **robust** to a
+  minority of adversarial records: each assignment carries an opaque,
+  per-test, daily-rotating hash of the writer's address prefix (/24 or
+  /48; the address itself is never stored), and no single source may
+  contribute more than `max(50, 5%)` of a test's records. Excess records
+  stay in the log but are excluded from the model and the reported
+  numbers, and `/stats` reports the exclusion tally plus a per-source
+  breakdown so you see the judgment instead of trusting it blindly.
+
+  Because derived state is a pure function of the log, the policy is
+  **retroactive**: `POST /exclude/:cfg` (stats secret) quarantines a
+  source or time window and recomputes, so a test attacked yesterday is
+  cleaned up today.
+
+  Honest caveats: a creator holding the stats secret could brute-force a
+  /24 back out of a source hash for their own traffic, and an attacker
+  distributed across many address ranges can still nudge a test. Carrier
+  NAT means many genuine visitors can share one prefix, which is why the
+  cap is a generous share with a floor rather than a tight quota.
 
 ## Development
 

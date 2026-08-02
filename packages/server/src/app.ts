@@ -6,6 +6,7 @@ import {
   decorateUrl,
   externalIdHash,
   mulberry32,
+  sourceHash,
   randomSeed,
   verifyStatsSecret,
   type DecodedConfig,
@@ -13,6 +14,7 @@ import {
 } from "@livevariant/core";
 import {
   chooseRequestSchema,
+  excludeRequestSchema,
   rewardRequestSchema,
   MAX_REWARD_AMOUNT
 } from "./api-schemas.js";
@@ -109,36 +111,42 @@ export function createApp(options: AppOptions): Hono {
   app.use("/reward", openCors);
   app.use("/stats/*", openCors);
   app.use("/recompute/*", openCors);
+  app.use("/exclude/*", openCors);
 
   /**
-   * Fixed-window per-IP limiter for the unauthenticated write endpoints.
-   * Every request there spins up a Durable Object, so this bounds both
-   * cost amplification and how fast a single source can stuff a test's
-   * assignment log.
+   * Per-IP-prefix limiter for the unauthenticated write endpoints, counted
+   * by the backend rather than in this isolate: on Workers every isolate
+   * would otherwise keep its own tally and the effective global limit
+   * would be a large multiple of what it claims. The test's Durable
+   * Object is a single instance, so counting there is exact and, since
+   * every write already reaches it, nearly free.
    */
   const rateLimit = options.rateLimitPerMinute ?? 0;
-  const hits = new Map<string, { count: number; windowStart: number }>();
-  function rateLimited(c: {
-    req: { header(name: string): string | undefined };
-  }): boolean {
-    if (rateLimit <= 0) {
+  async function rateLimited(
+    c: { req: { header(name: string): string | undefined } },
+    testId: string
+  ): Promise<boolean> {
+    if (rateLimit <= 0 || !service.noteRequest) {
       return false;
     }
-    const ip =
+    const ip = clientIp(c);
+    const bucket = await sourceHash(testId, ip, Date.now());
+    if (!bucket) {
+      return false;
+    }
+    const { count } = await service.noteRequest(testId, bucket);
+    return count > rateLimit;
+  }
+
+  /** Client address, as Cloudflare (or a proxy) reports it. */
+  function clientIp(c: {
+    req: { header(name: string): string | undefined };
+  }): string | null {
+    return (
       c.req.header("cf-connecting-ip") ??
       c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
-      "unknown";
-    const now = Date.now();
-    const entry = hits.get(ip);
-    if (!entry || now - entry.windowStart >= 60_000) {
-      if (hits.size > 10_000) {
-        pruneWindows(hits, now);
-      }
-      hits.set(ip, { count: 1, windowStart: now });
-      return false;
-    }
-    entry.count += 1;
-    return entry.count > rateLimit;
+      null
+    );
   }
 
   /** Query params prefixed c_ carry context: ?c_device=mobile&c_country=nl */
@@ -227,6 +235,7 @@ export function createApp(options: AppOptions): Hono {
       param(name: string): string;
       query(): Record<string, string>;
       query(name: string): string | undefined;
+      header(name: string): string | undefined;
     };
   }): Promise<
     | { error: Response }
@@ -249,7 +258,8 @@ export function createApp(options: AppOptions): Hono {
     const identity = await resolveIdentity(
       decoded,
       externalId ? await externalIdHash(decoded.testId, externalId) : null,
-      ctxFromQuery(c.req.query())
+      ctxFromQuery(c.req.query()),
+      await sourceHash(decoded.testId, clientIp(c), Date.now())
     );
     return { decoded, params, identity };
   }
@@ -377,10 +387,11 @@ export function createApp(options: AppOptions): Hono {
 
   // No-JS conversion pixel for thank-you pages.
   app.get("/px/:cfg", async c => {
-    const result = rateLimited(c)
-      ? ({ error: new Response(null, { status: 429 }) } as const)
-      : await decodeOr404(c.req.param("cfg"));
-    if (!("error" in result)) {
+    const result = await decodeOr404(c.req.param("cfg"));
+    if (
+      !("error" in result) &&
+      !(await rateLimited(c, result.decoded.testId))
+    ) {
       const { decoded } = result;
       const externalId = c.req.query("id");
       const amount = Number(c.req.query("amount") ?? "1");
@@ -409,9 +420,6 @@ export function createApp(options: AppOptions): Hono {
 
   // JS-mode choose: content-free request, arm index response.
   app.post("/choose", async c => {
-    if (rateLimited(c)) {
-      return c.json({ error: "rate limit exceeded" }, 429);
-    }
     const body = chooseRequestSchema.safeParse(
       await c.req.json().catch(() => null)
     );
@@ -422,6 +430,9 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const r = body.data;
+    if (await rateLimited(c, r.testId)) {
+      return c.json({ error: "rate limit exceeded" }, 429);
+    }
     // The caller supplies both the priors and their cap, so the cap can't
     // be trusted to bound them: clamp to the server's own ceiling, which
     // is what keeps a hostile prior from pinning an arm (linear priors are
@@ -457,15 +468,13 @@ export function createApp(options: AppOptions): Hono {
     const { armIndex } = await service.assign(params, {
       idHash: r.idHash ?? null,
       ctxKey: r.ctxKey ?? null,
-      featIdx: r.featIdx ?? [0]
+      featIdx: r.featIdx ?? [0],
+      srcHash: await sourceHash(r.testId, clientIp(c), Date.now())
     });
     return c.json({ armIndex });
   });
 
   app.post("/reward", async c => {
-    if (rateLimited(c)) {
-      return c.json({ error: "rate limit exceeded" }, 429);
-    }
     const body = rewardRequestSchema.safeParse(
       await c.req.json().catch(() => null)
     );
@@ -476,6 +485,9 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const r = body.data;
+    if (await rateLimited(c, r.testId)) {
+      return c.json({ error: "rate limit exceeded" }, 429);
+    }
     const result = await service.reward(r.testId, r.idHash, r.amount);
     return c.json({ rewarded: result !== null, first: result?.first ?? false });
   });
@@ -511,6 +523,38 @@ export function createApp(options: AppOptions): Hono {
     const params = await paramsFromConfig(decoded);
     const events = await service.recompute(params);
     return c.json({ ok: true, events });
+  });
+
+  /**
+   * Creator quarantine: exclude traffic sources or time windows, then
+   * recompute so the exclusion applies to history, not just new traffic.
+   * Source hashes come from the perSource breakdown in /stats.
+   */
+  app.post("/exclude/:cfg", async c => {
+    const result = await decodeOr404(c.req.param("cfg"));
+    if ("error" in result) {
+      return result.error;
+    }
+    const { decoded } = result;
+    if (!(await authorized(c, decoded))) {
+      return c.json({ error: "stats secret required" }, 401);
+    }
+    const body = excludeRequestSchema.safeParse(
+      await c.req.json().catch(() => null)
+    );
+    if (!body.success) {
+      return c.json(
+        { error: "invalid request", details: body.error.issues },
+        400
+      );
+    }
+    const policy = await service.updatePolicy(decoded.testId, {
+      excludedSources: body.data.sources,
+      excludedWindows: body.data.windows
+    });
+    const params = await paramsFromConfig(decoded);
+    const events = await service.recompute(params);
+    return c.json({ ok: true, events, policy });
   });
 
   // Unauthenticated static shell: exposes nothing beyond the (public)

@@ -33,6 +33,12 @@ export interface AssignmentRecord {
   /** ms epoch; also the replay order for recompute. */
   firstSeen: number;
   /**
+   * Opaque, per-test, daily-rotating hash of the traffic source's address
+   * prefix (see source.ts). Never an address, never cross-test. Used only
+   * to bound how much one source can move a test (see robust.ts).
+   */
+  srcHash?: string | null;
+  /**
    * Serving snapshot: how this assignment was made. Makes /reward
    * self-sufficient ({testId, idHash, amount} only): the derived-state
    * update reads these instead of requiring the caller to echo them.

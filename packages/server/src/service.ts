@@ -1,6 +1,8 @@
 import {
   bucketKey,
+  capContributions,
   chooseArm,
+  DEFAULT_CAP_POLICY,
   effectiveArmPriors,
   effectiveBucketPriors,
   effectiveLinearPriors,
@@ -10,11 +12,13 @@ import {
   newDerivedState,
   normalizeCtx,
   recomputeState,
+  sourceWithinCap,
   FEATURE_DIM,
   type ArmPrior,
   type AssignmentRecord,
   type DecodedConfig,
   type DerivedState,
+  type CapPolicy,
   type LinearPrior,
   type Rng
 } from "@livevariant/core";
@@ -28,7 +32,8 @@ import {
   counterKey,
   GLOBAL_SCOPE,
   linearKey,
-  type StateStore
+  type StateStore,
+  type TestPolicy
 } from "./store/types.js";
 
 /**
@@ -70,23 +75,36 @@ export interface RequestIdentity {
   idHash: string | null;
   ctxKey: string | null;
   featIdx: number[];
+  /** Opaque source bucket for robust aggregation; null when unknown. */
+  srcHash?: string | null;
 }
 
 /** Resolves raw request context into the opaque forms used everywhere else. */
 export async function resolveIdentity(
   decoded: DecodedConfig,
   externalIdHashed: string | null,
-  rawCtx: Record<string, string> | null
+  rawCtx: Record<string, string> | null,
+  srcHash: string | null = null
 ): Promise<RequestIdentity> {
   const ctx = normalizeCtx(decoded.config, rawCtx);
   return {
     idHash: externalIdHashed,
     ctxKey: ctx ? await bucketKey(decoded.testId, ctx) : null,
-    featIdx: featureIndices(ctx)
+    featIdx: featureIndices(ctx),
+    srcHash
   };
 }
 
 const CAS_RETRIES = 5;
+
+/** The creator's quarantine list, in the shape core's capper expects. */
+function capPolicyFrom(policy: TestPolicy): CapPolicy {
+  return {
+    ...DEFAULT_CAP_POLICY,
+    excludedSources: policy.excludedSources,
+    excludedWindows: policy.excludedWindows
+  };
+}
 
 /**
  * The whole-operation surface the HTTP layer talks to. TestService is the
@@ -107,6 +125,10 @@ export interface TestBackend {
   ): Promise<{ armIndex: number; first: boolean } | null>;
   recompute(params: ServingParams): Promise<number>;
   stats(params: ServingParams, armNames?: string[]): Promise<TestStats>;
+  /** Creator-authorized quarantine; returns the merged policy. */
+  updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy>;
+  /** Windowed request count for rate limiting; optional per backend. */
+  noteRequest?(testId: string, bucket: string): Promise<{ count: number }>;
 }
 
 export class TestService implements TestBackend {
@@ -115,17 +137,26 @@ export class TestService implements TestBackend {
     private rng: Rng
   ) {}
 
+  /** Stats from the event log, with the cap policy applied. */
+  async stats(params: ServingParams, armNames?: string[]): Promise<TestStats> {
+    return buildStats(this.store, params, armNames);
+  }
+
+  /** Creator-authorized quarantine; the caller checks the stats secret. */
+  updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy> {
+    return this.store.updatePolicy(testId, patch);
+  }
+
+  noteRequest(testId: string, bucket: string): Promise<{ count: number }> {
+    return this.store.noteRequest(testId, bucket);
+  }
+
   /**
    * Pins the shape a test is first served with. JS-mode callers declare
    * armCount/alg/dim themselves and testIds are public, so a later caller
    * claiming a different shape is rejected here rather than writing
    * records the real config cannot represent.
    */
-  /** Stats straight from the event log (the source of truth). */
-  stats(params: ServingParams, armNames?: string[]): Promise<TestStats> {
-    return buildStats(this.store, params, armNames);
-  }
-
   async checkShape(
     params: ServingParams,
     authoritative = false
@@ -191,7 +222,8 @@ export class TestService implements TestBackend {
       // Serving snapshot: lets /reward run from the record alone.
       alg: params.alg,
       armCount: params.armCount,
-      dim: params.dim
+      dim: params.dim,
+      srcHash: identity.srcHash ?? null
     };
     const result = await this.store.putAssignmentIfAbsent(
       params.testId,
@@ -203,7 +235,12 @@ export class TestService implements TestBackend {
       // winner's request already updated the cache.
       return { armIndex: result.rec.armIndex, created: false };
     }
-    await this.recordPull(params, rec);
+    // Live cap: the record is always logged, but a source flooding this
+    // test stops moving the model immediately instead of waiting for a
+    // manual recompute. capContributions remains the authority.
+    if (await this.withinLiveCap(params.testId, identity.srcHash)) {
+      await this.recordPull(params, rec);
+    }
     return { armIndex, created: true };
   }
 
@@ -234,12 +271,31 @@ export class TestService implements TestBackend {
     return { armIndex: result.rec.armIndex, first: result.first };
   }
 
+  /** True while this source is still under its share of the test. */
+  private async withinLiveCap(
+    testId: string,
+    srcHash: string | null | undefined
+  ): Promise<boolean> {
+    if (!srcHash) {
+      return true; // sourceless traffic is never capped as one bucket
+    }
+    const { sourceCount, totalCount } = await this.store.noteSource(
+      testId,
+      srcHash
+    );
+    return sourceWithinCap(sourceCount, totalCount);
+  }
+
   /** Rebuilds the derived cache from the event log (alg changes, repair). */
   async recompute(params: ServingParams): Promise<number> {
-    const events: AssignmentRecord[] = [];
+    const all: AssignmentRecord[] = [];
     for await (const rec of this.store.scanAssignments(params.testId)) {
-      events.push(rec);
+      all.push(rec);
     }
+    const policy = await this.store.getPolicy(params.testId);
+    // The policy is applied here, so it heals history: a test attacked
+    // before a source was quarantined is cleaned up by recomputing.
+    const events = capContributions(all, capPolicyFrom(policy)).applied;
     const state = recomputeState(events, {
       alg: params.alg,
       armCount: params.armCount,
@@ -247,7 +303,7 @@ export class TestService implements TestBackend {
       linearPriors: params.linearPriors
     });
     await this.store.replaceDerived(params.testId, state);
-    return events.length;
+    return all.length;
   }
 
   private async loadState(
@@ -397,6 +453,18 @@ export interface TestStats {
   arms: ArmStats[];
   buckets: Record<string, { pulls: number[]; conversions: number[] }>;
   linearTheta?: number[][];
+  /**
+   * Records the cap policy removed, so the creator sees the judgment
+   * rather than silently trusting the numbers above.
+   */
+  excluded: {
+    total: number;
+    byCap: number;
+    bySource: number;
+    byWindow: number;
+  };
+  /** Assignment count per opaque source bucket, before capping. */
+  perSource: Record<string, number>;
 }
 
 /** Aggregates stats straight from the event log (the source of truth). */
@@ -405,6 +473,14 @@ export async function buildStats(
   params: ServingParams,
   armNames?: string[]
 ): Promise<TestStats> {
+  const all: AssignmentRecord[] = [];
+  for await (const rec of store.scanAssignments(params.testId)) {
+    all.push(rec);
+  }
+  const capped = capContributions(
+    all,
+    capPolicyFrom(await store.getPolicy(params.testId))
+  );
   const arms: ArmStats[] = Array.from({ length: params.armCount }, (_, i) => ({
     name: armNames?.[i],
     pulls: 0,
@@ -414,7 +490,7 @@ export async function buildStats(
   }));
   const buckets: TestStats["buckets"] = {};
   let total = 0;
-  for await (const rec of store.scanAssignments(params.testId)) {
+  for (const rec of capped.applied) {
     total++;
     const arm = arms[rec.armIndex];
     if (!arm) {
@@ -445,7 +521,9 @@ export async function buildStats(
     alg: params.alg,
     totalAssignments: total,
     arms,
-    buckets
+    buckets,
+    excluded: capped.excluded,
+    perSource: capped.perSource
   };
   if (params.alg === "linear") {
     const blob = await store.getBlob(linearKey(params.testId));

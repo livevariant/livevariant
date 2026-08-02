@@ -17,6 +17,19 @@ export interface TestShape {
   dim: number;
 }
 
+/**
+ * Per-test server-side policy: the state that is NOT derived from the
+ * config. Bootstrapped on first sight and mutable only by the creator
+ * (stats secret). Every trust control lands here.
+ */
+export interface TestPolicy {
+  shape?: TestShape;
+  /** Source hashes the creator quarantined. */
+  excludedSources?: string[];
+  /** Time windows (ms epoch) the creator quarantined. */
+  excludedWindows?: Array<{ since: number; until: number }>;
+}
+
 export interface StateStore {
   // ------------------------------------------------ events (source of truth)
 
@@ -31,6 +44,29 @@ export interface StateStore {
     shape: TestShape,
     authoritative: boolean
   ): Promise<TestShape>;
+
+  /** The test's policy record (empty object when nothing is set). */
+  getPolicy(testId: string): Promise<TestPolicy>;
+
+  /** Merges a patch into the policy; creator-authorized callers only. */
+  updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy>;
+
+  /**
+   * Records one more contribution from a source and reports whether it is
+   * still within the cap. Live-path guard only: the authority on what
+   * counts is capContributions at recompute/stats time.
+   */
+  noteSource(
+    testId: string,
+    srcHash: string
+  ): Promise<{ sourceCount: number; totalCount: number }>;
+
+  /**
+   * Count of requests from `bucket` in the current minute. Kept by the
+   * store because on Workers a per-isolate counter would let the real
+   * global rate exceed the configured limit many times over.
+   */
+  noteRequest(testId: string, bucket: string): Promise<{ count: number }>;
 
   getAssignment(
     testId: string,

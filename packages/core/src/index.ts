@@ -76,6 +76,14 @@ export {
   type StateInit
 } from "./state.js";
 export { buildTestUrls, type TestUrls } from "./urls.js";
+export { ipPrefix, sourceHash, utcDay } from "./source.js";
+export {
+  DEFAULT_CAP_POLICY,
+  capContributions,
+  sourceWithinCap,
+  type CapPolicy,
+  type CapResult
+} from "./robust.js";
 export {
   recommendAlgorithm,
   type AlgorithmRecommendation

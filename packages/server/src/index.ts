@@ -30,5 +30,6 @@ export {
   GLOBAL_SCOPE,
   linearKey,
   type StateStore,
+  type TestPolicy,
   type TestShape
 } from "./store/types.js";

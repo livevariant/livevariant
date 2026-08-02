@@ -17,6 +17,15 @@ import { MemoryStore } from "./store/memory.js";
 
 const SECRET = "test-stats-secret";
 
+/** Deterministic 64-hex id for tests that mint many visitors. */
+function hex(seed: string): string {
+  let h = 0;
+  for (const ch of seed) {
+    h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0").repeat(8);
+}
+
 async function makeTest(overrides: Partial<TestConfigInput> = {}) {
   const config: TestConfigInput = {
     v: 1,
@@ -459,6 +468,113 @@ describe("destination allowlist", () => {
       headers: { authorization: `Bearer ${SECRET}` }
     });
     expect((await s.json()).totalAssignments).toBe(0);
+describe("robust aggregation", () => {
+  /** One /choose from a given client address. */
+  async function choose(testId: string, idHash: string, ip: string) {
+    return app.request("/choose", {
+      method: "POST",
+      body: JSON.stringify({ testId, armCount: 2, alg: "ts", idHash }),
+      headers: { "content-type": "application/json", "cf-connecting-ip": ip }
+    });
+  }
+
+  it("caps a single source flooding a test, without touching real traffic", async () => {
+    const { encoded, testId } = await makeTest();
+    // 60 genuine visitors spread across 30 address prefixes.
+    for (let i = 0; i < 60; i++) {
+      await choose(testId, hex(`real${i}`), `198.51.${i % 30}.7`);
+    }
+    // One source stuffs 300 invented visitors.
+    for (let i = 0; i < 300; i++) {
+      await choose(testId, hex(`fake${i}`), "203.0.113.9");
+    }
+    const s = await stats(encoded);
+    // The log keeps everything; the reported numbers do not.
+    expect(s.excluded.byCap).toBeGreaterThan(200);
+    const counted = s.arms.reduce((sum: number, a: any) => sum + a.pulls, 0);
+    expect(counted).toBeLessThan(150);
+    // Every genuine visitor still counts.
+    expect(counted).toBeGreaterThanOrEqual(60);
+  });
+
+  it("reports a per-source breakdown so the creator can see the flood", async () => {
+    const { encoded, testId } = await makeTest();
+    for (let i = 0; i < 5; i++) {
+      await choose(testId, hex(`a${i}`), "198.51.100.1");
+    }
+    await choose(testId, hex("b"), "203.0.113.1");
+    const s = await stats(encoded);
+    const counts = Object.values(s.perSource).sort(
+      (x: any, y: any) => y - x
+    ) as number[];
+    expect(counts).toEqual([5, 1]);
+  });
+
+  it("quarantines a source and heals history on recompute", async () => {
+    const { encoded, testId } = await makeTest();
+    for (let i = 0; i < 3; i++) {
+      await choose(testId, hex(`good${i}`), "198.51.100.5");
+    }
+    for (let i = 0; i < 4; i++) {
+      await choose(testId, hex(`bad${i}`), "203.0.113.5");
+    }
+    const before = await stats(encoded);
+    expect(before.totalAssignments).toBe(7);
+    const badSource = Object.entries(before.perSource).find(
+      ([, count]) => count === 4
+    )![0];
+
+    const res = await app.request(`/exclude/${encoded}`, {
+      method: "POST",
+      body: JSON.stringify({ sources: [badSource] }),
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${SECRET}`
+      }
+    });
+    expect(res.status).toBe(200);
+
+    const after = await stats(encoded);
+    expect(after.totalAssignments).toBe(3);
+    expect(after.excluded.bySource).toBe(4);
+  });
+
+  it("requires the stats secret to quarantine", async () => {
+    const { encoded } = await makeTest();
+    const res = await app.request(`/exclude/${encoded}`, {
+      method: "POST",
+      body: JSON.stringify({ sources: [] }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("rate limits a single source across the write endpoints", async () => {
+    const store = new MemoryStore();
+    const limited = createApp({
+      store,
+      rng: mulberry32(1),
+      rateLimitPerMinute: 5
+    });
+    const { testId } = await makeTest();
+    let lastStatus = 200;
+    for (let i = 0; i < 8; i++) {
+      const res = await limited.request("/choose", {
+        method: "POST",
+        body: JSON.stringify({
+          testId,
+          armCount: 2,
+          alg: "ts",
+          idHash: hex(`rl${i}`)
+        }),
+        headers: {
+          "content-type": "application/json",
+          "cf-connecting-ip": "203.0.113.77"
+        }
+      });
+      lastStatus = res.status;
+    }
+    expect(lastStatus).toBe(429);
   });
 });
 

@@ -95,3 +95,14 @@ export const rewardRequestSchema = z.object({
 
 export type ChooseRequest = z.infer<typeof chooseRequestSchema>;
 export type RewardRequest = z.infer<typeof rewardRequestSchema>;
+
+/** Creator quarantine payload for POST /exclude/:cfg. */
+export const excludeRequestSchema = z.object({
+  sources: z.array(hex64).max(1000).optional(),
+  windows: z
+    .array(z.object({ since: z.number().int(), until: z.number().int() }))
+    .max(100)
+    .optional()
+});
+
+export type ExcludeRequest = z.infer<typeof excludeRequestSchema>;

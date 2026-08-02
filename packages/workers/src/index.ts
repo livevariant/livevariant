@@ -13,6 +13,7 @@ import {
   type ServingParams,
   type StateStore,
   type TestBackend,
+  type TestPolicy,
   type TestShape
 } from "@livevariant/server";
 import { TestStorage } from "./test-storage.js";
@@ -45,6 +46,10 @@ export class TestStateDO extends DurableObject {
     return {
       pinShape: (_t, shape, authoritative) =>
         store.pinShape(shape, authoritative),
+      getPolicy: () => store.getPolicy(),
+      updatePolicy: (_t, patch) => store.updatePolicy(patch),
+      noteSource: (_t, srcHash) => store.noteSource(srcHash),
+      noteRequest: (_t, bucket) => store.noteRequest(bucket, Date.now()),
       getAssignment: (_t, idHash) => store.getAssignment(idHash),
       putAssignmentIfAbsent: (_t, idHash, rec) =>
         store.putAssignmentIfAbsent(idHash, rec),
@@ -113,6 +118,14 @@ export class TestStateDO extends DurableObject {
 
   stats(params: ServingParams, armNames?: string[]) {
     return this.service(params.testId).stats(params, armNames);
+  }
+
+  updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy> {
+    return this.service(testId).updatePolicy(testId, patch);
+  }
+
+  noteRequest(testId: string, bucket: string): Promise<{ count: number }> {
+    return this.service(testId).noteRequest(testId, bucket);
   }
 
   pinShape(shape: TestShape, authoritative: boolean): Promise<TestShape> {
@@ -213,6 +226,14 @@ class DurableObjectBackend implements TestBackend {
 
   stats(params: ServingParams, armNames?: string[]) {
     return this.stub(params.testId).stats(params, armNames);
+  }
+
+  updatePolicy(testId: string, patch: TestPolicy) {
+    return this.stub(testId).updatePolicy(testId, patch);
+  }
+
+  noteRequest(testId: string, bucket: string) {
+    return this.stub(testId).noteRequest(testId, bucket);
   }
 }
 
