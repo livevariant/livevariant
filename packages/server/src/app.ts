@@ -2,13 +2,19 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
   capArmPriors,
+  composeBucketKey,
   decodeConfig,
   decorateUrl,
+  deriveAutoCtx,
   externalIdHash,
+  isAssetFetch,
+  mergeFeatureIndices,
+  requestSignals,
   mulberry32,
   sourceHash,
   randomSeed,
   verifyStatsSecret,
+  type CloudflareGeo,
   type DecodedConfig,
   type Rng
 } from "@livevariant/core";
@@ -23,6 +29,7 @@ import {
   paramsFromConfig,
   resolveIdentity,
   TestService,
+  type RequestContext,
   type ServingParams,
   type TestBackend
 } from "./service.js";
@@ -81,6 +88,26 @@ export function createApp(options: AppOptions): Hono {
   app.use("/stats/*", openCors);
   app.use("/recompute/*", openCors);
   app.use("/exclude/*", openCors);
+
+  /**
+   * Everything the platform tells us about a request. On Workers the geo
+   * arrives on `request.cf`; elsewhere it is simply absent and only the
+   * header-derived signals (device, language) are available.
+   */
+  function requestContext(c: {
+    req: { raw: Request; header(name: string): string | undefined };
+  }): RequestContext {
+    const cf = (c.req.raw as Request & { cf?: CloudflareGeo }).cf ?? null;
+    return {
+      geo: cf,
+      userAgent: c.req.header("user-agent"),
+      acceptLanguage: c.req.header("accept-language"),
+      assetFetch: isAssetFetch({
+        accept: c.req.header("accept"),
+        secFetchDest: c.req.header("sec-fetch-dest")
+      })
+    };
+  }
 
   /** Client address, as Cloudflare (or a proxy) reports it. */
   function clientIp(c: {
@@ -176,6 +203,7 @@ export function createApp(options: AppOptions): Hono {
   /** Shared preamble for the two redirect handlers. */
   async function serveContext(c: {
     req: {
+      raw: Request;
       param(name: string): string;
       query(): Record<string, string>;
       query(name: string): string | undefined;
@@ -203,7 +231,8 @@ export function createApp(options: AppOptions): Hono {
       decoded,
       externalId ? await externalIdHash(decoded.testId, externalId) : null,
       ctxFromQuery(c.req.query()),
-      await sourceHash(decoded.testId, clientIp(c), Date.now())
+      await sourceHash(decoded.testId, clientIp(c), Date.now()),
+      requestContext(c)
     );
     return { decoded, params, identity };
   }
@@ -403,11 +432,19 @@ export function createApp(options: AppOptions): Hono {
         409
       );
     }
+    // JS mode sends a hash of its own context, so the server composes its
+    // derived dimensions on top of that hash rather than into the map.
+    // Redirect mode takes the same path (see resolveIdentity), which is
+    // what keeps one context in one bucket across both channels.
+    const request = requestContext(c);
+    const signals = request.assetFetch ? {} : requestSignals(request);
+    const autoCtx = deriveAutoCtx(r.autoDims, signals, r.autoCtx ?? null);
     const { armIndex } = await service.assign(params, {
       idHash: r.idHash ?? null,
-      ctxKey: r.ctxKey ?? null,
-      featIdx: r.featIdx ?? [0],
-      srcHash: await sourceHash(r.testId, clientIp(c), Date.now())
+      ctxKey: await composeBucketKey(r.testId, r.ctxKey ?? null, autoCtx),
+      featIdx: mergeFeatureIndices(r.featIdx ?? [0], autoCtx, r.dim ?? 16),
+      srcHash: await sourceHash(r.testId, clientIp(c), Date.now()),
+      signals
     });
     return c.json({ armIndex });
   });

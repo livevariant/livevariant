@@ -8,6 +8,7 @@ import {
   externalIdHash,
   featureIndices,
   normalizeCtx,
+  splitAutoDims,
   utf8ToBase64Url,
   FEATURE_DIM,
   type TestConfig,
@@ -140,8 +141,21 @@ export async function createTest(
       );
 
   const ctx = normalizeCtx(resolved, options.context ?? null);
-  const ctxKey = ctx ? await bucketKey(testId, ctx) : null;
-  const featIdx = featureIndices(ctx);
+  // Dimensions the config marks `from` are filled and hashed server-side,
+  // so they stay out of the key hashed here. Sending any value the page
+  // does know for them raw is the point: the server has to compose
+  // supplied and derived values identically or the same context would sit
+  // in a different bucket depending on whether it arrived via the SDK or
+  // via an email redirect.
+  const autoDims = resolved.ctx?.dims.filter(d => d.from);
+  const callerCtx = splitAutoDims(autoDims, ctx);
+  const autoCtx = Object.fromEntries(
+    (autoDims ?? [])
+      .map(d => [d.key, ctx?.[d.key]] as const)
+      .filter((entry): entry is readonly [string, string] => !!entry[1])
+  );
+  const ctxKey = callerCtx ? await bucketKey(testId, callerCtx) : null;
+  const featIdx = featureIndices(callerCtx);
   // Bucket priors must be resolved to bucket keys the same way the
   // redirect path does, or a bucketed test would silently lose its
   // warm-start priors when served through the SDK.
@@ -207,7 +221,9 @@ export async function createTest(
         linearPriors: resolved.priors?.linear,
         idHash,
         ctxKey: ctxKey ?? undefined,
-        featIdx
+        featIdx,
+        autoDims,
+        autoCtx: Object.keys(autoCtx).length > 0 ? autoCtx : undefined
       })
     });
     if (!response.ok) {

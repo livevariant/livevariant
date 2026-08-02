@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { TestConfig } from "@livevariant/core";
+import { bucketKey, computeTestId, type TestConfig } from "@livevariant/core";
 import { createTest, type CreateTestOptions } from "./index.js";
 import { gaClientId } from "./identity.js";
 import { eventNameOf, resetDataLayerInterception } from "./ga.js";
@@ -107,6 +107,50 @@ describe("assignment", () => {
     expect(server.chooseCalls[0].idHash).toMatch(/^[0-9a-f]{64}$/);
     expect(server.chooseCalls[0].ctxKey).toMatch(/^[0-9a-f]{64}$/);
     expect(server.chooseCalls[0].featIdx.length).toBeGreaterThan(1);
+    test.dispose();
+  });
+
+  it("forwards auto dimensions instead of hashing them into the key", async () => {
+    // A `from` dimension is filled server-side (only the server sees the
+    // request's geo), so it must stay out of the key hashed here. What
+    // goes on the wire is the public dimension spec, plus any value the
+    // page itself knows, which the server composes the same way it does
+    // for an email redirect.
+    const server = fakeServer();
+    const autoConfig: TestConfig = {
+      ...CONFIG,
+      ctx: {
+        dims: [{ key: "country", from: "country" }, { key: "persona" }]
+      }
+    } as TestConfig;
+    const test = await createTest(autoConfig, {
+      ...options(server),
+      externalId: "u-auto",
+      context: { country: "nl", persona: "power" }
+    });
+    const call = server.chooseCalls[0];
+    expect(call.autoDims).toEqual([{ key: "country", from: "country" }]);
+    expect(call.autoCtx).toEqual({ country: "nl" });
+    // The hashed key covers persona alone: country is composed on top of
+    // it by the server, for SDK and redirect traffic alike.
+    expect(call.ctxKey).toBe(
+      await bucketKey(await computeTestId(autoConfig), { persona: "power" })
+    );
+    test.dispose();
+  });
+
+  it("omits auto fields entirely for a config that declares none", async () => {
+    const server = fakeServer();
+    const ctxConfig: TestConfig = {
+      ...CONFIG,
+      ctx: { dims: [{ key: "persona" }] }
+    } as TestConfig;
+    const test = await createTest(ctxConfig, {
+      ...options(server),
+      context: { persona: "power" }
+    });
+    expect(server.chooseCalls[0].autoDims).toEqual([]);
+    expect(server.chooseCalls[0].autoCtx).toBeUndefined();
     test.dispose();
   });
 

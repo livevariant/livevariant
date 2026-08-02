@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Hono } from "hono";
 import {
+  bucketKey,
   encodeConfig,
+  featureIndices,
+  FEATURE_DIM,
   externalIdHash,
   hashStatsSecret,
   mulberry32,
@@ -640,5 +643,310 @@ describe("linear serving", () => {
     expect(s.totalAssignments).toBe(20);
     expect(s.linearTheta).toHaveLength(2);
     expect(s.linearTheta[0]).toHaveLength(16);
+  });
+});
+
+describe("auto-context from the platform", () => {
+  /**
+   * Cloudflare hands geo to the Worker on `request.cf`, which no fetch
+   * init can set, so tests attach it to the Request the way the runtime
+   * would.
+   */
+  function cfRequest(
+    path: string,
+    cf: Record<string, string> | null,
+    headers: Record<string, string> = {},
+    body?: unknown
+  ): Request {
+    const req = new Request(`http://localhost${path}`, {
+      headers: body
+        ? { ...headers, "content-type": "application/json" }
+        : headers,
+      method: body ? "POST" : "GET",
+      body: body ? JSON.stringify(body) : undefined
+    });
+    if (cf) {
+      Object.defineProperty(req, "cf", { value: cf });
+    }
+    return req;
+  }
+
+  const AUTO = {
+    ctx: { dims: [{ key: "country", from: "country" as const }] }
+  };
+
+  it("fills a declared dimension from geo the caller never sent", async () => {
+    // This is the whole point: an email redirect has no JavaScript and
+    // the sender usually does not know where the reader is.
+    const { encoded } = await makeTest(AUTO);
+    for (const [i, country] of ["NL", "NL", "DE"].entries()) {
+      const res = await app.request(
+        cfRequest(`/s/${encoded}?id=geo${i}`, { country })
+      );
+      expect(res.status).toBe(302);
+    }
+    const s = await stats(encoded);
+    expect(s.totalAssignments).toBe(3);
+    // Two countries, two buckets: the NL pair shares one.
+    expect(Object.keys(s.buckets)).toHaveLength(2);
+    expect(s.bySignal.country).toEqual({
+      nl: { pulls: 2, conversions: 0 },
+      de: { pulls: 1, conversions: 0 }
+    });
+  });
+
+  it("lets a caller-supplied value beat the derived one", async () => {
+    // The integrator knows their own users; an IP database is a guess.
+    const { encoded } = await makeTest(AUTO);
+    await app.request(cfRequest(`/s/${encoded}?id=a`, { country: "NL" }));
+    await app.request(
+      cfRequest(`/s/${encoded}?id=b&c_country=nl`, { country: "DE" })
+    );
+    const s = await stats(encoded);
+    // Both land in the "nl" bucket even though b's IP says Germany.
+    expect(Object.keys(s.buckets)).toHaveLength(1);
+    // The raw signal is still reported as observed, unmapped.
+    expect(s.bySignal.country.de.pulls).toBe(1);
+  });
+
+  it("records signals even when no dimension uses them", async () => {
+    // A plain non-contextual test still gets a legible breakdown, which
+    // is what makes the algorithm suggestion possible later.
+    const { encoded } = await makeTest();
+    await app.request(
+      cfRequest(
+        `/s/${encoded}?id=plain`,
+        { country: "NL", city: "Amsterdam" },
+        {
+          "user-agent": "Mozilla/5.0 (iPhone) AppleWebKit/605.1",
+          "accept-language": "nl-NL,nl;q=0.9"
+        }
+      )
+    );
+    const s = await stats(encoded);
+    expect(Object.keys(s.buckets)).toHaveLength(0);
+    expect(s.bySignal.country.nl.pulls).toBe(1);
+    expect(s.bySignal.city.amsterdam.pulls).toBe(1);
+    expect(s.bySignal.device.mobile.pulls).toBe(1);
+    expect(s.bySignal.language.nl.pulls).toBe(1);
+  });
+
+  it("ignores geo on a proxied image fetch", async () => {
+    // Gmail fetches email images from Google's own infrastructure, so
+    // this geo is a datacenter, not the reader. No context is better
+    // than confidently wrong context.
+    const { encoded } = await makeTest(AUTO);
+    await app.request(
+      cfRequest(
+        `/s/${encoded}?id=mailproxy`,
+        { country: "US", city: "Mountain View" },
+        { accept: "image/webp,image/*,*/*;q=0.8" }
+      )
+    );
+    const s = await stats(encoded);
+    expect(s.totalAssignments).toBe(1);
+    expect(s.bySignal).toEqual({});
+    expect(Object.keys(s.buckets)).toHaveLength(0);
+  });
+
+  it("works with no platform geo at all", async () => {
+    // Self-hosted on plain Node there is no `cf`; header-derived signals
+    // still work and a geo dimension simply stays unfilled.
+    const { encoded } = await makeTest(AUTO);
+    const res = await app.request(
+      cfRequest(`/s/${encoded}?id=nogeo`, null, {
+        "user-agent": "Mozilla/5.0 (Macintosh) Chrome/120"
+      })
+    );
+    expect(res.status).toBe(302);
+    const s = await stats(encoded);
+    expect(s.bySignal.device.mobile).toBeUndefined();
+    expect(s.bySignal.device.desktop.pulls).toBe(1);
+    expect(s.bySignal.country).toBeUndefined();
+  });
+
+  it("counts a conversion against the signal that produced it", async () => {
+    const { encoded } = await makeTest(AUTO);
+    await app.request(cfRequest(`/s/${encoded}?id=conv`, { country: "NL" }));
+    await app.request(`/px/${encoded}?id=conv`);
+    const s = await stats(encoded);
+    expect(s.bySignal.country.nl).toEqual({ pulls: 1, conversions: 1 });
+  });
+});
+
+describe("algorithm suggestion from observed traffic", () => {
+  it("says nothing while the chosen algorithm still fits", async () => {
+    const { encoded } = await makeTest();
+    await app.request(`/s/${encoded}?id=solo`);
+    const s = await stats(encoded);
+    expect(s.suggestion).toBeNull();
+  });
+
+  it("flags a plain test that is quietly receiving context", async () => {
+    // Declared dims lie: this test says `ts`, but context is arriving,
+    // so a contextual algorithm could serve a per-segment winner.
+    const { encoded } = await makeTest({
+      alg: "ts",
+      ctx: { dims: [{ key: "country", from: "country" }] }
+    });
+    for (const [i, country] of ["NL", "DE", "FR"].entries()) {
+      const req = new Request(`http://localhost/s/${encoded}?id=sug${i}`);
+      Object.defineProperty(req, "cf", { value: { country } });
+      await app.request(req);
+    }
+    const s = await stats(encoded);
+    expect(s.suggestion?.alg).toBe("linear");
+    expect(s.suggestion?.reasoning).toContain("3 buckets");
+  });
+
+  it("tells a starving bucketed test to generalize instead", async () => {
+    // City is the trap: it looks like one dimension and fragments into
+    // thousands of buckets that each fall back to the global model.
+    const { encoded } = await makeTest({
+      alg: "bucketed",
+      ctx: { dims: [{ key: "city", from: "city" }] }
+    });
+    for (let i = 0; i < 12; i++) {
+      const req = new Request(`http://localhost/s/${encoded}?id=city${i}`);
+      Object.defineProperty(req, "cf", { value: { city: `town${i}` } });
+      await app.request(req);
+    }
+    const s = await stats(encoded);
+    expect(s.suggestion?.alg).toBe("linear");
+    expect(s.suggestion?.reasoning).toContain("recompute");
+  });
+});
+
+describe("auto-context across serving channels", () => {
+  /**
+   * The invariant that makes `from` dimensions usable at all: one
+   * effective context is one bucket, whether it arrived through an email
+   * redirect (server derives it), through the SDK (server derives it on
+   * top of a client-hashed key), or was supplied outright. If these
+   * diverged, a campaign that emails people and then tracks them with the
+   * SDK on the landing page would learn each half of its own traffic
+   * separately.
+   */
+  function cfPost(body: unknown, cf: Record<string, string> | null): Request {
+    const req = new Request("http://localhost/choose", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (cf) {
+      Object.defineProperty(req, "cf", { value: cf });
+    }
+    return req;
+  }
+
+  function cfGet(path: string, cf: Record<string, string> | null): Request {
+    const req = new Request(`http://localhost${path}`);
+    if (cf) {
+      Object.defineProperty(req, "cf", { value: cf });
+    }
+    return req;
+  }
+
+  const DIMS = [
+    { key: "country", from: "country" as const },
+    { key: "persona" }
+  ];
+
+  /** The choose body the SDK builds for a given caller context. */
+  async function sdkBody(testId: string, idHash: string, persona: string) {
+    return {
+      testId,
+      armCount: 2,
+      alg: "bucketed" as const,
+      dim: FEATURE_DIM,
+      idHash,
+      ctxKey: await bucketKey(testId, { persona }),
+      featIdx: featureIndices({ persona }),
+      autoDims: [{ key: "country", from: "country" }]
+    };
+  }
+
+  it("puts an SDK visitor and a redirect visitor in one bucket", async () => {
+    const { encoded, testId } = await makeTest({
+      alg: "bucketed",
+      ctx: { dims: DIMS }
+    });
+    await app.request(
+      cfGet(`/s/${encoded}?id=viaEmail&c_persona=power`, { country: "NL" })
+    );
+    const res = await app.request(
+      cfPost(await sdkBody(testId, hex("viaSdk"), "power"), { country: "NL" })
+    );
+    expect(res.status).toBe(200);
+
+    const s = await stats(encoded);
+    expect(s.totalAssignments).toBe(2);
+    // One bucket, both visitors in it.
+    expect(Object.keys(s.buckets)).toHaveLength(1);
+    const bucket = Object.values(s.buckets)[0] as { pulls: number[] };
+    expect(bucket.pulls.reduce((a, b) => a + b, 0)).toBe(2);
+  });
+
+  it("matches a supplied value against a derived one across channels", async () => {
+    // The SDK knows this visitor is Dutch from the user's own profile;
+    // their IP says Germany. They still belong with the redirect visitor
+    // whose Dutch IP produced the same value.
+    const { encoded, testId } = await makeTest({
+      alg: "bucketed",
+      ctx: { dims: DIMS }
+    });
+    await app.request(
+      cfGet(`/s/${encoded}?id=derived&c_persona=power`, { country: "NL" })
+    );
+    await app.request(
+      cfPost(
+        {
+          ...(await sdkBody(testId, hex("supplied"), "power")),
+          autoCtx: { country: "nl" }
+        },
+        { country: "DE" }
+      )
+    );
+
+    const s = await stats(encoded);
+    expect(s.totalAssignments).toBe(2);
+    expect(Object.keys(s.buckets)).toHaveLength(1);
+  });
+
+  it("keeps genuinely different contexts apart", async () => {
+    const { encoded, testId } = await makeTest({
+      alg: "bucketed",
+      ctx: { dims: DIMS }
+    });
+    await app.request(
+      cfGet(`/s/${encoded}?id=nl&c_persona=power`, { country: "NL" })
+    );
+    await app.request(
+      cfPost(await sdkBody(testId, hex("de"), "power"), { country: "DE" })
+    );
+    await app.request(
+      cfPost(await sdkBody(testId, hex("casual"), "casual"), { country: "NL" })
+    );
+
+    const s = await stats(encoded);
+    expect(Object.keys(s.buckets)).toHaveLength(3);
+  });
+
+  it("ignores an SDK caller that declares no auto dimensions", async () => {
+    // An older SDK build predates `from` support. Its traffic must still
+    // be served, just without the derived dimension.
+    const { encoded, testId } = await makeTest({
+      alg: "bucketed",
+      ctx: { dims: DIMS }
+    });
+    const body = await sdkBody(testId, hex("oldSdk"), "power");
+    const res = await app.request(
+      cfPost({ ...body, autoDims: undefined }, { country: "NL" })
+    );
+    expect(res.status).toBe(200);
+    const s = await stats(encoded);
+    // Its own bucket: the persona key alone, uncomposed.
+    expect(Object.keys(s.buckets)).toHaveLength(1);
+    expect(s.bySignal.country.nl.pulls).toBe(1);
   });
 });

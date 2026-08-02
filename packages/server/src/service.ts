@@ -1,6 +1,11 @@
 import {
   bucketKey,
   applyExclusions,
+  composeBucketKey,
+  deriveAutoCtx,
+  mergeFeatureIndices,
+  recommendFromObserved,
+  requestSignals,
   chooseArm,
   effectiveArmPriors,
   effectiveBucketPriors,
@@ -10,13 +15,17 @@ import {
   linearReward,
   newDerivedState,
   normalizeCtx,
+  splitAutoDims,
   recomputeState,
   FEATURE_DIM,
   type ArmPrior,
   type AssignmentRecord,
   type DecodedConfig,
+  type AlgorithmRecommendation,
+  type CloudflareGeo,
   type DerivedState,
   type ExclusionPolicy,
+  type RequestSignals,
   type LinearPrior,
   type Rng
 } from "@livevariant/core";
@@ -75,6 +84,17 @@ export interface RequestIdentity {
   featIdx: number[];
   /** Opaque source bucket for the stats breakdown; null when unknown. */
   srcHash?: string | null;
+  /** Coarse server-derived signals, stored readable for stats. */
+  signals?: RequestSignals | null;
+}
+
+/** What the server can observe about a request, before any mapping. */
+export interface RequestContext {
+  geo?: CloudflareGeo | null;
+  userAgent?: string;
+  acceptLanguage?: string;
+  /** True for proxied asset fetches, where geo is the proxy's, not a person's. */
+  assetFetch?: boolean;
 }
 
 /** Resolves raw request context into the opaque forms used everywhere else. */
@@ -82,14 +102,27 @@ export async function resolveIdentity(
   decoded: DecodedConfig,
   externalIdHashed: string | null,
   rawCtx: Record<string, string> | null,
-  srcHash: string | null = null
+  srcHash: string | null = null,
+  request: RequestContext = {}
 ): Promise<RequestIdentity> {
   const ctx = normalizeCtx(decoded.config, rawCtx);
+  // An email image is fetched by the mail provider, not the reader, so
+  // its geo would be a datacenter. No context beats wrong context.
+  const signals = request.assetFetch ? {} : requestSignals(request);
+  const autoCtx = deriveAutoCtx(decoded.config.ctx?.dims, signals, ctx);
+  // Auto dimensions are composed on top of the caller's key even when the
+  // caller supplied them, so supplied and derived values of the same
+  // dimension share a bucket instead of splitting the test in half.
+  const callerCtx = splitAutoDims(decoded.config.ctx?.dims, ctx);
+  const callerKey = callerCtx
+    ? await bucketKey(decoded.testId, callerCtx)
+    : null;
   return {
     idHash: externalIdHashed,
-    ctxKey: ctx ? await bucketKey(decoded.testId, ctx) : null,
-    featIdx: featureIndices(ctx),
-    srcHash
+    ctxKey: await composeBucketKey(decoded.testId, callerKey, autoCtx),
+    featIdx: mergeFeatureIndices(featureIndices(callerCtx), autoCtx),
+    srcHash,
+    signals
   };
 }
 
@@ -214,7 +247,8 @@ export class TestService implements TestBackend {
       alg: params.alg,
       armCount: params.armCount,
       dim: params.dim,
-      srcHash: identity.srcHash ?? null
+      srcHash: identity.srcHash ?? null,
+      signals: identity.signals ?? null
     };
     const result = await this.store.putAssignmentIfAbsent(
       params.testId,
@@ -432,6 +466,23 @@ export interface TestStats {
   };
   /** Assignment count per opaque source bucket, before exclusions. */
   perSource: Record<string, number>;
+  /**
+   * Pulls and conversions per derived signal value, e.g.
+   * { country: { nl: {...}, de: {...} }, device: { mobile: {...} } }.
+   * Recorded for every signal, not only those a test uses as context, so
+   * a plain test still gets a legible breakdown.
+   */
+  bySignal: Record<
+    string,
+    Record<string, { pulls: number; conversions: number }>
+  >;
+  /**
+   * Advice based on what this test actually saw, not what it declared.
+   * Null when the current algorithm still fits. Acting on it is a config
+   * edit plus a recompute: `alg` is outside the identity hash, so the
+   * test keeps its id and its history.
+   */
+  suggestion: AlgorithmRecommendation | null;
 }
 
 /** Aggregates stats straight from the event log (the source of truth). */
@@ -456,6 +507,7 @@ export async function buildStats(
     conversionRate: null
   }));
   const buckets: TestStats["buckets"] = {};
+  const bySignal: TestStats["bySignal"] = {};
   let total = 0;
   for (const rec of kept.applied) {
     total++;
@@ -467,6 +519,14 @@ export async function buildStats(
     if (rec.rewardTotal > 0) {
       arm.conversions++;
       arm.rewardTotal += rec.rewardTotal;
+    }
+    for (const [signal, value] of Object.entries(rec.signals ?? {})) {
+      const perValue = (bySignal[signal] ??= {});
+      const entry = (perValue[value] ??= { pulls: 0, conversions: 0 });
+      entry.pulls++;
+      if (rec.rewardTotal > 0) {
+        entry.conversions++;
+      }
     }
     if (rec.ctxKey) {
       const bucket = (buckets[rec.ctxKey] ??= {
@@ -489,8 +549,15 @@ export async function buildStats(
     totalAssignments: total,
     arms,
     buckets,
+    bySignal,
     excluded: kept.excluded,
-    perSource: kept.perSource
+    perSource: kept.perSource,
+    suggestion: recommendFromObserved({
+      alg: params.alg,
+      bucketCount: Object.keys(buckets).length,
+      totalAssignments: total,
+      minBucketPulls: params.minBucketPulls
+    })
   };
   if (params.alg === "linear") {
     const blob = await store.getBlob(linearKey(params.testId));

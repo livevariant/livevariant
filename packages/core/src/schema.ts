@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AUTO_SIGNALS } from "./signals.js";
 
 /**
  * The test config IS the test: it travels base64url-encoded in serve URLs
@@ -35,10 +36,19 @@ const armSchema = z.object({
   redirectUrl: httpUrl.optional()
 });
 
-const ctxDimSchema = z.object({
+export const ctxDimSchema = z.object({
   key: z.string().min(1),
   /** Known values, if enumerable; omitted means free-form (hashed). */
-  values: z.array(z.string().min(1)).min(2).optional()
+  values: z.array(z.string().min(1)).min(2).optional(),
+  /**
+   * Fill this dimension from a signal the server derives, so the caller
+   * never has to pass it. This is what lets an email redirect be
+   * contextual: there is no JavaScript in an inbox, and the sender may
+   * not know the reader's country either. A caller-supplied `c_<key>`
+   * still wins, since you know your own users better than an IP
+   * database does.
+   */
+  from: z.enum(AUTO_SIGNALS).optional()
 });
 
 /**
@@ -138,5 +148,6 @@ export const testConfigSchema = z
 export type TestConfig = z.infer<typeof testConfigSchema>;
 export type TestConfigInput = z.input<typeof testConfigSchema>;
 export type Arm = TestConfig["arms"][number];
+export type CtxDim = z.infer<typeof ctxDimSchema>;
 export type ArmPrior = z.infer<typeof armPriorSchema>;
 export type Priors = z.infer<typeof priorsSchema>;

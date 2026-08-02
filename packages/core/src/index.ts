@@ -8,9 +8,11 @@ export {
   utf8ToBase64Url
 } from "./canonical.js";
 export {
+  ctxDimSchema,
   testConfigSchema,
   type Arm,
   type ArmPrior,
+  type CtxDim,
   type Priors,
   type TestConfig,
   type TestConfigInput
@@ -38,11 +40,26 @@ export {
   type Rng
 } from "./rng.js";
 export {
+  AUTO_SIGNALS,
+  SIGNAL_CARDINALITY,
+  deviceClass,
+  isAssetFetch,
+  primaryLanguage,
+  requestSignals,
+  type AutoSignal,
+  type CloudflareGeo,
+  type RequestSignals
+} from "./signals.js";
+export {
   FEATURE_DIM,
   bucketKey,
+  composeBucketKey,
+  deriveAutoCtx,
+  mergeFeatureIndices,
   externalIdHash,
   featureIndices,
-  normalizeCtx
+  normalizeCtx,
+  splitAutoDims
 } from "./context.js";
 export {
   capArmPriors,
@@ -90,6 +107,7 @@ export {
 } from "./exclusions.js";
 export {
   recommendAlgorithm,
+  recommendFromObserved,
   type AlgorithmRecommendation
 } from "./recommend.js";
 export {

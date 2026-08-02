@@ -111,6 +111,62 @@ Two things are not optional:
   prefetch links. Clicks and on-site conversions are the trustworthy
   signals; raw opens are not, which is true of every email tool.
 
+### Context the caller never has to send
+
+A context dimension can declare `from`, and the server fills it from the
+request itself:
+
+```jsonc
+{
+  "ctx": {
+    "dims": [
+      { "key": "country", "from": "country" },
+      { "key": "device", "from": "device" },
+      { "key": "persona" } // still supplied by you
+    ]
+  }
+}
+```
+
+Available signals: `country`, `continent`, `region`, `city`, `timezone`,
+`device`, `language`, `organization`. Geo comes from Cloudflare's
+`request.cf` and is simply absent on other hosts; `device` and `language`
+are derived from request headers and work anywhere.
+
+This is what makes an email redirect contextual: there is no JavaScript
+in an inbox, and the sender usually does not know the reader's country
+either. A value you supply yourself (`?c_country=nl`, or `context` in the
+SDK) always wins, because you know your own users better than an IP
+database does. A declared `values` list still applies, so a signal can
+never invent a bucket the config did not sanction.
+
+Two details worth knowing:
+
+- **One context is one bucket, on every channel.** A supplied value and a
+  derived one are composed identically, so a campaign that emails people
+  and then tracks them with the SDK on the landing page learns from all
+  of its traffic at once instead of splitting it in half.
+- **Proxied image fetches derive nothing.** Mail providers fetch email
+  images from their own infrastructure, so that geo is a datacenter, not
+  the reader. No context beats confidently wrong context.
+
+All signals are recorded on every assignment, not only the ones a test
+uses as context, so `/stats` returns a `bySignal` breakdown even for a
+plain non-contextual test.
+
+### Advice from what the test actually saw
+
+Declared dimensions lie. A free-form persona tag or a `city` dimension
+looks like one dimension and fragments into thousands of buckets that
+each starve and fall back to the global model. `/stats` therefore returns
+a `suggestion` computed from the observed bucket count and traffic, e.g.
+a `bucketed` test averaging too few pulls per bucket is told to switch to
+`linear`.
+
+Acting on it costs nothing: `alg` is excluded from the identity hash, so
+changing it keeps the same testId, and `POST /recompute` rebuilds the
+model from the full event log. No history is lost.
+
 ## Development
 
 Requires Node 24 (`nvm use`) and npm.

@@ -13,6 +13,7 @@ import { FEATURE_DIM } from "./context.js";
 import type { LinearPrior } from "./priors.js";
 import type { ArmPrior } from "./schema.js";
 import type { Rng } from "./rng.js";
+import type { RequestSignals } from "./signals.js";
 
 /**
  * Event-sourced state. The single source of truth is one AssignmentRecord
@@ -39,6 +40,14 @@ export interface AssignmentRecord {
    * doesn't belong (see exclusions.ts).
    */
   srcHash?: string | null;
+  /**
+   * Coarse signals the server derived for this request (country, device,
+   * and friends). Stored readable, unlike the caller's own context, so
+   * stats can say "nl / mobile" instead of an opaque bucket hash. These
+   * are recorded whether or not the test uses them as context, since
+   * they cost nothing and make a test's numbers legible after the fact.
+   */
+  signals?: RequestSignals | null;
   /**
    * Serving snapshot: how this assignment was made. Makes /reward
    * self-sufficient ({testId, idHash, amount} only): the derived-state

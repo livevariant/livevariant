@@ -1,9 +1,15 @@
 import { z } from "zod";
+import { ctxDimSchema } from "@livevariant/core";
 
 /**
  * JS-mode request bodies. Deliberately content-free: the SDK sends only
- * hashes, indices, and tuning numbers, never variant content, raw ids, or
- * raw context values.
+ * hashes, indices, and tuning numbers, never variant content or raw ids.
+ *
+ * The one exception is `autoCtx`, whose values are raw. Those dimensions
+ * are the coarse ones the server derives from the request itself anyway
+ * (country, device, language), and redirect mode has always taken them as
+ * plain `?c_country=` params, so this adds no exposure the product did
+ * not already have.
  */
 
 const hex64 = z.string().regex(/^[0-9a-f]{64}$/);
@@ -31,6 +37,17 @@ export const chooseRequestSchema = z
     ...servingFields,
     idHash: hex64.optional(),
     ctxKey: hex64.optional(),
+    /**
+     * The config's `from` dimensions, forwarded so the server can fill
+     * them the same way it does for redirects. JS mode never sends the
+     * config, and the server cannot read `ctx.dims` without it. Nothing
+     * here is a secret: it is public config, and a caller who lies about
+     * it only moves their own traffic to a different bucket, which is the
+     * same latitude they already have over `ctxKey`.
+     */
+    autoDims: z.array(ctxDimSchema).max(8).optional(),
+    /** Caller-supplied values for those dimensions, before signals. */
+    autoCtx: z.record(z.string().min(1), z.string().min(1).max(64)).optional(),
     // Bounds are re-checked against the request's own `dim` in superRefine:
     // an index >= dim reads past the model matrix and poisons it with NaN.
     featIdx: z.array(z.number().int().min(0).max(63)).max(16).optional(),
