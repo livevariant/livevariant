@@ -1,0 +1,39 @@
+{
+  "name": "@livevariant/core",
+  "version": "0.0.1",
+  "description": "Shared foundation of LiveVariant: URL-encoded test configs with hash identity, stats secrets, seeded RNG, Thompson-sampling bandits (plain, bucketed, linear) with LLM warm-start priors, and event-sourced state derivation",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/livevariant/livevariant.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "ab-testing",
+    "multi-armed-bandit",
+    "thompson-sampling",
+    "contextual-bandit",
+    "experimentation"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@livevariant/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ]
+}

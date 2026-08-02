@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: 8.28.0
+  # sha256 of gitleaks_8.28.0_linux_x64.tar.gz from the official release's
+  # checksums file; bump together with GITLEAKS_VERSION.
+  GITLEAKS_SHA256: a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # Full history so the gitleaks scan covers every commit. No
+      # partial-clone filter: gitleaks reads every historical blob, and the
+      # whole repo is only a few MiB.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: "npm"
+
+      # Secret scan over the full history. The version is pinned so the rule
+      # set is predictable instead of whatever happens to be latest.
+      - name: Scan history for secrets (gitleaks)
+        run: |
+          curl -sSfL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xz -C /usr/local/bin -f /tmp/gitleaks.tar.gz gitleaks
+          gitleaks version
+          gitleaks git . --no-banner --redact
+
+      - run: npm ci
+
+      # Browser-mode (vitest + playwright) tests for the SDK run in
+      # chromium; harmless while only node-environment packages exist.
+      - run: npx playwright install --with-deps chromium
+
+      - run: npx nx format:check --all
+
+      - run: npx nx run-many -t build test lint typecheck
