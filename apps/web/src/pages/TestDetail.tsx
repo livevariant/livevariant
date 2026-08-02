@@ -63,6 +63,7 @@ export function TestDetail() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [snippetCopied, setSnippetCopied] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!test) {
@@ -103,11 +104,13 @@ export function TestDetail() {
   }
 
   const urls = buildTestUrls(test.serverUrl, test.encoded, test.statsSecret);
+  // Full encoded config: the snippet must be copy-paste runnable.
   const snippet = `import { createTest } from "@livevariant/sdk";
 
-const test = await createTest("${test.encoded.slice(0, 24)}…", {
-  serverUrl: "${test.serverUrl}"
-});
+const test = await createTest(
+  "${test.encoded}",
+  { serverUrl: "${test.serverUrl}" }
+);
 element.textContent = test.variant.text;`;
 
   return (
@@ -196,8 +199,19 @@ element.textContent = test.variant.text;`;
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>SDK snippet</CardTitle>
+        <CardHeader className="flex-row items-center space-y-0">
+          <CardTitle className="flex-1">SDK snippet</CardTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void navigator.clipboard.writeText(snippet);
+              setSnippetCopied(true);
+              setTimeout(() => setSnippetCopied(false), 1500);
+            }}
+          >
+            {snippetCopied ? <Check /> : <Copy />} Copy
+          </Button>
         </CardHeader>
         <CardContent>
           <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">

@@ -197,7 +197,12 @@ export function Builder() {
               setArms(current => [
                 ...current,
                 {
-                  name: `variant-${String.fromCharCode(97 + current.length)}`,
+                  // a..z, then plain numbers past 26 variants.
+                  name: `variant-${
+                    current.length < 26
+                      ? String.fromCharCode(97 + current.length)
+                      : current.length + 1
+                  }`,
                   url: "",
                   text: ""
                 }
