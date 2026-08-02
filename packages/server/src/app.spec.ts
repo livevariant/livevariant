@@ -7,7 +7,8 @@ import {
   mulberry32,
   type TestConfigInput
 } from "@livevariant/core";
-import { createApp, pruneWindows } from "./app.js";
+import { createApp } from "./app.js";
+import { pruneWindows } from "./rate-window.js";
 import { MemoryStore } from "./store/memory.js";
 
 /**
@@ -468,6 +469,9 @@ describe("destination allowlist", () => {
       headers: { authorization: `Bearer ${SECRET}` }
     });
     expect((await s.json()).totalAssignments).toBe(0);
+  });
+});
+
 describe("robust aggregation", () => {
   /** One /choose from a given client address. */
   async function choose(testId: string, idHash: string, ip: string) {

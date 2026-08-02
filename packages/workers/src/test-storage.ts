@@ -1,4 +1,5 @@
 import type { AssignmentRecord } from "@livevariant/core";
+import { pruneWindows } from "@livevariant/server";
 
 /**
  * The per-test state logic that runs INSIDE the Durable Object, written
@@ -168,7 +169,7 @@ export class TestStorage {
     const entry = this.requestWindows.get(bucket);
     if (!entry || now - entry.windowStart >= 60_000) {
       if (this.requestWindows.size > 5_000) {
-        this.requestWindows.clear();
+        pruneWindows(this.requestWindows, now);
       }
       this.requestWindows.set(bucket, { count: 1, windowStart: now });
       return { count: 1 };

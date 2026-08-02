@@ -7,6 +7,7 @@ import {
   type TestShape
 } from "./types.js";
 import { derivedToArtifacts } from "./snapshot.js";
+import { pruneWindows } from "../rate-window.js";
 
 /** In-process store for tests and single-node development. */
 export class MemoryStore implements StateStore {
@@ -52,7 +53,7 @@ export class MemoryStore implements StateStore {
     const entry = this.requests.get(key);
     if (!entry || now - entry.windowStart >= 60_000) {
       if (this.requests.size > 10_000) {
-        this.requests.clear(); // bounded; the window is a minute anyway
+        pruneWindows(this.requests, now);
       }
       this.requests.set(key, { count: 1, windowStart: now });
       return { count: 1 };
