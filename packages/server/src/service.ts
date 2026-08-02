@@ -42,7 +42,8 @@ export interface ServingParams {
   armCount: number;
   alg: "ts" | "bucketed" | "linear";
   dim: number;
-  minBucketPulls: number;
+  /** Choose-path only (bucketed fallback threshold); rewards never read it. */
+  minBucketPulls?: number;
   armPriors?: ArmPrior[];
   bucketPriors?: Record<string, ArmPrior[]>;
   linearPriors?: LinearPrior[];
@@ -174,13 +175,7 @@ export class TestService {
     if (result.first && result.rec.alg !== undefined) {
       const rec = result.rec;
       await this.recordFirstReward(
-        {
-          testId,
-          armCount: rec.armCount,
-          alg: rec.alg,
-          dim: rec.dim,
-          minBucketPulls: 0 // unused on the reward path
-        },
+        { testId, armCount: rec.armCount, alg: rec.alg, dim: rec.dim },
         rec
       );
     }

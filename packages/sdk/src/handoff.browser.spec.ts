@@ -64,6 +64,48 @@ describe("captureHandoff", () => {
     expect(captureHandoff(window, localStorage)).toBeNull();
   });
 
+  it("lists live handoffs even while pruning expired ones", async () => {
+    // Regression: pruning during an index loop re-compacts localStorage
+    // keys and used to skip the entry sliding into the freed slot.
+    localStorage.setItem(
+      `lv:h:${"11".repeat(32)}`,
+      JSON.stringify({
+        testId: "11".repeat(32),
+        idHash: ID_HASH,
+        armIndex: 0,
+        capturedAt: Date.now() - 31 * 24 * 60 * 60 * 1000 // expired
+      })
+    );
+    localStorage.setItem(
+      `lv:h:${"22".repeat(32)}`,
+      JSON.stringify({
+        testId: "22".repeat(32),
+        idHash: ID_HASH,
+        armIndex: 1,
+        capturedAt: Date.now() // live
+      })
+    );
+    const live = listHandoffs(localStorage);
+    expect(live).toHaveLength(1);
+    expect(live[0].testId).toBe("22".repeat(32));
+    // The expired entry was pruned as a side effect.
+    expect(localStorage.getItem(`lv:h:${"11".repeat(32)}`)).toBeNull();
+  });
+
+  it("ignores handoffs whose armIndex exceeds the config", async () => {
+    const testId = await computeTestId(CONFIG);
+    visitWithParams({ _lvt: testId, _lvid: ID_HASH, _lvvar: "7" }); // only 2 arms
+    const { calls, fetchImpl } = fakeServer();
+    const test = await createTest(CONFIG, {
+      serverUrl: "https://livevariant.link",
+      fetch: fetchImpl,
+      rewardEvents: false
+    });
+    // Falls back to a normal choose instead of rendering a wrong arm.
+    expect(calls.filter(c => c.url.endsWith("/choose"))).toHaveLength(1);
+    test.dispose();
+  });
+
   it("expires stored handoffs after the TTL", async () => {
     const testId = await computeTestId(CONFIG);
     localStorage.setItem(

@@ -44,7 +44,9 @@ export function parseHandoff(search: string): Handoff | null {
     !idHash ||
     !/^[0-9a-f]{64}$/.test(idHash) ||
     !Number.isInteger(armIndex) ||
-    armIndex < 0
+    armIndex < 0 ||
+    // Sanity bound; callers with the config must still check armCount.
+    armIndex >= 100
   ) {
     return null;
   }

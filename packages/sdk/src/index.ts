@@ -101,9 +101,15 @@ export async function createTest(
   const testId = await computeTestId(resolved);
 
   // Redirect handoff first: if this visitor arrived through /s or /c,
-  // the server-side assignment (and its idHash) is authoritative.
+  // the server-side assignment (and its idHash) is authoritative. A
+  // tampered armIndex beyond this config's arms is treated as no handoff
+  // rather than silently rendering the wrong variant.
   captureHandoff(win, storage);
-  const handoff = getHandoff(storage, testId);
+  const storedHandoff = getHandoff(storage, testId);
+  const handoff =
+    storedHandoff && storedHandoff.armIndex < resolved.arms.length
+      ? storedHandoff
+      : null;
 
   const idHash = handoff
     ? handoff.idHash

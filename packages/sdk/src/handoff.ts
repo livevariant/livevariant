@@ -65,14 +65,21 @@ export function listHandoffs(storage: Storage | null): StoredHandoff[] {
   if (!storage) {
     return [];
   }
-  const handoffs: StoredHandoff[] = [];
+  // Collect keys BEFORE reading: getHandoff removes expired entries, and
+  // removal during an index loop re-compacts the key list and skips the
+  // entry that slides into the freed slot.
+  const keys: string[] = [];
   for (let i = 0; i < storage.length; i++) {
     const key = storage.key(i);
     if (key?.startsWith(STORAGE_PREFIX)) {
-      const stored = getHandoff(storage, key.slice(STORAGE_PREFIX.length));
-      if (stored) {
-        handoffs.push(stored);
-      }
+      keys.push(key);
+    }
+  }
+  const handoffs: StoredHandoff[] = [];
+  for (const key of keys) {
+    const stored = getHandoff(storage, key.slice(STORAGE_PREFIX.length));
+    if (stored) {
+      handoffs.push(stored);
     }
   }
   return handoffs;
