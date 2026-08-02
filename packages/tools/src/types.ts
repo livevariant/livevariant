@@ -74,10 +74,13 @@ export function toolPath(name: string): string {
  * that will not decode, a stats secret the server rejected. Hosts turn it
  * into a 400 and an MCP error result instead of a stack trace.
  */
+/** The statuses a tool failure can carry, so hosts need no cast. */
+export type ToolErrorStatus = 400 | 401 | 404 | 502;
+
 export class ToolInputError extends Error {
   constructor(
     message: string,
-    readonly status = 400
+    readonly status: ToolErrorStatus = 400
   ) {
     super(message);
     this.name = "ToolInputError";

@@ -503,7 +503,7 @@ export const generatePriors = defineTool({
   output: z.object({
     testId: z.string(),
     config: z.string(),
-    manageUrlPath: z.string(),
+    manageUrl: z.string(),
     priors: z.array(
       z.object({ variant: z.string(), alpha: z.number(), beta: z.number() })
     ),
@@ -576,7 +576,7 @@ export const generatePriors = defineTool({
     return {
       testId: encoded.testId,
       config: encoded.encoded,
-      manageUrlPath: `${origin}/manage/${encoded.encoded}`,
+      manageUrl: `${origin}/manage/${encoded.encoded}`,
       priors: capped.map((p, i) => ({
         variant: names[i],
         alpha: p.alpha,
@@ -660,7 +660,24 @@ export const getStats = defineTool({
         "no stats secret: pass statsSecret, or the manage URL whose #fragment holds it"
       );
     }
-    const origin = originOf(context, resolved.serverUrl);
+    // The origin for a credentialed request comes from configuration, never
+    // from the pasted URL. `test` is attacker-reachable: it arrives from a
+    // document, an email, or an injected instruction, while the secret can
+    // come from trusted context earlier in the conversation. Honouring the
+    // URL's own origin would send that secret wherever the URL said.
+    //
+    // A mismatch is refused rather than silently redirected, so a
+    // self-hoster is told to configure their deployment instead of quietly
+    // querying the wrong server.
+    const origin = originOf(context);
+    if (resolved.serverUrl && resolved.serverUrl !== origin) {
+      throw new ToolInputError(
+        `that URL points at ${resolved.serverUrl}, but this client is ` +
+          `configured for ${origin}. The stats secret is only ever sent to ` +
+          "the configured server. If that deployment is yours, set " +
+          "LIVEVARIANT_SERVER_URL to it; otherwise do not trust the link."
+      );
+    }
     const encoded = (await encodeConfig(resolved.config)).encoded;
     const response = await context.fetch(`${origin}/stats/${encoded}`, {
       headers: { authorization: `Bearer ${secret}` }
@@ -672,9 +689,12 @@ export const getStats = defineTool({
       );
     }
     if (!response.ok) {
+      // 404 means the server has never seen this test, which is the
+      // caller's problem; anything else is the server's, and saying so
+      // stops an outage reading as a bad config.
       throw new ToolInputError(
         `stats request failed (${response.status})`,
-        response.status
+        response.status === 404 ? 404 : 502
       );
     }
     const stats = (await response.json()) as {

@@ -14,7 +14,8 @@ export {
   defineTool,
   toolPath,
   type ToolContext,
-  type ToolDefinition
+  type ToolDefinition,
+  type ToolErrorStatus
 } from "./types.js";
 export {
   resolveTest,

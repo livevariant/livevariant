@@ -59,7 +59,7 @@ export function createApi(options: ApiOptions): Hono {
         return c.json(await tool.handler(parsed.data, context));
       } catch (err) {
         if (err instanceof ToolInputError) {
-          return c.json({ error: err.message }, err.status as 400);
+          return c.json({ error: err.message }, err.status);
         }
         throw err;
       }

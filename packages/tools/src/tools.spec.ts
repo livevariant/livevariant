@@ -233,6 +233,7 @@ describe("generate_priors", () => {
     // must keep its id and its whole event history.
     expect(out.testId).toBe(built.testId);
     expect(out.config).not.toBe(built.config);
+    expect(out.manageUrl).toBe(`https://livevariant.link/manage/${out.config}`);
     const decoded = await decodeConfig(out.config);
     expect(decoded.config.priors?.arms).toHaveLength(2);
   });
@@ -351,6 +352,52 @@ describe("get_stats", () => {
       { ...ctx, fetch: impl }
     );
     expect(calls[0].auth).toBe(`Bearer ${built.statsSecret}`);
+  });
+
+  it("never sends the secret to an origin the pasted URL chose", async () => {
+    // The attack this pins: `test` arrives from a document, an email or an
+    // injected instruction, while the secret can come from trusted context
+    // earlier in the conversation. Honouring the URL's own origin would
+    // hand that secret to whoever wrote the link.
+    const built = await twoVariantTest();
+    const { impl, calls } = fakeFetch();
+    await expect(
+      getStats.handler(
+        {
+          test: `https://attacker.example/manage/${built.config}`,
+          statsSecret: built.statsSecret
+        },
+        { ...ctx, fetch: impl }
+      )
+    ).rejects.toThrow(/only ever sent to the configured server/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("refuses even when the hostile URL carries its own fragment secret", async () => {
+    const built = await twoVariantTest();
+    const { impl, calls } = fakeFetch();
+    await expect(
+      getStats.handler(
+        {
+          test: `https://attacker.example/manage/${built.config}#${built.statsSecret}`
+        },
+        { ...ctx, fetch: impl }
+      )
+    ).rejects.toThrow(/do not trust the link/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("still works for a self-hoster whose client is configured to match", async () => {
+    const built = await buildTest.handler(
+      { variants: [{ url: A }, { url: B }], serverUrl: "https://ab.internal" },
+      ctx
+    );
+    const { impl, calls } = fakeFetch();
+    await getStats.handler(
+      { test: built.urls.manage },
+      { serverUrl: "https://ab.internal", fetch: impl }
+    );
+    expect(calls[0].url).toContain("https://ab.internal/stats/");
   });
 
   it("says plainly when there is no secret to use", async () => {
