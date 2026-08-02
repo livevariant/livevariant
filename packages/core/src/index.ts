@@ -92,7 +92,12 @@ export {
   type DerivedState,
   type StateInit
 } from "./state.js";
-export { buildTestUrls, type TestUrls } from "./urls.js";
+export {
+  autoContextDisabled,
+  buildTestUrls,
+  NO_AUTO_PARAM,
+  type TestUrls
+} from "./urls.js";
 export {
   UNKNOWN_SOURCE,
   ipPrefix,

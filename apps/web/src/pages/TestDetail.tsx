@@ -195,6 +195,23 @@ element.textContent = test.variant.text;`;
             value={`${urls.pixel}?id={{recipient_id}}`}
           />
           <CopyField label="Manage (keep private)" value={urls.manage} />
+          <p className="text-muted-foreground pt-1 text-sm">
+            If your email carries a tracking image, use the pair below instead.
+            The image is fetched by the mail provider, not the reader, and
+            whichever request arrives first fixes that recipient's bucket for
+            good, so any country the server derives from it belongs to a
+            datacenter. These links say so outright rather than leaving it to a
+            guess. Context you merge in yourself, like{" "}
+            <code>&amp;c_country=nl</code>, still counts.
+          </p>
+          <CopyField
+            label="Serve (no derived context)"
+            value={`${urls.noAuto.serve}&id={{recipient_id}}`}
+          />
+          <CopyField
+            label="Click (no derived context)"
+            value={`${urls.noAuto.click}&id={{recipient_id}}`}
+          />
         </CardContent>
       </Card>
 

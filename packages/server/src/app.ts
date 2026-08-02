@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
+  autoContextDisabled,
   capArmPriors,
   composeBucketKey,
   decodeConfig,
@@ -232,7 +233,10 @@ export function createApp(options: AppOptions): Hono {
       externalId ? await externalIdHash(decoded.testId, externalId) : null,
       ctxFromQuery(c.req.query()),
       await sourceHash(decoded.testId, clientIp(c), Date.now()),
-      requestContext(c)
+      {
+        ...requestContext(c),
+        noAuto: autoContextDisabled(c.req.query("auto"))
+      }
     );
     return { decoded, params, identity };
   }

@@ -95,6 +95,8 @@ export interface RequestContext {
   acceptLanguage?: string;
   /** True for proxied asset fetches, where geo is the proxy's, not a person's. */
   assetFetch?: boolean;
+  /** True when the link itself opted out of derived context (?auto=0). */
+  noAuto?: boolean;
 }
 
 /** Resolves raw request context into the opaque forms used everywhere else. */
@@ -106,9 +108,13 @@ export async function resolveIdentity(
   request: RequestContext = {}
 ): Promise<RequestIdentity> {
   const ctx = normalizeCtx(decoded.config, rawCtx);
-  // An email image is fetched by the mail provider, not the reader, so
-  // its geo would be a datacenter. No context beats wrong context.
-  const signals = request.assetFetch ? {} : requestSignals(request);
+  // Two reasons to derive nothing. An email image is fetched by the mail
+  // provider, not the reader, so its geo would be a datacenter. And a
+  // link can say outright that it is going somewhere we cannot read
+  // (?auto=0), which is the honest setting for anything in an inbox.
+  // Either way: no context beats wrong context.
+  const signals =
+    request.assetFetch || request.noAuto ? {} : requestSignals(request);
   const autoCtx = deriveAutoCtx(decoded.config.ctx?.dims, signals, ctx);
   // Auto dimensions are composed on top of the caller's key even when the
   // caller supplied them, so supplied and derived values of the same

@@ -111,6 +111,22 @@ Two things are not optional:
   prefetch links. Clicks and on-site conversions are the trustworthy
   signals; raw opens are not, which is true of every email tool.
 
+One thing that is optional but usually right: append `?auto=0` to email
+links (`buildTestUrls` returns them ready-made as `noAuto.serve` and
+`noAuto.click`) to switch server-derived context off for that link.
+
+Proxy detection already discards derived context for image fetches, but
+it is a header heuristic and corporate link scanners defeat it on
+purpose, following links from a datacenter while presenting ordinary
+browser headers. The reason it matters more than a few wrong rows is that
+assignment is sticky: whichever request arrives first fixes a recipient's
+bucket permanently, and in an email carrying both an image and a link
+that is the image open. So derived context in email is unreliable _and_
+order-dependent. `?auto=0` makes the behaviour declared instead of
+guessed. Context you merge in yourself (`&c_country=nl`) is unaffected,
+and the flag is per link, so the web half of a campaign keeps its
+context.
+
 ### Context the caller never has to send
 
 A context dimension can declare `from`, and the server fills it from the
@@ -152,7 +168,8 @@ Two details worth knowing:
   bare `Accept: */*`, and a request with no headers are all treated as
   proxies. Guessing "proxy" for a real visitor costs only their context,
   while the reverse silently files datacenter geo as real. No context
-  beats confidently wrong context.
+  beats confidently wrong context. It is still a heuristic, so for email
+  prefer the explicit `?auto=0` links described above.
 
 All signals are recorded on every assignment, not only the ones a test
 uses as context, so `/stats` returns a `bySignal` breakdown even for a

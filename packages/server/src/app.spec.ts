@@ -975,3 +975,103 @@ describe("auto-context across serving channels", () => {
     expect(s.bySignal.country.nl.pulls).toBe(1);
   });
 });
+
+describe("opting a link out of derived context", () => {
+  /**
+   * Nothing that touches an inbox is reliably the reader: mail providers
+   * fetch images from their own infrastructure, and corporate link
+   * scanners follow links from datacenters while sending browser headers,
+   * which no header heuristic can catch. `?auto=0` makes that explicit
+   * per link instead of leaving it to a guess.
+   */
+  function browserRequest(path: string, cf: Record<string, string>): Request {
+    const req = new Request(`http://localhost${path}`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    Object.defineProperty(req, "cf", { value: cf });
+    return req;
+  }
+
+  const AUTO_COUNTRY = {
+    alg: "bucketed" as const,
+    ctx: { dims: [{ key: "country", from: "country" as const }] }
+  };
+
+  it("derives nothing even though the request looks like a person", async () => {
+    // A link scanner presents exactly these headers. Without ?auto=0 it
+    // would be read as the recipient and file a datacenter's country.
+    const { encoded } = await makeTest(AUTO_COUNTRY);
+    const res = await app.request(
+      browserRequest(`/s/${encoded}?id=scanned&auto=0`, { country: "US" })
+    );
+    expect(res.status).toBe(302);
+    const s = await stats(encoded);
+    expect(s.totalAssignments).toBe(1);
+    expect(s.bySignal).toEqual({});
+    expect(Object.keys(s.buckets)).toHaveLength(0);
+  });
+
+  it("still derives context on the same test's ordinary links", async () => {
+    // Opting out is per link, not per test: the web half of a campaign
+    // keeps its context while the email half does not pretend to have it.
+    const { encoded } = await makeTest(AUTO_COUNTRY);
+    await app.request(
+      browserRequest(`/s/${encoded}?id=fromEmail&auto=0`, { country: "US" })
+    );
+    await app.request(
+      browserRequest(`/s/${encoded}?id=fromWeb`, { country: "NL" })
+    );
+    const s = await stats(encoded);
+    expect(s.totalAssignments).toBe(2);
+    expect(s.bySignal.country).toEqual({ nl: { pulls: 1, conversions: 0 } });
+    expect(Object.keys(s.buckets)).toHaveLength(1);
+  });
+
+  it("keeps context the caller supplied outright", async () => {
+    // ?auto=0 disables derivation, not context. A sender who merged the
+    // recipient's country in from their own CRM still knows it.
+    const { encoded } = await makeTest(AUTO_COUNTRY);
+    await app.request(
+      browserRequest(`/s/${encoded}?id=known&auto=0&c_country=nl`, {
+        country: "US"
+      })
+    );
+    const s = await stats(encoded);
+    expect(Object.keys(s.buckets)).toHaveLength(1);
+    // The supplied value bucketed the visitor; the machine's did not.
+    expect(s.bySignal).toEqual({});
+  });
+
+  it("applies to click links too", async () => {
+    const { encoded } = await makeTest(AUTO_COUNTRY);
+    const res = await app.request(
+      browserRequest(`/c/${encoded}?id=clicker&auto=0`, { country: "US" })
+    );
+    expect(res.status).toBe(302);
+    const s = await stats(encoded);
+    expect(s.bySignal).toEqual({});
+  });
+
+  it("reads the spellings that get pasted into ESP templates", async () => {
+    const { encoded } = await makeTest(AUTO_COUNTRY);
+    for (const [i, flag] of ["0", "false", "off", "no"].entries()) {
+      await app.request(
+        browserRequest(`/s/${encoded}?id=spell${i}&auto=${flag}`, {
+          country: "US"
+        })
+      );
+    }
+    const s = await stats(encoded);
+    expect(s.totalAssignments).toBe(4);
+    expect(s.bySignal).toEqual({});
+  });
+
+  it("ignores a value that does not mean off", async () => {
+    const { encoded } = await makeTest(AUTO_COUNTRY);
+    await app.request(
+      browserRequest(`/s/${encoded}?id=on&auto=1`, { country: "NL" })
+    );
+    const s = await stats(encoded);
+    expect(s.bySignal.country.nl.pulls).toBe(1);
+  });
+});
