@@ -75,3 +75,4 @@ export {
   type DerivedState,
   type StateInit
 } from "./state.js";
+export { buildTestUrls, type TestUrls } from "./urls.js";
