@@ -41,7 +41,10 @@ export {
 } from "./rng.js";
 export {
   AUTO_SIGNALS,
+  NETWORK_SIGNALS,
   SIGNAL_CARDINALITY,
+  URL_SIGNALS,
+  urlSignals,
   deviceClass,
   isAssetFetch,
   primaryLanguage,
@@ -92,6 +95,15 @@ export {
   type DerivedState,
   type StateInit
 } from "./state.js";
+export {
+  CONFIG_PARAMS,
+  RUNTIME_PARAMS,
+  configFromParams,
+  decorateDestination,
+  fallbackTarget,
+  isReservedParam,
+  passthroughParams
+} from "./params.js";
 export {
   autoContextDisabled,
   buildTestUrls,

@@ -110,8 +110,31 @@ export const testConfigSchema = z
      * destination site can adopt the assignment (identity handoff).
      */
     decorateRedirects: z.boolean().default(true),
-    /** sha256 hex of the creator-held stats secret. */
-    statsKeyHash: z.string().regex(/^[0-9a-f]{64}$/)
+    /**
+     * Stamp the served variant's name into this query parameter on
+     * redirect, e.g. "utm_content", so a test shows up in the customer's
+     * own analytics without them installing anything. Off unless set:
+     * writing into someone's attribution scheme uninvited is not a
+     * default anyone should get by accident.
+     */
+    variantParam: z.string().min(1).max(32).optional(),
+    /**
+     * Carry query parameters we do not recognize onto the redirect
+     * target. ESPs and ad platforms append their own attribution
+     * (utm_source, gclid), and swallowing it would break the customer's
+     * analytics exactly when the test starts mattering.
+     */
+    forwardParams: z.boolean().default(true),
+    /**
+     * sha256 hex of the creator-held stats secret. Optional so a test can
+     * be spelled out in query parameters with nothing but its variants,
+     * but a test without one has no readable stats at all: no secret can
+     * match, so /stats, /recompute and /exclude stay closed forever.
+     */
+    statsKeyHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional()
   })
   .superRefine((config, issues) => {
     const armCount = config.arms.length;

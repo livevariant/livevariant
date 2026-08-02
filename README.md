@@ -41,6 +41,7 @@ the repository roadmap.
 | ---------------------- | ----------------------------------------------------------- |
 | `GET /s/:cfg`          | Serve: assigns a variant, 302s to it (email/link mode)      |
 | `GET /c/:cfg`          | Click: rewards, then redirects onward                       |
+| `GET /s`, `GET /c`     | The same two, with the config in plain query parameters     |
 | `GET /px/:cfg`         | 1x1 gif conversion pixel (no-JS thank-you pages)            |
 | `POST /choose`         | JS mode: content-free assignment, returns an arm index      |
 | `POST /reward`         | JS mode: `{testId, idHash, amount}`                         |
@@ -127,6 +128,58 @@ guessed. Context you merge in yourself (`&c_country=nl`) is unaffected,
 and the flag is per link, so the web half of a campaign keeps its
 context.
 
+### Tests an ESP template can build
+
+A config does not have to be base64. The same test can be spelled out in
+plain query parameters, and the two forms parse to the same `TestConfig`
+and therefore the same `testId`:
+
+```
+https://livevariant.link/s?a=https://cdn.example.com/hero-a.jpg
+                          &a=https://cdn.example.com/hero-b.jpg
+                          &k=<statsKeyHash>
+                          &id={{recipient_id}}
+```
+
+Only `a` is required, twice or more. Everything else defaults, because
+nobody filling in a template field should have to know this system has an
+algorithm, let alone pick one.
+
+This is what makes the interesting workflow possible. Someone wires the
+template once with the fixed parts (`k`, and whatever the test needs);
+campaign managers then fill only the variant fields through the ordinary
+template editor. They never encode anything and never visit this service.
+Because the variant URLs are inside the identity hash, each campaign
+automatically becomes its own test, while the one stats secret opens all
+of them.
+
+| Param | Meaning                                                    |
+| ----- | ---------------------------------------------------------- |
+| `a`   | Variant target URL, repeated, in order (`a`[0] is control) |
+| `an`  | Variant name, repeated, positional (defaults v1, v2, …)    |
+| `k`   | `statsKeyHash`: without it the test has no readable stats  |
+| `alg` | `ts`, `bucketed` or `linear`                               |
+| `ctx` | Dimensions: `source:utm_source,persona`                    |
+| `r`   | Fallback click-redirect target                             |
+| `vp`  | Stamp the served variant into this param on redirect       |
+| `fw`  | `fw=0` stops unrecognized params being forwarded           |
+| `n`   | Test name                                                  |
+
+Two behaviours worth knowing:
+
+- **It fails open.** These URLs are assembled by hand, so a wrong one is
+  a broken image in front of the entire recipient list. If the config
+  will not parse but anything looks like a variant, the first one is
+  served and no test runs. A campaign degrades to "not measured", never
+  to a hole in the layout.
+- **Attribution is carried through.** Any parameter we do not recognize
+  (`utm_source`, `gclid`, `mc_cid`) is appended to the redirect target,
+  so the customer's analytics keeps working across the hop. Parameters
+  already on the destination win, and `fw=0` turns it off. Setting `vp`
+  (typically `vp=utm_content`) additionally stamps the served variant's
+  name onto the destination, which puts the test into the customer's own
+  reporting without them installing anything.
+
 ### Context the caller never has to send
 
 A context dimension can declare `from`, and the server fills it from the
@@ -144,10 +197,24 @@ request itself:
 }
 ```
 
-Available signals: `country`, `continent`, `region`, `city`, `timezone`,
-`device`, `language`, `organization`. Geo comes from Cloudflare's
-`request.cf` and is simply absent on other hosts; `device` and `language`
-are derived from request headers and work anywhere.
+Signals come in two kinds, and the difference matters:
+
+- **Network signals** are guessed from the connection: `country`,
+  `continent`, `region`, `city`, `timezone`, `device`, `language`,
+  `organization`. Geo comes from Cloudflare's `request.cf` and is simply
+  absent on other hosts; `device` and `language` come from headers and
+  work anywhere.
+- **Campaign tags** are read off the link: `utm_source`, `utm_medium`,
+  `utm_campaign`, `utm_content`, `utm_term`. Most marketing URLs already
+  carry them, so a test can segment by traffic source with nothing added
+  by the customer at all.
+
+Only the first kind can be wrong here. A proxy answers every network
+signal about itself, but relays the URL the sender wrote untouched, so a
+campaign tag is as true for Gmail's fetcher as for the reader. That makes
+tags the one sort of derived context that works properly in email, and it
+is why proxy detection and `?auto=0` suppress the guessed signals and
+leave the tags alone.
 
 This is what makes an email redirect contextual: there is no JavaScript
 in an inbox, and the sender usually does not know the reader's country

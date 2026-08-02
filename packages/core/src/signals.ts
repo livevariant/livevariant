@@ -8,8 +8,12 @@
  * users better than an IP database does.
  */
 
-/** Signals a context dimension may be filled from. */
-export const AUTO_SIGNALS = [
+/**
+ * Signals guessed from the connection. These are the ones a proxy ruins:
+ * a mail provider or link scanner fetching on someone's behalf answers
+ * every one of them about itself.
+ */
+export const NETWORK_SIGNALS = [
   "country",
   "continent",
   "region",
@@ -19,6 +23,27 @@ export const AUTO_SIGNALS = [
   "language",
   "organization"
 ] as const;
+
+/**
+ * Signals read straight off the link. Campaign tagging is already on
+ * most marketing URLs, so a test can segment by traffic source with
+ * nothing added by the customer at all.
+ *
+ * Unlike the network signals these survive a proxy perfectly: the mail
+ * provider fetching an image sends the URL the sender wrote, tags and
+ * all. That makes them the trustworthy kind of derived context in email,
+ * and it is why they are not suppressed alongside the guessed ones.
+ */
+export const URL_SIGNALS = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term"
+] as const;
+
+/** Signals a context dimension may be filled from. */
+export const AUTO_SIGNALS = [...NETWORK_SIGNALS, ...URL_SIGNALS] as const;
 
 export type AutoSignal = (typeof AUTO_SIGNALS)[number];
 
@@ -33,13 +58,42 @@ export type RequestSignals = Partial<Record<AutoSignal, string>>;
 export const SIGNAL_CARDINALITY: Record<AutoSignal, number> = {
   continent: 7,
   device: 3,
-  country: 200,
+  utm_medium: 10,
+  utm_source: 30,
   language: 50,
-  region: 3000,
+  utm_content: 50,
+  country: 200,
+  utm_campaign: 300,
   timezone: 400,
+  region: 3000,
   city: 10000,
+  utm_term: 10000,
   organization: 50000
 };
+
+/** Free-form signal values longer than this are dropped, as in ctx. */
+const MAX_SIGNAL_LENGTH = 64;
+
+/**
+ * Campaign tags off the request URL. Anyone can write these, but so can
+ * anyone write `?c_persona=`, and a forged value only moves the forger's
+ * own traffic into a bucket of its own.
+ */
+export function urlSignals(
+  query: URLSearchParams | null | undefined
+): RequestSignals {
+  const signals: RequestSignals = {};
+  if (!query) {
+    return signals;
+  }
+  for (const key of URL_SIGNALS) {
+    const value = query.get(key)?.trim().toLowerCase();
+    if (value && value.length <= MAX_SIGNAL_LENGTH) {
+      signals[key] = value;
+    }
+  }
+  return signals;
+}
 
 /** Values Cloudflare uses for "we don't know" or "not a normal client". */
 const UNKNOWN_GEO = new Set(["", "xx", "t1", "unknown"]);

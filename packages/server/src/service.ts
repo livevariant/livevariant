@@ -6,6 +6,7 @@ import {
   mergeFeatureIndices,
   recommendFromObserved,
   requestSignals,
+  urlSignals,
   chooseArm,
   effectiveArmPriors,
   effectiveBucketPriors,
@@ -97,6 +98,8 @@ export interface RequestContext {
   assetFetch?: boolean;
   /** True when the link itself opted out of derived context (?auto=0). */
   noAuto?: boolean;
+  /** The request's query string, source of the campaign-tag signals. */
+  query?: URLSearchParams | null;
 }
 
 /** Resolves raw request context into the opaque forms used everywhere else. */
@@ -108,13 +111,20 @@ export async function resolveIdentity(
   request: RequestContext = {}
 ): Promise<RequestIdentity> {
   const ctx = normalizeCtx(decoded.config, rawCtx);
-  // Two reasons to derive nothing. An email image is fetched by the mail
-  // provider, not the reader, so its geo would be a datacenter. And a
-  // link can say outright that it is going somewhere we cannot read
-  // (?auto=0), which is the honest setting for anything in an inbox.
-  // Either way: no context beats wrong context.
-  const signals =
+  // Signals come in two kinds and only one of them can be wrong here.
+  //
+  // Network signals are guessed from the connection, so a mail provider
+  // or a link scanner fetching on someone's behalf answers all of them
+  // about itself. Those are dropped for a proxied fetch, and for a link
+  // that said outright it is going somewhere unreadable (?auto=0).
+  //
+  // Campaign tags are read off the URL the sender wrote, so a proxy
+  // relays them untouched. They are as true for Gmail's fetcher as for
+  // the reader, which makes them the one kind of derived context that
+  // works properly in email, so nothing suppresses them.
+  const network =
     request.assetFetch || request.noAuto ? {} : requestSignals(request);
+  const signals = { ...network, ...urlSignals(request.query) };
   const autoCtx = deriveAutoCtx(decoded.config.ctx?.dims, signals, ctx);
   // Auto dimensions are composed on top of the caller's key even when the
   // caller supplied them, so supplied and derived values of the same

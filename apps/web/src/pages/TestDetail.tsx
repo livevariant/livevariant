@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import { Check, Copy, RefreshCw } from "lucide-react";
-import { buildTestUrls } from "@livevariant/core";
+import { buildTestUrls, hashStatsSecret } from "@livevariant/core";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -64,6 +64,25 @@ export function TestDetail() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [snippetCopied, setSnippetCopied] = useState(false);
+  // The stats key is the one fixed part of an ESP template: set it once
+  // and every campaign built from the template is readable with the same
+  // secret, while each one is still its own test.
+  const [statsKeyHash, setStatsKeyHash] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!test) {
+      return;
+    }
+    let live = true;
+    void hashStatsSecret(test.statsSecret).then(hash => {
+      if (live) {
+        setStatsKeyHash(hash);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [test]);
 
   const refresh = useCallback(async () => {
     if (!test) {
@@ -212,6 +231,46 @@ element.textContent = test.variant.text;`;
             label="Click (no derived context)"
             value={`${urls.noAuto.click}&id={{recipient_id}}`}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>ESP template</CardTitle>
+          <CardDescription>
+            The same test written in plain query parameters instead of an
+            encoded config, for building a reusable template in your email
+            platform. Wire this in once; campaign managers then fill only the
+            variant fields through your ordinary template editor and never touch
+            this service. Because the variant URLs are part of a test's
+            identity, every campaign becomes its own test automatically, and
+            this one stats secret opens all of them.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {statsKeyHash && (
+            <>
+              <CopyField
+                label="Image src (serve)"
+                value={`${test.serverUrl}/s?a={{variant_a_url}}&a={{variant_b_url}}&k=${statsKeyHash}&vp=utm_content&auto=0&id={{recipient_id}}`}
+              />
+              <CopyField
+                label="Link href (click)"
+                value={`${test.serverUrl}/c?a={{variant_a_url}}&a={{variant_b_url}}&r={{landing_url}}&k=${statsKeyHash}&vp=utm_content&auto=0&id={{recipient_id}}`}
+              />
+            </>
+          )}
+          <p className="text-muted-foreground text-sm">
+            Add another <code>a=</code> for a third variant, and{" "}
+            <code>an=</code> to name them (they default to v1, v2, …).{" "}
+            <code>vp=utm_content</code> stamps the served variant into that
+            parameter on the way out, so the test shows up in your own analytics
+            without installing anything; drop it to turn that off. Any parameter
+            we do not recognize, <code>utm_source</code> and <code>gclid</code>{" "}
+            included, is carried through to the destination, and{" "}
+            <code>ctx=source:utm_source</code> turns a campaign tag into a
+            context dimension the bandit learns per segment.
+          </p>
         </CardContent>
       </Card>
 

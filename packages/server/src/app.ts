@@ -1,8 +1,12 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import {
   autoContextDisabled,
   capArmPriors,
+  configFromParams,
+  decorateDestination,
+  fallbackTarget,
+  passthroughParams,
   composeBucketKey,
   decodeConfig,
   decorateUrl,
@@ -148,6 +152,38 @@ export function createApp(options: AppOptions): Hono {
   }
 
   /**
+   * The query-parameter spelling of a config. Failure is handled very
+   * differently from the base64 path: these URLs are assembled by hand in
+   * an ESP template, so a wrong one is a broken image in front of the
+   * whole recipient list. If anything looks like a variant we serve the
+   * first one and run no test at all, because a campaign should degrade
+   * to "not measured", never to a hole in the layout.
+   */
+  async function paramsOr404(
+    query: URLSearchParams
+  ): Promise<{ decoded: DecodedConfig } | { error: Response }> {
+    try {
+      return { decoded: await configFromParams(query) };
+    } catch (err) {
+      const target = fallbackTarget(query);
+      if (target && destinationAllowed(target)) {
+        return {
+          error: new Response(null, {
+            status: 302,
+            headers: { location: target, "cache-control": NO_STORE }
+          })
+        };
+      }
+      return {
+        error: Response.json(
+          { error: err instanceof Error ? err.message : "invalid config" },
+          { status: 404 }
+        )
+      };
+    }
+  }
+
+  /**
    * Operator allowlist: the only real anti-phishing control here, because
    * anyone can author a config, so a config's own origins prove nothing.
    * Unset means allow-all (correct for a self-host serving its own
@@ -216,9 +252,17 @@ export function createApp(options: AppOptions): Hono {
         decoded: DecodedConfig;
         params: Awaited<ReturnType<typeof paramsFromConfig>>;
         identity: Awaited<ReturnType<typeof resolveIdentity>>;
+        query: URLSearchParams;
       }
   > {
-    const result = await decodeOr404(c.req.param("cfg"));
+    const query = new URL(c.req.raw.url).searchParams;
+    // Two spellings of one test: a base64 config in the path, or plain
+    // parameters. Both parse to a TestConfig and hash to the same testId,
+    // so nothing downstream needs to know which arrived.
+    const encoded = c.req.param("cfg");
+    const result = encoded
+      ? await decodeOr404(encoded)
+      : await paramsOr404(query);
     if ("error" in result) {
       return result;
     }
@@ -235,26 +279,41 @@ export function createApp(options: AppOptions): Hono {
       await sourceHash(decoded.testId, clientIp(c), Date.now()),
       {
         ...requestContext(c),
-        noAuto: autoContextDisabled(c.req.query("auto"))
+        noAuto: autoContextDisabled(c.req.query("auto")),
+        query
       }
     );
-    return { decoded, params, identity };
+    return { decoded, params, identity, query };
   }
 
-  /** Handoff decoration, shared by both redirect handlers. */
+  /**
+   * Everything that rides along to the destination: our own handoff
+   * token, whatever attribution the link already carried, and optionally
+   * the served variant stamped into a parameter of the customer's
+   * choosing so the test shows up in their analytics unaided.
+   */
   function maybeDecorate(
     decoded: DecodedConfig,
     identity: { idHash: string | null },
     armIndex: number,
-    target: string
+    target: string,
+    query?: URLSearchParams
   ): string {
-    return decoded.config.decorateRedirects && identity.idHash
-      ? decorateUrl(target, {
-          testId: decoded.testId,
-          idHash: identity.idHash,
-          armIndex
-        })
-      : target;
+    const { config } = decoded;
+    const withHandoff =
+      config.decorateRedirects && identity.idHash
+        ? decorateUrl(target, {
+            testId: decoded.testId,
+            idHash: identity.idHash,
+            armIndex
+          })
+        : target;
+    return decorateDestination(withHandoff, {
+      passthrough:
+        config.forwardParams && query ? passthroughParams(query) : [],
+      variantParam: config.variantParam,
+      variantValue: config.arms[armIndex]?.name
+    });
   }
 
   /**
@@ -270,21 +329,26 @@ export function createApp(options: AppOptions): Hono {
     const header = c.req.header("authorization");
     const match = header?.match(/^Bearer\s+(\S+)$/i);
     const secret = match?.[1];
-    if (!secret) {
+    const { statsKeyHash } = decoded.config;
+    // A config without a stats key has no owner: nothing can match, so
+    // every creator-only endpoint stays shut rather than open.
+    if (!secret || !statsKeyHash) {
       return false;
     }
-    return verifyStatsSecret(secret, decoded.config.statsKeyHash);
+    return verifyStatsSecret(secret, statsKeyHash);
   }
 
   app.get("/health", c => c.json({ ok: true }));
 
-  // Redirect-mode serve: 302 to the assigned arm's url/image.
-  app.get("/s/:cfg", async c => {
+  // Redirect-mode serve: 302 to the assigned arm's url/image. Registered
+  // twice: /s/:cfg carries a base64 config, bare /s spells the same test
+  // out in query parameters (the ESP-template form).
+  const serveHandler = async (c: Context): Promise<Response> => {
     const ctx = await serveContext(c);
     if ("error" in ctx) {
       return ctx.error;
     }
-    const { decoded, params, identity } = ctx;
+    const { decoded, params, identity, query } = ctx;
     // EVERY arm must be servable and allowed before we record anything.
     // Checking only the chosen arm afterwards would sticky-assign a
     // visitor to an arm they can never be served, so every later visit
@@ -311,19 +375,22 @@ export function createApp(options: AppOptions): Hono {
     const target = (arm.formats.url ?? arm.formats.image) as string;
     // Handoff decoration applies to pages, not image assets.
     const decorated = arm.formats.url
-      ? maybeDecorate(decoded, identity, armIndex, target)
+      ? maybeDecorate(decoded, identity, armIndex, target, query)
       : target;
     c.header("cache-control", NO_STORE);
     return c.redirect(decorated, 302);
-  });
+  };
+  app.get("/s/:cfg", serveHandler);
+  app.get("/s", serveHandler);
 
-  // Click: rewards (id'd traffic) and redirects onward.
-  app.get("/c/:cfg", async c => {
+  // Click: rewards (id'd traffic) and redirects onward. Same two
+  // spellings as /s.
+  const clickHandler = async (c: Context): Promise<Response> => {
     const ctx = await serveContext(c);
     if ("error" in ctx) {
       return ctx.error;
     }
-    const { decoded, params, identity } = ctx;
+    const { decoded, params, identity, query } = ctx;
     const to = c.req.query("to");
     // Validate every destination BEFORE recording anything: an error that
     // has already counted a conversion would skew the test, and an error
@@ -359,8 +426,13 @@ export function createApp(options: AppOptions): Hono {
       await service.reward(decoded.testId, identity.idHash, 1);
     }
     c.header("cache-control", NO_STORE);
-    return c.redirect(maybeDecorate(decoded, identity, armIndex, target), 302);
-  });
+    return c.redirect(
+      maybeDecorate(decoded, identity, armIndex, target, query),
+      302
+    );
+  };
+  app.get("/c/:cfg", clickHandler);
+  app.get("/c", clickHandler);
 
   // No-JS conversion pixel for thank-you pages.
   app.get("/px/:cfg", async c => {

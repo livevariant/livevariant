@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Hono } from "hono";
 import {
   bucketKey,
+  configFromParams,
   encodeConfig,
   featureIndices,
   FEATURE_DIM,
@@ -1073,5 +1074,205 @@ describe("opting a link out of derived context", () => {
     );
     const s = await stats(encoded);
     expect(s.bySignal.country.nl.pulls).toBe(1);
+  });
+});
+
+describe("query-parameter tests (the ESP template form)", () => {
+  /**
+   * The whole point: a template author wires the fixed parts once, and a
+   * campaign manager fills in nothing but variant URLs through ordinary
+   * template fields. No encoding step, no account, no visit here.
+   */
+  const A = "https://example.com/a";
+  const B = "https://example.com/b";
+
+  function get(path: string, headers: Record<string, string> = {}) {
+    return app.request(
+      new Request(`http://localhost${path}`, {
+        headers: { accept: BROWSER_ACCEPT, ...headers }
+      })
+    );
+  }
+
+  it("serves a test spelled out with nothing but variants", async () => {
+    const res = await get(`/s?a=${A}&a=${B}&id=r1`);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toMatch(/example\.com\/(a|b)/);
+  });
+
+  it("is the same test as its base64 spelling", async () => {
+    // Two encodings of one config must share state, or a campaign that
+    // moved between forms would silently restart its learning.
+    const { config, testId } = await configFromParams(
+      new URLSearchParams(`a=${A}&a=${B}&k=${await hashStatsSecret(SECRET)}`)
+    );
+    const { encoded } = await encodeConfig(config);
+    await get(`/s?a=${A}&a=${B}&k=${await hashStatsSecret(SECRET)}&id=r1`);
+    await app.request(
+      new Request(`http://localhost/s/${encoded}?id=r2`, {
+        headers: { accept: BROWSER_ACCEPT }
+      })
+    );
+    const s = await stats(encoded);
+    expect(s.testId).toBe(testId);
+    expect(s.totalAssignments).toBe(2);
+  });
+
+  it("keeps a recipient on one variant across opens", async () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 4; i++) {
+      const res = await get(`/s?a=${A}&a=${B}&id=sticky`);
+      seen.add(res.headers.get("location")!);
+    }
+    expect(seen.size).toBe(1);
+  });
+
+  it("serves the control rather than break the layout", async () => {
+    // A hand-filled template with one field left empty. In an img src a
+    // 404 is a broken image in front of the whole list, so this degrades
+    // to "no test" instead.
+    const res = await get(`/s?a=${A}&id=r1`);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(A);
+  });
+
+  it("404s only when there is nothing servable at all", async () => {
+    expect((await get("/s?n=nothing")).status).toBe(404);
+  });
+
+  it("has no readable stats without a stats key", async () => {
+    // A test with no owner still runs; it just cannot be read, because
+    // no secret can match a hash that was never set.
+    const { config } = await configFromParams(
+      new URLSearchParams(`a=${A}&a=${B}`)
+    );
+    const { encoded, warnings } = await encodeConfig(config);
+    expect(warnings.join(" ")).toMatch(/never be read/);
+    const res = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("carrying attribution to the destination", () => {
+  const A = "https://example.com/a";
+  const B = "https://example.com/b";
+
+  function get(path: string) {
+    return app.request(
+      new Request(`http://localhost${path}`, {
+        headers: { accept: BROWSER_ACCEPT }
+      })
+    );
+  }
+
+  it("forwards params it does not recognize", async () => {
+    // ESPs and ad platforms append their own attribution. A redirect that
+    // swallowed it would break the customer's analytics at exactly the
+    // point the test starts mattering.
+    const res = await get(
+      `/s?a=${A}&a=${B}&id=r1&utm_source=newsletter&gclid=xyz`
+    );
+    const location = new URL(res.headers.get("location")!);
+    expect(location.searchParams.get("utm_source")).toBe("newsletter");
+    expect(location.searchParams.get("gclid")).toBe("xyz");
+    // Ours never leak onward.
+    expect(location.searchParams.has("a")).toBe(false);
+    expect(location.searchParams.has("id")).toBe(false);
+  });
+
+  it("stamps the served variant into the customer's own analytics", async () => {
+    const res = await get(
+      `/s?a=${A}&a=${B}&an=hero&an=lifestyle&vp=utm_content&id=r1` +
+        "&utm_source=newsletter"
+    );
+    const location = new URL(res.headers.get("location")!);
+    expect(["hero", "lifestyle"]).toContain(
+      location.searchParams.get("utm_content")
+    );
+  });
+
+  it("can be switched off", async () => {
+    const res = await get(`/s?a=${A}&a=${B}&id=r1&fw=0&utm_source=newsletter`);
+    const location = new URL(res.headers.get("location")!);
+    expect(location.searchParams.has("utm_source")).toBe(false);
+  });
+
+  it("forwards on click redirects too", async () => {
+    const res = await get(
+      `/c?a=${A}&a=${B}&r=https://example.com/thanks&id=r1&utm_source=news`
+    );
+    const location = new URL(res.headers.get("location")!);
+    expect(location.searchParams.get("utm_source")).toBe("news");
+  });
+});
+
+describe("campaign tags as context", () => {
+  const A = "https://example.com/a";
+  const B = "https://example.com/b";
+
+  function get(path: string, headers: Record<string, string> = {}) {
+    return app.request(
+      new Request(`http://localhost${path}`, {
+        headers: { accept: BROWSER_ACCEPT, ...headers }
+      })
+    );
+  }
+
+  async function statsFor(search: string) {
+    const { config } = await configFromParams(
+      new URLSearchParams(`${search}&k=${await hashStatsSecret(SECRET)}`)
+    );
+    const { encoded } = await encodeConfig(config);
+    return stats(encoded);
+  }
+
+  const TEST = `a=${A}&a=${B}&alg=bucketed&ctx=source:utm_source`;
+
+  it("buckets by the tag the sender wrote", async () => {
+    await get(
+      `/s?${TEST}&k=${await hashStatsSecret(SECRET)}&id=n1&utm_source=newsletter`
+    );
+    await get(
+      `/s?${TEST}&k=${await hashStatsSecret(SECRET)}&id=n2&utm_source=newsletter`
+    );
+    await get(
+      `/s?${TEST}&k=${await hashStatsSecret(SECRET)}&id=s1&utm_source=twitter`
+    );
+    const s = await statsFor(TEST);
+    expect(s.totalAssignments).toBe(3);
+    expect(Object.keys(s.buckets)).toHaveLength(2);
+    expect(s.bySignal.utm_source).toEqual({
+      newsletter: { pulls: 2, conversions: 0 },
+      twitter: { pulls: 1, conversions: 0 }
+    });
+  });
+
+  it("survives a proxy fetch, unlike geo", async () => {
+    // This is what makes campaign tags the trustworthy derived context in
+    // email: Gmail's fetcher relays the URL the sender wrote, so the tag
+    // is as true for it as for the reader, while its geo is a datacenter.
+    const req = new Request(
+      `http://localhost/s?${TEST}&k=${await hashStatsSecret(SECRET)}&id=proxy&utm_source=newsletter`,
+      { headers: { accept: "image/webp,*/*" } }
+    );
+    Object.defineProperty(req, "cf", { value: { country: "US" } });
+    await app.request(req);
+    const s = await statsFor(TEST);
+    expect(s.bySignal.utm_source.newsletter.pulls).toBe(1);
+    expect(s.bySignal.country).toBeUndefined();
+  });
+
+  it("survives ?auto=0 too", async () => {
+    const req = new Request(
+      `http://localhost/s?${TEST}&k=${await hashStatsSecret(SECRET)}&id=noauto&auto=0&utm_source=newsletter`,
+      { headers: { accept: BROWSER_ACCEPT } }
+    );
+    Object.defineProperty(req, "cf", { value: { country: "NL" } });
+    await app.request(req);
+    const s = await statsFor(TEST);
+    expect(s.bySignal.utm_source.newsletter.pulls).toBe(1);
+    expect(s.bySignal.country).toBeUndefined();
   });
 });
