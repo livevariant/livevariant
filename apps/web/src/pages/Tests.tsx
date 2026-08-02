@@ -21,9 +21,9 @@ export function Tests() {
         <p className="text-muted-foreground">
           Nothing here yet. Tests are stored in this browser only.
         </p>
-        <Link to="/builder">
-          <Button>Create your first test</Button>
-        </Link>
+        <Button asChild>
+          <Link to="/builder">Create your first test</Link>
+        </Button>
       </div>
     );
   }
@@ -32,9 +32,9 @@ export function Tests() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">My tests</h1>
-        <Link to="/builder">
-          <Button>Create a test</Button>
-        </Link>
+        <Button asChild>
+          <Link to="/builder">Create a test</Link>
+        </Button>
       </div>
       <div className="space-y-3">
         {tests.map(test => (

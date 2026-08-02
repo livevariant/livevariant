@@ -34,13 +34,30 @@ const buttonVariants = cva(
 export interface ButtonProps
   extends
     React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+    VariantProps<typeof buttonVariants> {
+  /**
+   * Style the single child instead of emitting a <button>. Wrapping a
+   * router Link around a Button nests a button inside an anchor: invalid
+   * HTML, and two tab stops for keyboard users.
+   */
+  asChild?: boolean;
+}
 
-export function Button({ className, variant, size, ...props }: ButtonProps) {
-  return (
-    <button
-      className={cn(buttonVariants({ variant, size, className }))}
-      {...props}
-    />
-  );
+export function Button({
+  className,
+  variant,
+  size,
+  asChild,
+  ...props
+}: ButtonProps) {
+  const classes = cn(buttonVariants({ variant, size, className }));
+  if (asChild) {
+    const child = React.Children.only(
+      props.children as React.ReactElement<{ className?: string }>
+    );
+    return React.cloneElement(child, {
+      className: cn(classes, child.props.className)
+    });
+  }
+  return <button className={classes} {...props} />;
 }

@@ -1,7 +1,6 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { AssignmentRecord } from "@livevariant/core";
 import { MemoryStore } from "./memory.js";
-import { RedisStore } from "./redis.js";
 import {
   counterKey,
   GLOBAL_SCOPE,
@@ -10,8 +9,10 @@ import {
 } from "./types.js";
 
 /**
- * Contract every adapter must satisfy. Memory always runs; Redis runs when
- * REDIS_URL is set (CI provides a redis service container).
+ * The contract every StateStore adapter must satisfy. MemoryStore is the
+ * reference implementation; the Cloudflare deployment runs its own store
+ * inside the Durable Object (see @livevariant/workers), which is covered
+ * by that package's tests.
  */
 
 let seq = 0;
@@ -123,6 +124,31 @@ function contract(name: string, getStore: () => StateStore): void {
       expect((await store.getBlob(key))?.data).toBe("v2");
     });
 
+    it("pins a shape on first sight and lets the config override it", async () => {
+      const store = getStore();
+      const testId = freshTestId();
+      const first = await store.pinShape(
+        testId,
+        { armCount: 2, alg: "ts", dim: 16 },
+        false
+      );
+      expect(first.armCount).toBe(2);
+      // A non-authoritative caller claiming a different shape sees the pin.
+      const claimed = await store.pinShape(
+        testId,
+        { armCount: 50, alg: "linear", dim: 64 },
+        false
+      );
+      expect(claimed).toEqual({ armCount: 2, alg: "ts", dim: 16 });
+      // The decoded config always wins.
+      const authoritative = await store.pinShape(
+        testId,
+        { armCount: 3, alg: "bucketed", dim: 16 },
+        true
+      );
+      expect(authoritative.armCount).toBe(3);
+    });
+
     it("replaces derived state wholesale", async () => {
       const store = getStore();
       const testId = freshTestId();
@@ -157,12 +183,3 @@ function contract(name: string, getStore: () => StateStore): void {
 
 const memory = new MemoryStore();
 contract("MemoryStore", () => memory);
-
-const redisUrl = process.env.REDIS_URL;
-if (redisUrl) {
-  const redis = await RedisStore.connect(redisUrl);
-  afterAll(() => redis.close());
-  contract("RedisStore", () => redis);
-} else {
-  it.skip("RedisStore contract (set REDIS_URL to run)", () => undefined);
-}

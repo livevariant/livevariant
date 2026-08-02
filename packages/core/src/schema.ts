@@ -6,12 +6,20 @@ import { z } from "zod";
  * identity. Keep this schema lean; every byte rides along on every request.
  */
 
+/**
+ * http(s) only. Plain z.url() accepts javascript:, data:, and mailto:,
+ * which would hand an XSS payload to any SDK consumer assigning
+ * variant.url to an href (and opaque schemes all report origin "null",
+ * which would collapse the click-redirect origin allowlist).
+ */
+const httpUrl = z.url({ protocol: /^https?$/ });
+
 const armFormatsSchema = z
   .object({
     /** Destination page for redirect-mode serving (landing page tests). */
-    url: z.url().optional(),
+    url: httpUrl.optional(),
     /** Image asset URL, for email hero images etc. */
-    image: z.url().optional(),
+    image: httpUrl.optional(),
     html: z.string().optional(),
     md: z.string().optional(),
     text: z.string().optional()
@@ -24,7 +32,7 @@ const armSchema = z.object({
   name: z.string().min(1),
   formats: armFormatsSchema,
   /** Overrides the test-level redirectUrl for click redirects. */
-  redirectUrl: z.url().optional()
+  redirectUrl: httpUrl.optional()
 });
 
 const ctxDimSchema = z.object({
@@ -82,7 +90,7 @@ export const testConfigSchema = z
     /** Max pseudo-observations any prior may contribute per arm. */
     priorStrengthCap: z.number().positive().default(50),
     /** Fallback click-redirect target when the arm has none. */
-    redirectUrl: z.url().optional(),
+    redirectUrl: httpUrl.optional(),
     /** GA4 event names the SDK auto-rewards on (dataLayer interception). */
     rewardEvents: z.array(z.string().min(1)).optional(),
     /** Bucketed alg: bucket pulls needed before leaving global fallback. */

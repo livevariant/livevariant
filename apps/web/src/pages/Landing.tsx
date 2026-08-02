@@ -8,6 +8,7 @@ import {
   CardTitle,
   CardDescription
 } from "@/components/ui/card";
+import { DEFAULT_SERVER_URL } from "@/lib/tests-store";
 
 export function Landing() {
   return (
@@ -22,16 +23,16 @@ export function Landing() {
           account, no snippet configuration, no user data stored.
         </p>
         <div className="flex justify-center gap-3">
-          <Link to="/builder">
-            <Button size="lg">
+          <Button size="lg" asChild>
+            <Link to="/builder">
               Create a test <ArrowRight />
-            </Button>
-          </Link>
-          <a href="https://github.com/livevariant/livevariant">
-            <Button size="lg" variant="outline">
+            </Link>
+          </Button>
+          <Button size="lg" variant="outline" asChild>
+            <a href="https://github.com/livevariant/livevariant">
               Read the source
-            </Button>
-          </a>
+            </a>
+          </Button>
         </div>
       </section>
 
@@ -76,9 +77,9 @@ export function Landing() {
             <Sparkles className="size-6" />
             <CardTitle>Warm-started by your LLM</CardTitle>
             <CardDescription>
-              An MCP server lets Claude or any LLM draft variants and encode its
-              win-probability guesses as capped priors, so small tests start
-              smart and real data always has the last word.
+              Coming next: an MCP server will let Claude or any LLM draft
+              variants and encode its win-probability guesses as capped priors,
+              so small tests start smart and real data always has the last word.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -92,7 +93,7 @@ export function Landing() {
               <code>{`import { createTest } from "@livevariant/sdk";
 
 const test = await createTest("<encoded-config>", {
-  serverUrl: "https://livevariant.link"
+  serverUrl: "${DEFAULT_SERVER_URL}"
 });
 headline.textContent = test.variant.text;
 // conversions auto-tracked from your existing GA events`}</code>

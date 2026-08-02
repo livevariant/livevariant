@@ -1,9 +1,9 @@
 import type { AssignmentRecord, DerivedState } from "@livevariant/core";
 import {
   counterKey,
-  GLOBAL_SCOPE,
   linearKey,
-  type StateStore
+  type StateStore,
+  type TestShape
 } from "./types.js";
 import { derivedToArtifacts } from "./snapshot.js";
 
@@ -12,6 +12,20 @@ export class MemoryStore implements StateStore {
   private assignments = new Map<string, Map<string, AssignmentRecord>>();
   private counters = new Map<string, number[]>();
   private blobs = new Map<string, { data: string; version: number }>();
+  private shapes = new Map<string, TestShape>();
+
+  async pinShape(
+    testId: string,
+    shape: TestShape,
+    authoritative: boolean
+  ): Promise<TestShape> {
+    const existing = this.shapes.get(testId);
+    if (existing && !authoritative) {
+      return existing;
+    }
+    this.shapes.set(testId, { ...shape });
+    return shape;
+  }
 
   async getAssignment(
     testId: string,
@@ -112,5 +126,3 @@ export class MemoryStore implements StateStore {
     }
   }
 }
-
-export { GLOBAL_SCOPE };

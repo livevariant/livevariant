@@ -88,11 +88,63 @@ export async function resolveIdentity(
 
 const CAS_RETRIES = 5;
 
-export class TestService {
+/**
+ * The whole-operation surface the HTTP layer talks to. TestService is the
+ * in-process implementation over a StateStore; the Cloudflare deployment
+ * implements it as RPC into the test's Durable Object, so one serving
+ * request is one round-trip instead of one per storage primitive.
+ */
+export interface TestBackend {
+  checkShape(params: ServingParams, authoritative: boolean): Promise<boolean>;
+  assign(
+    params: ServingParams,
+    identity: RequestIdentity
+  ): Promise<{ armIndex: number; created: boolean }>;
+  reward(
+    testId: string,
+    idHash: string,
+    amount: number
+  ): Promise<{ armIndex: number; first: boolean } | null>;
+  recompute(params: ServingParams): Promise<number>;
+  stats(params: ServingParams, armNames?: string[]): Promise<TestStats>;
+}
+
+export class TestService implements TestBackend {
   constructor(
     private store: StateStore,
     private rng: Rng
   ) {}
+
+  /**
+   * Pins the shape a test is first served with. JS-mode callers declare
+   * armCount/alg/dim themselves and testIds are public, so a later caller
+   * claiming a different shape is rejected here rather than writing
+   * records the real config cannot represent.
+   */
+  /** Stats straight from the event log (the source of truth). */
+  stats(params: ServingParams, armNames?: string[]): Promise<TestStats> {
+    return buildStats(this.store, params, armNames);
+  }
+
+  async checkShape(
+    params: ServingParams,
+    authoritative = false
+  ): Promise<boolean> {
+    const pinned = await this.store.pinShape(
+      params.testId,
+      {
+        armCount: params.armCount,
+        alg: params.alg,
+        dim: params.dim
+      },
+      authoritative
+    );
+    return (
+      pinned.armCount === params.armCount &&
+      pinned.alg === params.alg &&
+      pinned.dim === params.dim
+    );
+  }
 
   /**
    * Sticky assignment: an existing record always wins; otherwise the
@@ -263,12 +315,12 @@ export class TestService {
     }
     await this.store.incrCounters(
       counterKey(testId, GLOBAL_SCOPE),
-      pullDelta(armCount, rec.armIndex, false)
+      pullDelta(armCount, rec.armIndex)
     );
     if (params.alg === "bucketed" && rec.ctxKey) {
       await this.store.incrCounters(
         counterKey(testId, rec.ctxKey),
-        pullDelta(armCount, rec.armIndex, false)
+        pullDelta(armCount, rec.armIndex)
       );
     }
   }

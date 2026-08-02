@@ -1,6 +1,6 @@
 /**
- * Algorithm auto-pick, shared by the web builder and the MCP server so
- * both give identical advice. Heuristic from the plan: no context ->
+ * Algorithm auto-pick, used by the web builder and (once it exists) the
+ * planned MCP server so both give identical advice. Heuristic from the plan: no context ->
  * plain Thompson; one coarse dimension with healthy per-bucket traffic ->
  * bucketed; richer or thinner -> linear (generalizes instead of
  * fragmenting).

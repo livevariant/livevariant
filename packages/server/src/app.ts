@@ -11,21 +11,38 @@ import {
   type DecodedConfig,
   type Rng
 } from "@livevariant/core";
-import { chooseRequestSchema, rewardRequestSchema } from "./api-schemas.js";
+import {
+  chooseRequestSchema,
+  rewardRequestSchema,
+  MAX_REWARD_AMOUNT
+} from "./api-schemas.js";
 import { renderManagePage } from "./manage-page.js";
 import {
-  buildStats,
   paramsFromConfig,
   resolveIdentity,
   TestService,
-  type ServingParams
+  type ServingParams,
+  type TestBackend
 } from "./service.js";
 import type { StateStore } from "./store/types.js";
 
 export interface AppOptions {
-  store: StateStore;
+  /** In-process backend over a StateStore (Node, tests). */
+  store?: StateStore;
+  /** Pre-built backend; the Workers deployment passes a DO-backed one. */
+  backend?: TestBackend;
   /** Injectable for deterministic tests; defaults to a random seed. */
   rng?: Rng;
+  /**
+   * Hostnames redirects may send visitors to. Unset means allow-all,
+   * which is right for self-hosters serving their own configs; the
+   * hosted deployment sets it so livevariant.link can't be used as an
+   * open redirector for phishing (anyone can author a config, so the
+   * config's own origins are not a trust boundary).
+   */
+  allowedDestinations?: string[];
+  /** Requests per minute per client IP for the public write endpoints. */
+  rateLimitPerMinute?: number;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -34,11 +51,19 @@ const PIXEL_GIF = Uint8Array.from(
   c => c.charCodeAt(0)
 );
 
+/** Server ceiling on prior strength, regardless of caller-supplied caps. */
+const MAX_PRIOR_STRENGTH = 50;
+
+/** Redirects and pixels must never be cached: they are per-visitor. */
+const NO_STORE = "no-store, private";
+
 export function createApp(options: AppOptions): Hono {
-  const service = new TestService(
-    options.store,
-    options.rng ?? mulberry32(randomSeed())
-  );
+  const service: TestBackend =
+    options.backend ??
+    new TestService(
+      options.store as StateStore,
+      options.rng ?? mulberry32(randomSeed())
+    );
   const app = new Hono();
 
   // Browser-called endpoints must be CORS-open: the SDK runs on customer
@@ -55,6 +80,37 @@ export function createApp(options: AppOptions): Hono {
   app.use("/reward", openCors);
   app.use("/stats/*", openCors);
   app.use("/recompute/*", openCors);
+
+  /**
+   * Fixed-window per-IP limiter for the unauthenticated write endpoints.
+   * Every request there spins up a Durable Object, so this bounds both
+   * cost amplification and how fast a single source can stuff a test's
+   * assignment log.
+   */
+  const rateLimit = options.rateLimitPerMinute ?? 0;
+  const hits = new Map<string, { count: number; windowStart: number }>();
+  function rateLimited(c: {
+    req: { header(name: string): string | undefined };
+  }): boolean {
+    if (rateLimit <= 0) {
+      return false;
+    }
+    const ip =
+      c.req.header("cf-connecting-ip") ??
+      c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ??
+      "unknown";
+    const now = Date.now();
+    const entry = hits.get(ip);
+    if (!entry || now - entry.windowStart >= 60_000) {
+      if (hits.size > 10_000) {
+        hits.clear(); // bounded memory; the window is short anyway
+      }
+      hits.set(ip, { count: 1, windowStart: now });
+      return false;
+    }
+    entry.count += 1;
+    return entry.count > rateLimit;
+  }
 
   /** Query params prefixed c_ carry context: ?c_device=mobile&c_country=nl */
   function ctxFromQuery(query: Record<string, string>): Record<string, string> {
@@ -83,10 +139,35 @@ export function createApp(options: AppOptions): Hono {
   }
 
   /**
-   * Click ?to= must land on an origin the config itself names. The click
-   * URL is public (it lives in every email), so an unvalidated ?to= would
-   * turn the serving domain into an open redirector for phishing; origins
-   * are creator-controlled because the config is hash-bound.
+   * Operator allowlist: the only real anti-phishing control here, because
+   * anyone can author a config, so a config's own origins prove nothing.
+   * Unset means allow-all (correct for a self-host serving its own
+   * campaigns); the hosted deployment sets it to protect the serving
+   * domain's reputation. Matches a host or any of its subdomains.
+   */
+  const allowedHosts = (options.allowedDestinations ?? []).map(h =>
+    h.toLowerCase().replace(/^\./, "")
+  );
+  function destinationAllowed(target: string): boolean {
+    if (allowedHosts.length === 0) {
+      return true;
+    }
+    let host: string;
+    try {
+      host = new URL(target).hostname.toLowerCase();
+    } catch {
+      return false;
+    }
+    return allowedHosts.some(
+      allowed => host === allowed || host.endsWith(`.${allowed}`)
+    );
+  }
+
+  /**
+   * Click ?to= must additionally land on an origin the config itself
+   * names, which stops a legitimate campaign's link from being re-pointed
+   * by appending ?to=. It is not a phishing control on its own (see
+   * destinationAllowed).
    */
   function isAllowedRedirect(
     config: DecodedConfig["config"],
@@ -111,6 +192,55 @@ export function createApp(options: AppOptions): Hono {
     });
   }
 
+  /** Shared preamble for the two redirect handlers. */
+  async function serveContext(c: {
+    req: {
+      param(name: string): string;
+      query(): Record<string, string>;
+      query(name: string): string | undefined;
+    };
+  }): Promise<
+    | { error: Response }
+    | {
+        decoded: DecodedConfig;
+        params: Awaited<ReturnType<typeof paramsFromConfig>>;
+        identity: Awaited<ReturnType<typeof resolveIdentity>>;
+      }
+  > {
+    const result = await decodeOr404(c.req.param("cfg"));
+    if ("error" in result) {
+      return result;
+    }
+    const { decoded } = result;
+    const params = await paramsFromConfig(decoded);
+    // The config is authoritative: it defines the test's real shape, so
+    // it overwrites anything a JS-mode caller pinned earlier.
+    await service.checkShape(params, true);
+    const externalId = c.req.query("id") ?? null;
+    const identity = await resolveIdentity(
+      decoded,
+      externalId ? await externalIdHash(decoded.testId, externalId) : null,
+      ctxFromQuery(c.req.query())
+    );
+    return { decoded, params, identity };
+  }
+
+  /** Handoff decoration, shared by both redirect handlers. */
+  function maybeDecorate(
+    decoded: DecodedConfig,
+    identity: { idHash: string | null },
+    armIndex: number,
+    target: string
+  ): string {
+    return decoded.config.decorateRedirects && identity.idHash
+      ? decorateUrl(target, {
+          testId: decoded.testId,
+          idHash: identity.idHash,
+          armIndex
+        })
+      : target;
+  }
+
   /**
    * Stats secret via Authorization: Bearer only. Query parameters would
    * land in access/proxy logs; the shareable manage URL instead carries
@@ -121,7 +251,9 @@ export function createApp(options: AppOptions): Hono {
     c: { req: { header(name: string): string | undefined } },
     decoded: DecodedConfig
   ): Promise<boolean> {
-    const secret = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
+    const header = c.req.header("authorization");
+    const match = header?.match(/^Bearer\s+(\S+)$/i);
+    const secret = match?.[1];
     if (!secret) {
       return false;
     }
@@ -132,69 +264,57 @@ export function createApp(options: AppOptions): Hono {
 
   // Redirect-mode serve: 302 to the assigned arm's url/image.
   app.get("/s/:cfg", async c => {
-    const result = await decodeOr404(c.req.param("cfg"));
-    if ("error" in result) {
-      return result.error;
+    const ctx = await serveContext(c);
+    if ("error" in ctx) {
+      return ctx.error;
     }
-    const { decoded } = result;
-    const params = await paramsFromConfig(decoded);
-    const externalId = c.req.query("id") ?? null;
-    const identity = await resolveIdentity(
-      decoded,
-      externalId ? await externalIdHash(decoded.testId, externalId) : null,
-      ctxFromQuery(c.req.query())
+    const { decoded, params, identity } = ctx;
+    // Every arm must be servable before we record anything: otherwise a
+    // config with a text-only arm burns a pull and then 400s.
+    const unservable = decoded.config.arms.find(
+      arm => !(arm.formats.url ?? arm.formats.image)
     );
-    const { armIndex } = await service.assign(params, identity);
-    const arm = decoded.config.arms[armIndex];
-    const target = arm.formats.url ?? arm.formats.image;
-    if (!target) {
+    if (unservable) {
       return c.json(
         {
-          error: `arm "${arm.name}" has no url/image format for redirect serving`
+          error: `arm "${unservable.name}" has no url/image format for redirect serving`
         },
         400
       );
     }
-    // Identity handoff: decorate page destinations (not image assets) so
-    // an SDK on the destination site can adopt this assignment.
-    const decorated =
-      decoded.config.decorateRedirects && identity.idHash && arm.formats.url
-        ? decorateUrl(target, {
-            testId: decoded.testId,
-            idHash: identity.idHash,
-            armIndex
-          })
-        : target;
+    const { armIndex } = await service.assign(params, identity);
+    const arm = decoded.config.arms[armIndex];
+    const target = (arm.formats.url ?? arm.formats.image) as string;
+    if (!destinationAllowed(target)) {
+      return c.json({ error: "destination not allowed by this server" }, 403);
+    }
+    // Handoff decoration applies to pages, not image assets.
+    const decorated = arm.formats.url
+      ? maybeDecorate(decoded, identity, armIndex, target)
+      : target;
+    c.header("cache-control", NO_STORE);
     return c.redirect(decorated, 302);
   });
 
   // Click: rewards (id'd traffic) and redirects onward.
   app.get("/c/:cfg", async c => {
-    const result = await decodeOr404(c.req.param("cfg"));
-    if ("error" in result) {
-      return result.error;
+    const ctx = await serveContext(c);
+    if ("error" in ctx) {
+      return ctx.error;
     }
-    const { decoded } = result;
-    const params = await paramsFromConfig(decoded);
-    const externalId = c.req.query("id") ?? null;
-    const identity = await resolveIdentity(
-      decoded,
-      externalId ? await externalIdHash(decoded.testId, externalId) : null,
-      ctxFromQuery(c.req.query())
-    );
-    // A click implies a serve, so assign (sticky or fresh) before rewarding.
-    const { armIndex } = await service.assign(params, identity);
-    if (identity.idHash) {
-      await service.reward(decoded.testId, identity.idHash, 1);
-    }
-    const arm = decoded.config.arms[armIndex];
+    const { decoded, params, identity } = ctx;
     const to = c.req.query("to");
+    // Validate the destination BEFORE recording anything: a 400 that has
+    // already counted a conversion would silently skew the test.
     if (to !== undefined && !isAllowedRedirect(decoded.config, to)) {
       return c.json(
         { error: "?to= must be on an origin the test config references" },
         400
       );
     }
+    // A click implies a serve, so assign (sticky or fresh) before rewarding.
+    const { armIndex } = await service.assign(params, identity);
+    const arm = decoded.config.arms[armIndex];
     const target = to ?? arm.redirectUrl ?? decoded.config.redirectUrl;
     if (!target) {
       return c.json(
@@ -202,25 +322,34 @@ export function createApp(options: AppOptions): Hono {
         400
       );
     }
-    const decorated =
-      decoded.config.decorateRedirects && identity.idHash
-        ? decorateUrl(target, {
-            testId: decoded.testId,
-            idHash: identity.idHash,
-            armIndex
-          })
-        : target;
-    return c.redirect(decorated, 302);
+    if (!destinationAllowed(target)) {
+      return c.json({ error: "destination not allowed by this server" }, 403);
+    }
+    if (identity.idHash) {
+      await service.reward(decoded.testId, identity.idHash, 1);
+    }
+    c.header("cache-control", NO_STORE);
+    return c.redirect(maybeDecorate(decoded, identity, armIndex, target), 302);
   });
 
   // No-JS conversion pixel for thank-you pages.
   app.get("/px/:cfg", async c => {
-    const result = await decodeOr404(c.req.param("cfg"));
+    const result = rateLimited(c)
+      ? ({ error: new Response(null, { status: 429 }) } as const)
+      : await decodeOr404(c.req.param("cfg"));
     if (!("error" in result)) {
       const { decoded } = result;
       const externalId = c.req.query("id");
       const amount = Number(c.req.query("amount") ?? "1");
-      if (externalId && Number.isFinite(amount) && amount > 0) {
+      // Same bound as /reward: the pixel URL is public (it carries the raw
+      // recipient id in emails), so an unbounded amount lets any recipient
+      // or link-scanner drive rewardTotal to Infinity.
+      if (
+        externalId &&
+        Number.isFinite(amount) &&
+        amount > 0 &&
+        amount <= MAX_REWARD_AMOUNT
+      ) {
         await service.reward(
           decoded.testId,
           await externalIdHash(decoded.testId, externalId),
@@ -237,14 +366,24 @@ export function createApp(options: AppOptions): Hono {
 
   // JS-mode choose: content-free request, arm index response.
   app.post("/choose", async c => {
+    if (rateLimited(c)) {
+      return c.json({ error: "rate limit exceeded" }, 429);
+    }
     const body = chooseRequestSchema.safeParse(
       await c.req.json().catch(() => null)
     );
     if (!body.success) {
-      return c.json({ error: body.error.issues }, 400);
+      return c.json(
+        { error: "invalid request", details: body.error.issues },
+        400
+      );
     }
     const r = body.data;
-    const cap = r.priorStrengthCap ?? 50;
+    // The caller supplies both the priors and their cap, so the cap can't
+    // be trusted to bound them: clamp to the server's own ceiling, which
+    // is what keeps a hostile prior from pinning an arm (linear priors are
+    // baked into persisted state on first write).
+    const cap = Math.min(r.priorStrengthCap ?? 50, MAX_PRIOR_STRENGTH);
     const params: ServingParams = {
       testId: r.testId,
       armCount: r.armCount,
@@ -266,6 +405,12 @@ export function createApp(options: AppOptions): Hono {
       })),
       noise: r.noise
     };
+    if (!(await service.checkShape(params, false))) {
+      return c.json(
+        { error: "armCount/alg/dim disagree with this test's serving shape" },
+        409
+      );
+    }
     const { armIndex } = await service.assign(params, {
       idHash: r.idHash ?? null,
       ctxKey: r.ctxKey ?? null,
@@ -275,11 +420,17 @@ export function createApp(options: AppOptions): Hono {
   });
 
   app.post("/reward", async c => {
+    if (rateLimited(c)) {
+      return c.json({ error: "rate limit exceeded" }, 429);
+    }
     const body = rewardRequestSchema.safeParse(
       await c.req.json().catch(() => null)
     );
     if (!body.success) {
-      return c.json({ error: body.error.issues }, 400);
+      return c.json(
+        { error: "invalid request", details: body.error.issues },
+        400
+      );
     }
     const r = body.data;
     const result = await service.reward(r.testId, r.idHash, r.amount);
@@ -297,12 +448,12 @@ export function createApp(options: AppOptions): Hono {
       return c.json({ error: "stats secret required" }, 401);
     }
     const params = await paramsFromConfig(decoded);
-    const stats = await buildStats(
-      options.store,
-      params,
-      decoded.config.arms.map(a => a.name)
+    return c.json(
+      await service.stats(
+        params,
+        decoded.config.arms.map(a => a.name)
+      )
     );
-    return c.json(stats);
   });
 
   app.post("/recompute/:cfg", async c => {

@@ -24,12 +24,50 @@ registration, no dashboard required.
 
 ## Packages
 
-| Package             | Purpose                                                 |
-| ------------------- | ------------------------------------------------------- |
-| `@livevariant/core` | Config codec, hash identity, bandit math, priors, state |
+| Package                | Purpose                                                      |
+| ---------------------- | ------------------------------------------------------------ |
+| `@livevariant/core`    | Config codec, hash identity, bandit math, priors, state      |
+| `@livevariant/server`  | Hono serving app behind a pluggable StateStore + TestBackend |
+| `@livevariant/workers` | Cloudflare deployment: one SQLite Durable Object per test    |
+| `@livevariant/sdk`     | Browser SDK: sticky variants, GA-driven conversion tracking  |
+| `apps/web`             | livevariant.com: product site and account-free test builder  |
 
-Server (Hono, Cloudflare Workers/Node), browser SDK, and MCP server
-packages are in progress; see the repository issues/roadmap.
+An MCP server (LLM-drafted variants and warm-start priors) is next; see
+the repository roadmap.
+
+### HTTP surface
+
+| Endpoint               | Purpose                                                     |
+| ---------------------- | ----------------------------------------------------------- |
+| `GET /s/:cfg`          | Serve: assigns a variant, 302s to it (email/link mode)      |
+| `GET /c/:cfg`          | Click: rewards, then redirects onward                       |
+| `GET /px/:cfg`         | 1x1 gif conversion pixel (no-JS thank-you pages)            |
+| `POST /choose`         | JS mode: content-free assignment, returns an arm index      |
+| `POST /reward`         | JS mode: `{testId, idHash, amount}`                         |
+| `GET /stats/:cfg`      | Creator-only stats (Bearer stats secret)                    |
+| `POST /recompute/:cfg` | Creator-only: rebuild derived state from the event log      |
+| `GET /manage/:cfg`     | Creator dashboard shell (secret travels in the `#fragment`) |
+
+Serve and click redirects append `_lvt`/`_lvid`/`_lvvar` so the SDK on the
+destination site can adopt the assignment (`decorateRedirects: false` opts
+out).
+
+### Trust model
+
+Configs are unauthenticated by design: the URL is the test. That has two
+consequences worth stating plainly.
+
+- **Serving endpoints are redirectors.** Anyone can author a config
+  pointing anywhere, so set `LV_ALLOWED_DESTINATIONS` (comma-separated
+  hosts) on a public deployment to keep your domain out of phishing
+  reports. Unset means allow-all, which is the right default for a
+  self-host serving its own campaigns.
+- **JS-mode serving is unauthenticated.** `/choose` and `/reward` take a
+  public `testId`, so the server pins each test's shape (arm count,
+  algorithm, dimension) on first sight and rejects callers that disagree,
+  and `LV_RATE_LIMIT_PER_MINUTE` (default 120/IP) bounds stuffing. A
+  determined attacker who knows a testId can still add same-shape
+  assignments; treat public test stats accordingly.
 
 ## Development
 

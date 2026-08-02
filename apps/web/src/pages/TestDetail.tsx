@@ -96,9 +96,9 @@ export function TestDetail() {
         <p className="text-muted-foreground">
           This test isn't saved in this browser.
         </p>
-        <Link to="/tests">
-          <Button variant="outline">Back to my tests</Button>
-        </Link>
+        <Button variant="outline" asChild>
+          <Link to="/tests">Back to my tests</Link>
+        </Button>
       </div>
     );
   }

@@ -11,7 +11,16 @@ import type { TestConfig } from "./schema.js";
 /** Feature-vector dimension for the linear bandit: slot 0 is the bias. */
 export const FEATURE_DIM = 16;
 
-/** Normalizes a raw context against the config: unknown keys dropped. */
+/** Free-form dimension values longer than this are dropped. */
+const MAX_CTX_VALUE_LENGTH = 64;
+
+/**
+ * Normalizes a raw context against the config: unknown keys dropped, and
+ * declared `values` enforced as an allowlist. Without that enforcement a
+ * crafted ?c_country=... creates an unbounded number of bucket counters
+ * per test (storage growth plus stats fragmentation), since context
+ * values arrive from URLs and page code.
+ */
 export function normalizeCtx(
   config: TestConfig,
   raw: Record<string, string> | null | undefined
@@ -19,10 +28,16 @@ export function normalizeCtx(
   if (!raw || !config.ctx) {
     return null;
   }
-  const known = new Set(config.ctx.dims.map(d => d.key));
+  const dims = new Map(config.ctx.dims.map(d => [d.key, d.values]));
   const ctx: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (known.has(key) && value !== "") {
+    if (!dims.has(key) || value === "") {
+      continue;
+    }
+    const allowed = dims.get(key);
+    if (
+      allowed ? allowed.includes(value) : value.length <= MAX_CTX_VALUE_LENGTH
+    ) {
       ctx[key] = value;
     }
   }

@@ -1,4 +1,4 @@
-import type { AssignmentRecord, DerivedState } from "@livevariant/core";
+import type { AssignmentRecord } from "@livevariant/core";
 
 /**
  * The per-test state logic that runs INSIDE the Durable Object, written
@@ -23,7 +23,22 @@ export interface StorageLike {
 const ASSIGNMENT_PREFIX = "a:";
 const COUNTER_PREFIX = "c:";
 const BLOB_KEY = "l";
-const BLOB_VERSION_KEY = "lv";
+const SHAPE_KEY = "shape";
+/** Cloudflare caps a single storage delete() at 128 keys. */
+const DELETE_BATCH = 128;
+
+export interface TestShape {
+  armCount: number;
+  alg: "ts" | "bucketed" | "linear";
+  dim: number;
+}
+
+/** data:null means "no blob", but the version keeps advancing so that a
+ * racing CAS writer holding an old version still fails. */
+interface BlobEnvelope {
+  version: number;
+  data: string | null;
+}
 
 export class TestStorage {
   constructor(private storage: StorageLike) {}
@@ -93,22 +108,32 @@ export class TestStorage {
     return Array.from({ length }, (_, i) => current[i] ?? 0);
   }
 
-  async getBlob(): Promise<{ data: string; version: number } | null> {
-    const data = await this.storage.get<string>(BLOB_KEY);
-    if (data === undefined) {
-      return null;
+  /** Shape pinning; the config-derived call is authoritative. */
+  async pinShape(shape: TestShape, authoritative: boolean): Promise<TestShape> {
+    const existing = await this.storage.get<TestShape>(SHAPE_KEY);
+    if (existing && !authoritative) {
+      return existing;
     }
-    const version = (await this.storage.get<number>(BLOB_VERSION_KEY)) ?? 0;
-    return { data, version };
+    await this.storage.put(SHAPE_KEY, shape);
+    return shape;
+  }
+
+  // Blob and version live in ONE key: two keys doubled the billed storage
+  // ops on the linear hot path for no benefit.
+  async getBlob(): Promise<{ data: string; version: number } | null> {
+    const envelope = await this.storage.get<BlobEnvelope>(BLOB_KEY);
+    return envelope?.data != null
+      ? { data: envelope.data, version: envelope.version }
+      : null;
   }
 
   async putBlob(data: string, expectedVersion: number): Promise<boolean> {
-    const current = (await this.storage.get<number>(BLOB_VERSION_KEY)) ?? 0;
+    const envelope = await this.storage.get<BlobEnvelope>(BLOB_KEY);
+    const current = envelope?.version ?? 0;
     if (current !== expectedVersion) {
       return false;
     }
-    await this.storage.put(BLOB_KEY, data);
-    await this.storage.put(BLOB_VERSION_KEY, current + 1);
+    await this.storage.put(BLOB_KEY, { version: current + 1, data });
     return true;
   }
 
@@ -120,22 +145,19 @@ export class TestStorage {
     const stale = await this.storage.list<number[]>({
       prefix: COUNTER_PREFIX
     });
-    if (stale.size > 0) {
-      // Single round-trip: a test with many context buckets would
-      // otherwise pay one await per stale scope.
-      await this.storage.deleteMany([...stale.keys()]);
+    // Chunked: DO storage rejects a delete() of more than 128 keys, which
+    // a test with many context buckets would hit.
+    const staleKeys = [...stale.keys()];
+    for (let i = 0; i < staleKeys.length; i += DELETE_BATCH) {
+      await this.storage.deleteMany(staleKeys.slice(i, i + DELETE_BATCH));
     }
     for (const [scope, values] of counters) {
       await this.storage.put(COUNTER_PREFIX + scope, values);
     }
-    const version = (await this.storage.get<number>(BLOB_VERSION_KEY)) ?? 0;
-    if (blob === null) {
-      await this.storage.delete(BLOB_KEY);
-    } else {
-      await this.storage.put(BLOB_KEY, blob);
-    }
-    await this.storage.put(BLOB_VERSION_KEY, version + 1);
+    const envelope = await this.storage.get<BlobEnvelope>(BLOB_KEY);
+    await this.storage.put(BLOB_KEY, {
+      version: (envelope?.version ?? 0) + 1,
+      data: blob
+    });
   }
 }
-
-export type { AssignmentRecord, DerivedState };

@@ -81,11 +81,39 @@ export function newDerivedState(init: StateInit): DerivedState {
   }
 }
 
+/**
+ * True when a record can be applied to this state. Records are written by
+ * request handlers, so a stale or hostile armIndex must never crash a
+ * replay: recompute is the creator's repair path and has to survive
+ * anything already in the log.
+ */
+function appliesTo(state: DerivedState, armIndex: number): boolean {
+  const armCount =
+    state.alg === "bucketed" ? state.global.length : state.arms.length;
+  return Number.isInteger(armIndex) && armIndex >= 0 && armIndex < armCount;
+}
+
+/**
+ * Feature indices clamped to the model's dimension. An index past `dim`
+ * reads undefined out of the matrix and silently turns the whole model
+ * into NaN, so a record written under a different dim is dropped here
+ * rather than poisoning the replay.
+ */
+function safeFeatIdx(dim: number, featIdx: number[] | null): number[] {
+  const indices = (featIdx ?? [0]).filter(
+    i => Number.isInteger(i) && i >= 0 && i < dim
+  );
+  return indices.length > 0 ? indices : [0];
+}
+
 /** Records a pull. Mutates state; callers own copy semantics. */
 export function applyAssignment(
   state: DerivedState,
   rec: Pick<AssignmentRecord, "armIndex" | "ctxKey" | "featIdx">
 ): void {
+  if (!appliesTo(state, rec.armIndex)) {
+    return;
+  }
   switch (state.alg) {
     case "ts":
       state.arms[rec.armIndex].pulls += 1;
@@ -101,7 +129,10 @@ export function applyAssignment(
       return;
     }
     case "linear":
-      linearObserve(state.arms[rec.armIndex], rec.featIdx ?? [0]);
+      linearObserve(
+        state.arms[rec.armIndex],
+        safeFeatIdx(state.dim, rec.featIdx)
+      );
       return;
   }
 }
@@ -111,6 +142,9 @@ export function applyFirstReward(
   state: DerivedState,
   rec: Pick<AssignmentRecord, "armIndex" | "ctxKey" | "featIdx">
 ): void {
+  if (!appliesTo(state, rec.armIndex)) {
+    return;
+  }
   switch (state.alg) {
     case "ts":
       state.arms[rec.armIndex].successes += 1;
@@ -126,7 +160,10 @@ export function applyFirstReward(
       return;
     }
     case "linear":
-      linearReward(state.arms[rec.armIndex], rec.featIdx ?? [0]);
+      linearReward(
+        state.arms[rec.armIndex],
+        safeFeatIdx(state.dim, rec.featIdx)
+      );
       return;
   }
 }
@@ -188,6 +225,11 @@ export function chooseArm(
       );
     }
     case "linear":
-      return chooseLinear(state.arms, input.featIdx ?? [0], rng, options.noise);
+      return chooseLinear(
+        state.arms,
+        safeFeatIdx(state.dim, input.featIdx ?? null),
+        rng,
+        options.noise
+      );
   }
 }

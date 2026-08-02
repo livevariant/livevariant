@@ -1,7 +1,7 @@
 {
   "name": "@livevariant/server",
   "version": "0.0.1",
-  "description": "LiveVariant serving backend: Hono app with redirect/click/pixel endpoints, JS-mode choose/reward API, secret-gated stats and recompute, behind a pluggable state store (memory, Redis; Cloudflare Durable Objects planned)",
+  "description": "LiveVariant serving backend: Hono app with redirect/click/pixel endpoints, JS-mode choose/reward API, secret-gated stats and recompute, behind a pluggable StateStore (in-memory here; Cloudflare Durable Objects in @livevariant/workers)",
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
@@ -27,12 +27,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    },
-    "./redis": {
-      "@livevariant/source": "./src/store/redis.ts",
-      "types": "./dist/store/redis.d.ts",
-      "import": "./dist/store/redis.js",
-      "default": "./dist/store/redis.js"
     }
   },
   "bin": {
@@ -42,7 +36,6 @@
     "@hono/node-server": "^2.0.12",
     "@livevariant/core": "0.0.1",
     "hono": "^4.12.33",
-    "redis": "^6.2.0",
     "zod": "^4.4.3"
   },
   "files": [

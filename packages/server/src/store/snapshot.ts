@@ -23,17 +23,10 @@ export function arrayToCounts(flat: number[], armCount: number): ArmCounts[] {
   }));
 }
 
-/** Delta array for one pull (optionally with its success) of an arm. */
-export function pullDelta(
-  armCount: number,
-  armIndex: number,
-  success: boolean
-): number[] {
+/** Delta array for one pull of an arm (successes use successDelta). */
+export function pullDelta(armCount: number, armIndex: number): number[] {
   const deltas = new Array<number>(armCount * 2).fill(0);
   deltas[2 * armIndex] = 1;
-  if (success) {
-    deltas[2 * armIndex + 1] = 1;
-  }
   return deltas;
 }
 

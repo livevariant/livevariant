@@ -1,17 +1,33 @@
 import { DurableObject } from "cloudflare:workers";
-import type { AssignmentRecord, DerivedState } from "@livevariant/core";
+import {
+  mulberry32,
+  randomSeed,
+  type AssignmentRecord
+} from "@livevariant/core";
 import {
   createApp,
   counterKey,
   derivedToArtifacts,
-  type StateStore
+  TestService,
+  type RequestIdentity,
+  type ServingParams,
+  type StateStore,
+  type TestBackend,
+  type TestShape
 } from "@livevariant/server";
 import { TestStorage } from "./test-storage.js";
 
 /**
  * Cloudflare deployment: the Hono app from @livevariant/server, backed by
  * one SQLite Durable Object per testId. The DO gives per-test serial
- * execution, so this adapter needs none of the Redis adapter's scripting.
+ * execution, so this adapter needs none of the locking or scripting a
+ * shared-database backend would.
+ *
+ * The DO exposes the whole assign/reward operations, not just storage
+ * primitives: a Worker running the fine-grained StateStore would pay a
+ * separate cross-colo RPC (and a billed DO request) for every read and
+ * write, so one serving request became 4-7 round-trips. Running the
+ * service inside the object makes it exactly one.
  */
 
 export class TestStateDO extends DurableObject {
@@ -22,6 +38,86 @@ export class TestStateDO extends DurableObject {
     deleteMany: keys => this.ctx.storage.delete(keys),
     list: async options => this.ctx.storage.list(options)
   });
+
+  /** Storage confined to this object; the testId is its name. */
+  private localStore(testId: string): StateStore {
+    const store = this.store;
+    return {
+      pinShape: (_t, shape, authoritative) =>
+        store.pinShape(shape, authoritative),
+      getAssignment: (_t, idHash) => store.getAssignment(idHash),
+      putAssignmentIfAbsent: (_t, idHash, rec) =>
+        store.putAssignmentIfAbsent(idHash, rec),
+      addReward: (_t, idHash, amount) => store.addReward(idHash, amount),
+      async *scanAssignments() {
+        let startAfter: string | null = null;
+        do {
+          const page: {
+            records: AssignmentRecord[];
+            nextStartAfter: string | null;
+          } = await store.listAssignments(startAfter, 500);
+          for (const rec of page.records) {
+            yield rec;
+          }
+          startAfter = page.nextStartAfter;
+        } while (startAfter !== null);
+      },
+      incrCounters: (key, deltas) =>
+        store.incrCounters(stripScope(testId, key), deltas),
+      getCounters: (key, length) =>
+        store.getCounters(stripScope(testId, key), length),
+      getBlob: () => store.getBlob(),
+      putBlob: (_k, data, expectedVersion) =>
+        store.putBlob(data, expectedVersion),
+      replaceDerived: async (_t, state) => {
+        const { counters, blob } = derivedToArtifacts(testId, state);
+        await store.replaceDerived(
+          [...counters.entries()].map(([key, values]) => [
+            stripScope(testId, key),
+            values
+          ]),
+          blob
+        );
+      }
+    };
+  }
+
+  private service(testId: string): TestService {
+    return new TestService(this.localStore(testId), mulberry32(randomSeed()));
+  }
+
+  // ---- whole operations: one RPC per serving request ----
+
+  checkShape(params: ServingParams, authoritative: boolean): Promise<boolean> {
+    return this.service(params.testId).checkShape(params, authoritative);
+  }
+
+  assign(
+    params: ServingParams,
+    identity: RequestIdentity
+  ): Promise<{ armIndex: number; created: boolean }> {
+    return this.service(params.testId).assign(params, identity);
+  }
+
+  rewardAssignment(
+    testId: string,
+    idHash: string,
+    amount: number
+  ): Promise<{ armIndex: number; first: boolean } | null> {
+    return this.service(testId).reward(testId, idHash, amount);
+  }
+
+  recompute(params: ServingParams): Promise<number> {
+    return this.service(params.testId).recompute(params);
+  }
+
+  stats(params: ServingParams, armNames?: string[]) {
+    return this.service(params.testId).stats(params, armNames);
+  }
+
+  pinShape(shape: TestShape, authoritative: boolean): Promise<TestShape> {
+    return this.store.pinShape(shape, authoritative);
+  }
 
   getAssignment(idHash: string): Promise<AssignmentRecord | null> {
     return this.store.getAssignment(idHash);
@@ -74,73 +170,49 @@ export class TestStateDO extends DurableObject {
 
 interface Env {
   TEST_STATE: DurableObjectNamespace<TestStateDO>;
+  /** Comma-separated destination hosts; unset means allow-all. */
+  LV_ALLOWED_DESTINATIONS?: string;
+  /** Per-IP per-minute cap on the public write endpoints. */
+  LV_RATE_LIMIT_PER_MINUTE?: string;
 }
 
-/** StateStore that forwards each call to the test's Durable Object. */
-class DurableObjectStore implements StateStore {
+/** Counter keys arrive as c:{testId}:{scope}; the DO stores scopes. */
+function stripScope(testId: string, key: string): string {
+  return key.slice(counterKey(testId, "").length);
+}
+
+/**
+ * TestBackend over the DO namespace: one RPC per whole operation, so a
+ * serving request is a single cross-colo hop instead of one per storage
+ * primitive. The fine-grained StateStore still exists (MemoryStore uses
+ * it, and the DO runs the service against its own local storage), so a
+ * different backend can be added without touching the HTTP layer.
+ */
+class DurableObjectBackend implements TestBackend {
   constructor(private ns: DurableObjectNamespace<TestStateDO>) {}
 
   private stub(testId: string) {
     return this.ns.get(this.ns.idFromName(testId));
   }
 
-  /** Counter/blob keys arrive as c:{testId}:{scope} / l:{testId}. */
-  private parseKey(key: string): { testId: string; scope: string } {
-    const [, testId, ...rest] = key.split(":");
-    return { testId, scope: rest.join(":") };
+  checkShape(params: ServingParams, authoritative: boolean) {
+    return this.stub(params.testId).checkShape(params, authoritative);
   }
 
-  getAssignment(testId: string, idHash: string) {
-    return this.stub(testId).getAssignment(idHash);
+  assign(params: ServingParams, identity: RequestIdentity) {
+    return this.stub(params.testId).assign(params, identity);
   }
 
-  putAssignmentIfAbsent(testId: string, idHash: string, rec: AssignmentRecord) {
-    return this.stub(testId).putAssignmentIfAbsent(idHash, rec);
+  reward(testId: string, idHash: string, amount: number) {
+    return this.stub(testId).rewardAssignment(testId, idHash, amount);
   }
 
-  addReward(testId: string, idHash: string, amount: number) {
-    return this.stub(testId).addReward(idHash, amount);
+  recompute(params: ServingParams) {
+    return this.stub(params.testId).recompute(params);
   }
 
-  async *scanAssignments(testId: string): AsyncIterable<AssignmentRecord> {
-    let startAfter: string | null = null;
-    do {
-      const page: {
-        records: AssignmentRecord[];
-        nextStartAfter: string | null;
-      } = await this.stub(testId).listAssignments(startAfter, 500);
-      for (const rec of page.records) {
-        yield rec;
-      }
-      startAfter = page.nextStartAfter;
-    } while (startAfter !== null);
-  }
-
-  incrCounters(key: string, deltas: number[]) {
-    const { testId, scope } = this.parseKey(key);
-    return this.stub(testId).incrCounters(scope, deltas);
-  }
-
-  getCounters(key: string, length: number) {
-    const { testId, scope } = this.parseKey(key);
-    return this.stub(testId).getCounters(scope, length);
-  }
-
-  getBlob(key: string) {
-    return this.stub(this.parseKey(key).testId).getBlob();
-  }
-
-  putBlob(key: string, data: string, expectedVersion: number) {
-    return this.stub(this.parseKey(key).testId).putBlob(data, expectedVersion);
-  }
-
-  async replaceDerived(testId: string, state: DerivedState): Promise<void> {
-    const { counters, blob } = derivedToArtifacts(testId, state);
-    // The DO stores scopes, not full keys: strip the c:{testId}: prefix.
-    const scoped: Array<[string, number[]]> = [...counters.entries()].map(
-      ([key, values]) => [key.slice(counterKey(testId, "").length), values]
-    );
-    await this.stub(testId).replaceDerived(scoped, blob);
+  stats(params: ServingParams, armNames?: string[]) {
+    return this.stub(params.testId).stats(params, armNames);
   }
 }
 
@@ -153,7 +225,15 @@ export default {
   fetch(request: Request, env: Env): Response | Promise<Response> {
     let app = apps.get(env);
     if (!app) {
-      app = createApp({ store: new DurableObjectStore(env.TEST_STATE) });
+      app = createApp({
+        backend: new DurableObjectBackend(env.TEST_STATE),
+        allowedDestinations: env.LV_ALLOWED_DESTINATIONS
+          ? env.LV_ALLOWED_DESTINATIONS.split(",")
+              .map(h => h.trim())
+              .filter(Boolean)
+          : undefined,
+        rateLimitPerMinute: Number(env.LV_RATE_LIMIT_PER_MINUTE ?? "120")
+      });
       apps.set(env, app);
     }
     return app.fetch(request);

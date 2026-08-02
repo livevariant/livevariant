@@ -97,7 +97,14 @@ describe("recompute equivalence", () => {
   });
 
   it("is insensitive to event iteration order", () => {
-    const shuffled = [...events].sort(() => 0.5 - Math.random());
+    // Seeded Fisher-Yates: a random comparator is implementation-defined
+    // and an unseeded failure would be unreproducible.
+    const shuffled = [...events];
+    const shuffleRng = mulberry32(99);
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(shuffleRng() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
     const init: StateInit = { alg: "ts", armCount: 3 };
     expectClose(recomputeState(events, init), recomputeState(shuffled, init));
   });

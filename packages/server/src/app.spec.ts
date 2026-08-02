@@ -215,6 +215,20 @@ describe("conversion pixel (email -> landing page flow)", () => {
     expect(res.headers.get("content-type")).toBe("image/gif");
   });
 
+  it("ignores out-of-range pixel amounts", async () => {
+    const { encoded } = await makeTest();
+    await app.request(`/s/${encoded}?id=r1`);
+    // The pixel URL is public and carries the raw recipient id, so an
+    // unbounded amount would let anyone drive rewardTotal to Infinity.
+    for (const amount of ["1e308", "-5", "NaN", "2000000"]) {
+      await app.request(`/px/${encoded}?id=r1&amount=${amount}`);
+    }
+    const s = await stats(encoded);
+    expect(s.arms.reduce((sum: number, a: any) => sum + a.rewardTotal, 0)).toBe(
+      0
+    );
+  });
+
   it("drops pixel rewards for ids that were never served", async () => {
     const { encoded } = await makeTest();
     await app.request(`/px/${encoded}?id=stranger`);
@@ -258,6 +272,50 @@ describe("JS mode (choose/reward)", () => {
     const res = await app.request("/choose", {
       method: "POST",
       body: JSON.stringify({ testId: "short", armCount: 2, alg: "ts" }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects feature indices outside the model dimension", async () => {
+    const { testId } = await makeTest();
+    // dim 16 with index 63 would read past the matrix and write NaN into
+    // the linear model.
+    const res = await app.request("/choose", {
+      method: "POST",
+      body: JSON.stringify({
+        testId,
+        armCount: 2,
+        alg: "linear",
+        dim: 16,
+        featIdx: [0, 63]
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects prior arrays that disagree with armCount", async () => {
+    const { testId } = await makeTest();
+    const res = await app.request("/choose", {
+      method: "POST",
+      body: JSON.stringify({
+        testId,
+        armCount: 2,
+        alg: "ts",
+        armPriors: [{ alpha: 1, beta: 1 }]
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects reward amounts beyond the cap", async () => {
+    const { testId } = await makeTest();
+    const idHash = await externalIdHash(testId, "u1");
+    const res = await app.request("/reward", {
+      method: "POST",
+      body: JSON.stringify({ testId, idHash, amount: 1e12 }),
       headers: { "content-type": "application/json" }
     });
     expect(res.status).toBe(400);
@@ -306,6 +364,18 @@ describe("stats and manage auth", () => {
       headers: { authorization: `Bearer ${SECRET}` }
     });
     expect(bearer.status).toBe(200);
+  });
+
+  it("recompute rejects missing and wrong secrets", async () => {
+    const { encoded } = await makeTest();
+    expect(
+      (await app.request(`/recompute/${encoded}`, { method: "POST" })).status
+    ).toBe(401);
+    const wrong = await app.request(`/recompute/${encoded}`, {
+      method: "POST",
+      headers: { authorization: "Bearer nope" }
+    });
+    expect(wrong.status).toBe(401);
   });
 
   it("serves the manage shell openly; stats stay behind the fragment secret", async () => {

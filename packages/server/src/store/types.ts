@@ -5,8 +5,32 @@ import type { AssignmentRecord, DerivedState } from "@livevariant/core";
  * event-sourced source of truth; counters and blobs are the derived cache
  * the hot path reads. Every adapter must satisfy store.contract.spec.ts.
  */
+/**
+ * The serving shape a test was first seen with. JS-mode callers supply
+ * armCount/alg/dim in the request body (the server never sees configs on
+ * that path), and a testId is public, so without pinning anyone could
+ * claim a foreign shape and write records the real config can't represent.
+ */
+export interface TestShape {
+  armCount: number;
+  alg: "ts" | "bucketed" | "linear";
+  dim: number;
+}
+
 export interface StateStore {
   // ------------------------------------------------ events (source of truth)
+
+  /**
+   * Records the shape and returns whatever is authoritative afterwards.
+   * `authoritative` is true when the shape came from the decoded config
+   * (redirect paths), which always wins; JS-mode callers pass false, so
+   * they pin only on first sight and must agree from then on.
+   */
+  pinShape(
+    testId: string,
+    shape: TestShape,
+    authoritative: boolean
+  ): Promise<TestShape>;
 
   getAssignment(
     testId: string,

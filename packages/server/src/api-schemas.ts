@@ -13,6 +13,9 @@ const armPrior = z.object({
   beta: z.number().nonnegative()
 });
 
+/** Shared bound so /px and /reward can never drift apart again. */
+export const MAX_REWARD_AMOUNT = 1_000_000;
+
 const servingFields = {
   testId: hex64,
   armCount: z.number().int().min(2).max(50),
@@ -23,22 +26,50 @@ const servingFields = {
   noise: z.number().positive().max(5).optional()
 };
 
-export const chooseRequestSchema = z.object({
-  ...servingFields,
-  idHash: hex64.optional(),
-  ctxKey: hex64.optional(),
-  featIdx: z.array(z.number().int().min(0).max(63)).max(16).optional(),
-  armPriors: z.array(armPrior).optional(),
-  bucketPriors: z.record(hex64, z.array(armPrior)).optional(),
-  linearPriors: z
-    .array(
-      z.object({
-        mean: z.number().min(0).max(1),
-        strength: z.number().nonnegative()
-      })
-    )
-    .optional()
-});
+export const chooseRequestSchema = z
+  .object({
+    ...servingFields,
+    idHash: hex64.optional(),
+    ctxKey: hex64.optional(),
+    // Bounds are re-checked against the request's own `dim` in superRefine:
+    // an index >= dim reads past the model matrix and poisons it with NaN.
+    featIdx: z.array(z.number().int().min(0).max(63)).max(16).optional(),
+    armPriors: z.array(armPrior).optional(),
+    bucketPriors: z.record(hex64, z.array(armPrior)).optional(),
+    linearPriors: z
+      .array(
+        z.object({
+          mean: z.number().min(0).max(1),
+          strength: z.number().nonnegative()
+        })
+      )
+      .optional()
+  })
+  .superRefine((body, issues) => {
+    const dim = body.dim ?? 16;
+    for (const [i, index] of (body.featIdx ?? []).entries()) {
+      if (index >= dim) {
+        issues.addIssue({
+          code: "custom",
+          path: ["featIdx", i],
+          message: `feature index ${index} is outside dim ${dim}`
+        });
+      }
+    }
+    const priorCounts: Array<[string, number | undefined]> = [
+      ["armPriors", body.armPriors?.length],
+      ["linearPriors", body.linearPriors?.length]
+    ];
+    for (const [field, count] of priorCounts) {
+      if (count !== undefined && count !== body.armCount) {
+        issues.addIssue({
+          code: "custom",
+          path: [field],
+          message: `${field} must have one entry per arm (${body.armCount})`
+        });
+      }
+    }
+  });
 
 // Deliberately minimal: the assignment record carries its own serving
 // snapshot, so rewards need no algorithm parameters. This is also what
@@ -46,7 +77,7 @@ export const chooseRequestSchema = z.object({
 export const rewardRequestSchema = z.object({
   testId: hex64,
   idHash: hex64,
-  amount: z.number().positive().max(1_000_000).default(1)
+  amount: z.number().positive().max(MAX_REWARD_AMOUNT).default(1)
 });
 
 export type ChooseRequest = z.infer<typeof chooseRequestSchema>;

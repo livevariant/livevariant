@@ -4,6 +4,7 @@ import {
   buildTestUrls,
   canonicalJson,
   computeTestId,
+  effectiveBucketPriors,
   externalIdHash,
   featureIndices,
   normalizeCtx,
@@ -126,6 +127,12 @@ export async function createTest(
   const ctx = normalizeCtx(resolved, options.context ?? null);
   const ctxKey = ctx ? await bucketKey(testId, ctx) : null;
   const featIdx = featureIndices(ctx);
+  // Bucket priors must be resolved to bucket keys the same way the
+  // redirect path does, or a bucketed test would silently lose its
+  // warm-start priors when served through the SDK.
+  const bucketPriors = resolved.priors?.buckets
+    ? await effectiveBucketPriors(resolved, testId)
+    : undefined;
 
   const armIndex = await resolveAssignment();
   const arm = resolved.arms[armIndex] ?? resolved.arms[0];
@@ -162,6 +169,7 @@ export async function createTest(
         minBucketPulls: resolved.minBucketPulls,
         priorStrengthCap: resolved.priorStrengthCap,
         armPriors: resolved.priors?.arms,
+        bucketPriors,
         linearPriors: resolved.priors?.linear,
         idHash,
         ctxKey: ctxKey ?? undefined,

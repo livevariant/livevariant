@@ -3,6 +3,7 @@ import { computeTestId, type TestConfig } from "@livevariant/core";
 import { createTest } from "./index.js";
 import { autoTrack } from "./auto-track.js";
 import { captureHandoff, getHandoff, listHandoffs } from "./handoff.js";
+import { resetDataLayerInterception } from "./ga.js";
 
 /**
  * The redirect -> SDK identity handoff, in a real browser: URL capture and
@@ -47,6 +48,9 @@ beforeEach(() => {
   localStorage.clear();
   history.replaceState(null, "", "/");
   delete (window as any).dataLayer;
+  // The interceptor is a per-window singleton with an event replay buffer;
+  // without this reset a later test inherits earlier tests' events.
+  resetDataLayerInterception(window);
 });
 
 describe("captureHandoff", () => {

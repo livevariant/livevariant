@@ -7,6 +7,7 @@ export {
   type ArmStats,
   type RequestIdentity,
   type ServingParams,
+  type TestBackend,
   type TestStats
 } from "./service.js";
 export {
@@ -15,9 +16,6 @@ export {
   type ChooseRequest,
   type RewardRequest
 } from "./api-schemas.js";
-// RedisStore is intentionally NOT exported here: it drags the Node-only
-// redis client into every consumer, which breaks Workers bundling. It
-// lives at the "@livevariant/server/redis" subpath instead.
 export { MemoryStore } from "./store/memory.js";
 export {
   arrayToCounts,
@@ -31,5 +29,6 @@ export {
   counterKey,
   GLOBAL_SCOPE,
   linearKey,
-  type StateStore
+  type StateStore,
+  type TestShape
 } from "./store/types.js";

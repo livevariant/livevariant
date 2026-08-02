@@ -10,8 +10,10 @@ export default [
         {
           ignoredFiles: [
             "{projectRoot}/eslint.config.{js,cjs,mjs,ts,cts,mts}",
-            "{projectRoot}/vite.config.mts"
-          ]
+            "{projectRoot}/vite.config.mts",
+            "{projectRoot}/vitest.config.mts"
+          ],
+          ignoredDependencies: ["vitest", "@vitest/browser-playwright"]
         }
       ]
     },
