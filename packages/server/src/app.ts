@@ -94,20 +94,17 @@ export function createApp(options: AppOptions): Hono {
     });
   }
 
-  /** Stats secret from ?key= or Authorization: Bearer (preferred for API
-   * calls: query keys end up in access logs; the manage URL accepts ?key=
-   * as a deliberate usability tradeoff). */
+  /**
+   * Stats secret via Authorization: Bearer only. Query parameters would
+   * land in access/proxy logs; the shareable manage URL instead carries
+   * the secret in its #fragment, which never leaves the browser, and the
+   * manage page's script converts it into this Bearer header.
+   */
   async function authorized(
-    c: {
-      req: {
-        query(name: string): string | undefined;
-        header(name: string): string | undefined;
-      };
-    },
+    c: { req: { header(name: string): string | undefined } },
     decoded: DecodedConfig
   ): Promise<boolean> {
-    const bearer = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
-    const secret = c.req.query("key") ?? bearer;
+    const secret = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
     if (!secret) {
       return false;
     }
@@ -295,30 +292,15 @@ export function createApp(options: AppOptions): Hono {
     return c.json({ ok: true, events });
   });
 
+  // Unauthenticated static shell: exposes nothing beyond the (public)
+  // config; its script reads the secret from the #fragment and fetches
+  // /stats with a Bearer header.
   app.get("/manage/:cfg", async c => {
     const result = await decodeOr404(c.req.param("cfg"));
     if ("error" in result) {
       return result.error;
     }
-    const { decoded } = result;
-    if (!(await authorized(c, decoded))) {
-      return c.json({ error: "stats secret required (?key=...)" }, 401);
-    }
-    const params = await paramsFromConfig(decoded);
-    const stats = await buildStats(
-      options.store,
-      params,
-      decoded.config.arms.map(a => a.name)
-    );
-    const origin = new URL(c.req.url).origin;
-    const cfg = c.req.param("cfg");
-    return c.html(
-      renderManagePage(decoded.config, stats, {
-        serve: `${origin}/s/${cfg}`,
-        click: `${origin}/c/${cfg}`,
-        pixel: `${origin}/px/${cfg}`
-      })
-    );
+    return c.html(renderManagePage(result.decoded.config, c.req.param("cfg")));
   });
 
   return app;

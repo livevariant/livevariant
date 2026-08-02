@@ -46,7 +46,9 @@ beforeEach(() => {
 });
 
 async function stats(encoded: string): Promise<any> {
-  const res = await app.request(`/stats/${encoded}?key=${SECRET}`);
+  const res = await app.request(`/stats/${encoded}`, {
+    headers: { authorization: `Bearer ${SECRET}` }
+  });
   expect(res.status).toBe(200);
   return res.json();
 }
@@ -214,27 +216,34 @@ describe("JS mode (choose/reward)", () => {
 });
 
 describe("stats and manage auth", () => {
-  it("401s without or with a wrong key, 200s with query key or bearer", async () => {
+  it("stats accepts only the bearer secret", async () => {
     const { encoded } = await makeTest();
     expect((await app.request(`/stats/${encoded}`)).status).toBe(401);
-    expect((await app.request(`/stats/${encoded}?key=wrong`)).status).toBe(401);
+    // Query keys are rejected by design: they would land in access logs.
     expect((await app.request(`/stats/${encoded}?key=${SECRET}`)).status).toBe(
-      200
+      401
     );
+    const wrong = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: "Bearer nope" }
+    });
+    expect(wrong.status).toBe(401);
     const bearer = await app.request(`/stats/${encoded}`, {
       headers: { authorization: `Bearer ${SECRET}` }
     });
     expect(bearer.status).toBe(200);
   });
 
-  it("serves the manage page with the key", async () => {
+  it("serves the manage shell openly; stats stay behind the fragment secret", async () => {
     const { encoded } = await makeTest();
-    expect((await app.request(`/manage/${encoded}`)).status).toBe(401);
-    const res = await app.request(`/manage/${encoded}?key=${SECRET}`);
+    const res = await app.request(`/manage/${encoded}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("landing page test");
-    expect(html).toContain("control");
+    // The shell contains no stats data (only loading placeholders), just
+    // the fetch wiring that turns the #fragment into a Bearer header.
+    expect(html).toContain("location.hash");
+    expect(html).toContain("Bearer");
+    expect(html).toContain("loading…");
   });
 });
 
@@ -254,12 +263,10 @@ describe("mid-test algorithm change", () => {
     });
     expect(switched.testId).toBe(base.testId);
 
-    const rc = await app.request(
-      `/recompute/${switched.encoded}?key=${SECRET}`,
-      {
-        method: "POST"
-      }
-    );
+    const rc = await app.request(`/recompute/${switched.encoded}`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
     expect(rc.status).toBe(200);
     expect((await rc.json()).events).toBe(10);
 
