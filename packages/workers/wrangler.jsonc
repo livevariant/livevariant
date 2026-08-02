@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "livevariant",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  // One Durable Object per testId: single-threaded per test, so assignment
+  // races and blob CAS conflicts cannot happen by construction.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TEST_STATE",
+        "class_name": "TestStateDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TestStateDO"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+  // Routes (livevariant.link serving + livevariant.com manage) are added at
+  // deploy time once the zones are on the Cloudflare account:
+  // "routes": [
+  //   { "pattern": "livevariant.link/*", "zone_name": "livevariant.link" },
+  //   { "pattern": "livevariant.com/*", "zone_name": "livevariant.com" }
+  // ]
+}
