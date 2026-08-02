@@ -135,13 +135,13 @@ plain query parameters, and the two forms parse to the same `TestConfig`
 and therefore the same `testId`:
 
 ```
-https://livevariant.link/s?a=https://cdn.example.com/hero-a.jpg
-                          &a=https://cdn.example.com/hero-b.jpg
-                          &k=<statsKeyHash>
+https://livevariant.link/s?v=https://cdn.example.com/hero-1.jpg
+                          &v=https://cdn.example.com/hero-2.jpg
+                          &kh=<statsKeyHash>
                           &id={{recipient_id}}
 ```
 
-Only `a` is required, twice or more. Everything else defaults, because
+Only `v` is required, twice or more. Everything else defaults, because
 nobody filling in a template field should have to know this system has an
 algorithm, let alone pick one.
 
@@ -153,17 +153,23 @@ Because the variant URLs are inside the identity hash, each campaign
 automatically becomes its own test, while the one stats secret opens all
 of them.
 
-| Param | Meaning                                                    |
-| ----- | ---------------------------------------------------------- |
-| `a`   | Variant target URL, repeated, in order (`a`[0] is control) |
-| `an`  | Variant name, repeated, positional (defaults v1, v2, …)    |
-| `k`   | `statsKeyHash`: without it the test has no readable stats  |
-| `alg` | `ts`, `bucketed` or `linear`                               |
-| `ctx` | Dimensions: `source:utm_source,persona`                    |
-| `r`   | Fallback click-redirect target                             |
-| `vp`  | Stamp the served variant into this param on redirect       |
-| `fw`  | `fw=0` stops unrecognized params being forwarded           |
-| `n`   | Test name                                                  |
+| Param   | Meaning                                                    |
+| ------- | ---------------------------------------------------------- |
+| `v`     | Variant target URL, repeated; the first one is the control |
+| `vn`    | Variant name, repeated, positional (defaults v1, v2, …)    |
+| `kh`    | `statsKeyHash`, the **hash** of the stats secret           |
+| `alg`   | `ts`, `bucketed` or `linear`                               |
+| `ctx`   | Dimensions: `source:utm_source,persona`                    |
+| `r`     | Fallback click-redirect target                             |
+| `stamp` | Write the served variant into this param on redirect       |
+| `fw`    | `fw=0` stops unrecognized params being forwarded           |
+| `n`     | Test name                                                  |
+
+`kh` is the hash, never the secret. It is already public in every serve
+URL, so it is safe in a link that reaches every recipient; the secret
+itself only ever appears in the manage link's `#fragment`. A test with no
+`kh` still serves and learns, but nothing can read it, because no secret
+matches a hash that is not there.
 
 Two behaviours worth knowing:
 
@@ -175,8 +181,8 @@ Two behaviours worth knowing:
 - **Attribution is carried through.** Any parameter we do not recognize
   (`utm_source`, `gclid`, `mc_cid`) is appended to the redirect target,
   so the customer's analytics keeps working across the hop. Parameters
-  already on the destination win, and `fw=0` turns it off. Setting `vp`
-  (typically `vp=utm_content`) additionally stamps the served variant's
+  already on the destination win, and `fw=0` turns it off. Setting `stamp`
+  (typically `stamp=utm_content`) additionally writes the served variant's
   name onto the destination, which puts the test into the customer's own
   reporting without them installing anything.
 

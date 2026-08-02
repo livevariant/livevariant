@@ -1095,7 +1095,7 @@ describe("query-parameter tests (the ESP template form)", () => {
   }
 
   it("serves a test spelled out with nothing but variants", async () => {
-    const res = await get(`/s?a=${A}&a=${B}&id=r1`);
+    const res = await get(`/s?v=${A}&v=${B}&id=r1`);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toMatch(/example\.com\/(a|b)/);
   });
@@ -1104,10 +1104,10 @@ describe("query-parameter tests (the ESP template form)", () => {
     // Two encodings of one config must share state, or a campaign that
     // moved between forms would silently restart its learning.
     const { config, testId } = await configFromParams(
-      new URLSearchParams(`a=${A}&a=${B}&k=${await hashStatsSecret(SECRET)}`)
+      new URLSearchParams(`v=${A}&v=${B}&kh=${await hashStatsSecret(SECRET)}`)
     );
     const { encoded } = await encodeConfig(config);
-    await get(`/s?a=${A}&a=${B}&k=${await hashStatsSecret(SECRET)}&id=r1`);
+    await get(`/s?v=${A}&v=${B}&kh=${await hashStatsSecret(SECRET)}&id=r1`);
     await app.request(
       new Request(`http://localhost/s/${encoded}?id=r2`, {
         headers: { accept: BROWSER_ACCEPT }
@@ -1121,7 +1121,7 @@ describe("query-parameter tests (the ESP template form)", () => {
   it("keeps a recipient on one variant across opens", async () => {
     const seen = new Set<string>();
     for (let i = 0; i < 4; i++) {
-      const res = await get(`/s?a=${A}&a=${B}&id=sticky`);
+      const res = await get(`/s?v=${A}&v=${B}&id=sticky`);
       seen.add(res.headers.get("location")!);
     }
     expect(seen.size).toBe(1);
@@ -1131,7 +1131,7 @@ describe("query-parameter tests (the ESP template form)", () => {
     // A hand-filled template with one field left empty. In an img src a
     // 404 is a broken image in front of the whole list, so this degrades
     // to "no test" instead.
-    const res = await get(`/s?a=${A}&id=r1`);
+    const res = await get(`/s?v=${A}&id=r1`);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe(A);
   });
@@ -1144,7 +1144,7 @@ describe("query-parameter tests (the ESP template form)", () => {
     // A test with no owner still runs; it just cannot be read, because
     // no secret can match a hash that was never set.
     const { config } = await configFromParams(
-      new URLSearchParams(`a=${A}&a=${B}`)
+      new URLSearchParams(`v=${A}&v=${B}`)
     );
     const { encoded, warnings } = await encodeConfig(config);
     expect(warnings.join(" ")).toMatch(/never be read/);
@@ -1172,19 +1172,19 @@ describe("carrying attribution to the destination", () => {
     // swallowed it would break the customer's analytics at exactly the
     // point the test starts mattering.
     const res = await get(
-      `/s?a=${A}&a=${B}&id=r1&utm_source=newsletter&gclid=xyz`
+      `/s?v=${A}&v=${B}&id=r1&utm_source=newsletter&gclid=xyz`
     );
     const location = new URL(res.headers.get("location")!);
     expect(location.searchParams.get("utm_source")).toBe("newsletter");
     expect(location.searchParams.get("gclid")).toBe("xyz");
     // Ours never leak onward.
-    expect(location.searchParams.has("a")).toBe(false);
+    expect(location.searchParams.has("v")).toBe(false);
     expect(location.searchParams.has("id")).toBe(false);
   });
 
   it("stamps the served variant into the customer's own analytics", async () => {
     const res = await get(
-      `/s?a=${A}&a=${B}&an=hero&an=lifestyle&vp=utm_content&id=r1` +
+      `/s?v=${A}&v=${B}&vn=hero&vn=lifestyle&stamp=utm_content&id=r1` +
         "&utm_source=newsletter"
     );
     const location = new URL(res.headers.get("location")!);
@@ -1194,14 +1194,14 @@ describe("carrying attribution to the destination", () => {
   });
 
   it("can be switched off", async () => {
-    const res = await get(`/s?a=${A}&a=${B}&id=r1&fw=0&utm_source=newsletter`);
+    const res = await get(`/s?v=${A}&v=${B}&id=r1&fw=0&utm_source=newsletter`);
     const location = new URL(res.headers.get("location")!);
     expect(location.searchParams.has("utm_source")).toBe(false);
   });
 
   it("forwards on click redirects too", async () => {
     const res = await get(
-      `/c?a=${A}&a=${B}&r=https://example.com/thanks&id=r1&utm_source=news`
+      `/c?v=${A}&v=${B}&r=https://example.com/thanks&id=r1&utm_source=news`
     );
     const location = new URL(res.headers.get("location")!);
     expect(location.searchParams.get("utm_source")).toBe("news");
@@ -1222,23 +1222,23 @@ describe("campaign tags as context", () => {
 
   async function statsFor(search: string) {
     const { config } = await configFromParams(
-      new URLSearchParams(`${search}&k=${await hashStatsSecret(SECRET)}`)
+      new URLSearchParams(`${search}&kh=${await hashStatsSecret(SECRET)}`)
     );
     const { encoded } = await encodeConfig(config);
     return stats(encoded);
   }
 
-  const TEST = `a=${A}&a=${B}&alg=bucketed&ctx=source:utm_source`;
+  const TEST = `v=${A}&v=${B}&alg=bucketed&ctx=source:utm_source`;
 
   it("buckets by the tag the sender wrote", async () => {
     await get(
-      `/s?${TEST}&k=${await hashStatsSecret(SECRET)}&id=n1&utm_source=newsletter`
+      `/s?${TEST}&kh=${await hashStatsSecret(SECRET)}&id=n1&utm_source=newsletter`
     );
     await get(
-      `/s?${TEST}&k=${await hashStatsSecret(SECRET)}&id=n2&utm_source=newsletter`
+      `/s?${TEST}&kh=${await hashStatsSecret(SECRET)}&id=n2&utm_source=newsletter`
     );
     await get(
-      `/s?${TEST}&k=${await hashStatsSecret(SECRET)}&id=s1&utm_source=twitter`
+      `/s?${TEST}&kh=${await hashStatsSecret(SECRET)}&id=s1&utm_source=twitter`
     );
     const s = await statsFor(TEST);
     expect(s.totalAssignments).toBe(3);
@@ -1254,7 +1254,7 @@ describe("campaign tags as context", () => {
     // email: Gmail's fetcher relays the URL the sender wrote, so the tag
     // is as true for it as for the reader, while its geo is a datacenter.
     const req = new Request(
-      `http://localhost/s?${TEST}&k=${await hashStatsSecret(SECRET)}&id=proxy&utm_source=newsletter`,
+      `http://localhost/s?${TEST}&kh=${await hashStatsSecret(SECRET)}&id=proxy&utm_source=newsletter`,
       { headers: { accept: "image/webp,*/*" } }
     );
     Object.defineProperty(req, "cf", { value: { country: "US" } });
@@ -1266,7 +1266,7 @@ describe("campaign tags as context", () => {
 
   it("survives ?auto=0 too", async () => {
     const req = new Request(
-      `http://localhost/s?${TEST}&k=${await hashStatsSecret(SECRET)}&id=noauto&auto=0&utm_source=newsletter`,
+      `http://localhost/s?${TEST}&kh=${await hashStatsSecret(SECRET)}&id=noauto&auto=0&utm_source=newsletter`,
       { headers: { accept: BROWSER_ACCEPT } }
     );
     Object.defineProperty(req, "cf", { value: { country: "NL" } });

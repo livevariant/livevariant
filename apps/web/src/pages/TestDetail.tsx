@@ -34,9 +34,16 @@ function CopyField({ label, value }: { label: string; value: string }) {
     <div className="space-y-1">
       <div className="text-sm font-medium">{label}</div>
       <div className="flex items-center gap-2">
-        <code className="flex-1 truncate rounded bg-muted px-2 py-1.5 text-xs">
-          {value}
-        </code>
+        {/* A read-only input rather than a <code> block: these URLs are
+            longer than the column, and truncated text you cannot scroll
+            through is text you cannot check. */}
+        <input
+          readOnly
+          value={value}
+          aria-label={label}
+          onFocus={event => event.currentTarget.select()}
+          className="flex-1 rounded bg-muted px-2 py-1.5 font-mono text-xs"
+        />
         <Button
           variant="outline"
           size="icon"
@@ -252,18 +259,24 @@ element.textContent = test.variant.text;`;
             <>
               <CopyField
                 label="Image src (serve)"
-                value={`${test.serverUrl}/s?a={{variant_a_url}}&a={{variant_b_url}}&k=${statsKeyHash}&vp=utm_content&auto=0&id={{recipient_id}}`}
+                value={`${test.serverUrl}/s?v={{variant_1_url}}&v={{variant_2_url}}&kh=${statsKeyHash}&stamp=utm_content&auto=0&id={{recipient_id}}`}
               />
               <CopyField
                 label="Link href (click)"
-                value={`${test.serverUrl}/c?a={{variant_a_url}}&a={{variant_b_url}}&r={{landing_url}}&k=${statsKeyHash}&vp=utm_content&auto=0&id={{recipient_id}}`}
+                value={`${test.serverUrl}/c?v={{variant_1_url}}&v={{variant_2_url}}&r={{landing_url}}&kh=${statsKeyHash}&stamp=utm_content&auto=0&id={{recipient_id}}`}
               />
             </>
           )}
           <p className="text-muted-foreground text-sm">
-            Add another <code>a=</code> for a third variant, and{" "}
-            <code>an=</code> to name them (they default to v1, v2, …).{" "}
-            <code>vp=utm_content</code> stamps the served variant into that
+            <code>kh</code> is the <em>hash</em> of your stats secret, not the
+            secret itself. It is already public in every serve URL, so it is
+            safe in a link that reaches every recipient; the secret stays in the
+            manage link above.
+          </p>
+          <p className="text-muted-foreground text-sm">
+            Add another <code>v=</code> for a third variant, and{" "}
+            <code>vn=</code> to name them (they default to v1, v2, …).{" "}
+            <code>stamp=utm_content</code> writes the served variant into that
             parameter on the way out, so the test shows up in your own analytics
             without installing anything; drop it to turn that off. Any parameter
             we do not recognize, <code>utm_source</code> and <code>gclid</code>{" "}

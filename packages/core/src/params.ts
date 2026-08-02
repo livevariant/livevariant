@@ -22,14 +22,14 @@ import { computeTestId, type DecodedConfig } from "./codec.js";
 
 /** Parameters that configure the test itself. */
 export const CONFIG_PARAMS = [
-  "a", // arm target URL, repeated, in order (a[0] is the control)
-  "an", // arm name, repeated, positional
+  "v", // variant target URL, repeated, in order (the first is the control)
+  "vn", // variant name, repeated, positional
   "n", // test name
-  "k", // statsKeyHash
+  "kh", // statsKeyHash: the HASH of the stats secret, never the secret
   "alg", // ts | bucketed | linear
   "ctx", // comma-separated dims: "country:country,persona"
   "r", // fallback redirect target for clicks
-  "vp", // stamp the served variant into this param on redirect
+  "stamp", // write the served variant into this param on redirect
   "fw" // fw=0 turns off forwarding unrecognized params
 ] as const;
 
@@ -89,10 +89,10 @@ function parseCtx(spec: string | null): TestConfigInput["ctx"] {
 export async function configFromParams(
   query: URLSearchParams
 ): Promise<DecodedConfig> {
-  const targets = query.getAll("a").filter(value => value.trim().length > 0);
-  const names = query.getAll("an");
+  const targets = query.getAll("v").filter(value => value.trim().length > 0);
+  const names = query.getAll("vn");
   if (targets.length < 2) {
-    throw new Error("a query-parameter test needs at least two `a` variants");
+    throw new Error("a query-parameter test needs at least two `v` variants");
   }
   const input: TestConfigInput = {
     v: 1,
@@ -104,11 +104,17 @@ export async function configFromParams(
       formats: { url: target }
     })),
     ...(query.get("n") ? { name: query.get("n") as string } : {}),
-    ...(query.get("k") ? { statsKeyHash: query.get("k") as string } : {}),
+    // `kh` is the sha256 of the stats secret, which is why it is safe in
+    // a link that reaches a million inboxes. A pasted secret is not
+    // 64 hex characters, so the schema rejects it rather than quietly
+    // running a different test than the sender meant.
+    ...(query.get("kh") ? { statsKeyHash: query.get("kh") as string } : {}),
     ...(query.get("alg") ? { alg: query.get("alg") as TestConfig["alg"] } : {}),
     ...(parseCtx(query.get("ctx")) ? { ctx: parseCtx(query.get("ctx")) } : {}),
     ...(query.get("r") ? { redirectUrl: query.get("r") as string } : {}),
-    ...(query.get("vp") ? { variantParam: query.get("vp") as string } : {}),
+    ...(query.get("stamp")
+      ? { variantParam: query.get("stamp") as string }
+      : {}),
     ...(query.get("fw") === "0" ? { forwardParams: false } : {})
   };
   const config = testConfigSchema.parse(input);
@@ -122,7 +128,7 @@ export async function configFromParams(
  * an error. No test, but no visible damage either.
  */
 export function fallbackTarget(query: URLSearchParams): string | null {
-  for (const value of query.getAll("a")) {
+  for (const value of query.getAll("v")) {
     try {
       const url = new URL(value);
       if (url.protocol === "http:" || url.protocol === "https:") {

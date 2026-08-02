@@ -19,7 +19,7 @@ describe("configFromParams", () => {
   it("builds a whole test out of nothing but variants", async () => {
     // The point of the param form: a campaign manager fills two template
     // fields and never learns this service exists.
-    const { config } = await configFromParams(query(`a=${A}&a=${B}`));
+    const { config } = await configFromParams(query(`v=${A}&v=${B}`));
     expect(config.arms).toHaveLength(2);
     expect(config.arms[0].formats.url).toBe(A);
     expect(config.arms.map(arm => arm.name)).toEqual(["v1", "v2"]);
@@ -32,7 +32,7 @@ describe("configFromParams", () => {
     // Both encodings must be two ways of writing one test, or a campaign
     // that switched forms would silently start from zero.
     const { config, testId } = await configFromParams(
-      query(`a=${A}&a=${B}&k=${"0".repeat(64)}`)
+      query(`v=${A}&v=${B}&kh=${"0".repeat(64)}`)
     );
     const { testId: viaBase64 } = await encodeConfig(config);
     expect(viaBase64).toBe(testId);
@@ -41,9 +41,9 @@ describe("configFromParams", () => {
   it("takes names, algorithm, redirect and context", async () => {
     const { config } = await configFromParams(
       query(
-        `a=${A}&a=${B}&an=hero&an=lifestyle&n=August+send&alg=bucketed` +
+        `v=${A}&v=${B}&vn=hero&vn=lifestyle&n=August+send&alg=bucketed` +
           `&ctx=source:utm_source,persona&r=https://shop.example.com/thanks` +
-          `&vp=utm_content&fw=0`
+          `&stamp=utm_content&fw=0`
       )
     );
     expect(config.name).toBe("August send");
@@ -62,13 +62,13 @@ describe("configFromParams", () => {
     // A typo becomes a caller-supplied dimension rather than an error:
     // the alternative is a template that renders nothing.
     const { config } = await configFromParams(
-      query(`a=${A}&a=${B}&ctx=source:utm_sauce`)
+      query(`v=${A}&v=${B}&ctx=source:utm_sauce`)
     );
     expect(config.ctx?.dims).toEqual([{ key: "source" }]);
   });
 
   it("refuses a test that has nothing to choose between", async () => {
-    await expect(configFromParams(query(`a=${A}`))).rejects.toThrow(
+    await expect(configFromParams(query(`v=${A}`))).rejects.toThrow(
       /at least two/
     );
     await expect(configFromParams(query("n=empty"))).rejects.toThrow();
@@ -79,7 +79,7 @@ describe("passthroughParams", () => {
   it("keeps attribution and drops everything of ours", async () => {
     const params = passthroughParams(
       query(
-        `a=${A}&a=${B}&k=abc&id=u1&auto=0&c_persona=power` +
+        `v=${A}&v=${B}&kh=abc&id=u1&auto=0&c_persona=power` +
           "&utm_source=newsletter&gclid=xyz"
       )
     );
@@ -90,7 +90,17 @@ describe("passthroughParams", () => {
   });
 
   it("treats every config and runtime name as ours", () => {
-    for (const key of ["a", "an", "k", "alg", "ctx", "r", "vp", "fw", "n"]) {
+    for (const key of [
+      "v",
+      "vn",
+      "kh",
+      "alg",
+      "ctx",
+      "r",
+      "stamp",
+      "fw",
+      "n"
+    ]) {
       expect(isReservedParam(key)).toBe(true);
     }
     for (const key of ["id", "auto", "to", "c_country"]) {
@@ -139,12 +149,12 @@ describe("decorateDestination", () => {
 
 describe("fallbackTarget", () => {
   it("finds the first servable variant for the failure path", () => {
-    expect(fallbackTarget(query(`a=${A}&a=${B}`))).toBe(A);
-    expect(fallbackTarget(query(`a=oops&a=${B}`))).toBe(B);
+    expect(fallbackTarget(query(`v=${A}&v=${B}`))).toBe(A);
+    expect(fallbackTarget(query(`v=oops&v=${B}`))).toBe(B);
   });
 
   it("gives up rather than redirect somewhere strange", () => {
-    expect(fallbackTarget(query("a=javascript:alert(1)"))).toBeNull();
+    expect(fallbackTarget(query("v=javascript:alert(1)"))).toBeNull();
     expect(fallbackTarget(query("n=nothing"))).toBeNull();
   });
 });
