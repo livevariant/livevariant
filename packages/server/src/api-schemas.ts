@@ -55,6 +55,15 @@ export const chooseRequestSchema = z
     autoDims: z.array(ctxDimSchema).max(8).optional(),
     /** Caller-supplied values for those dimensions, before signals. */
     autoCtx: z.record(z.string().min(1), z.string().min(1).max(64)).optional(),
+    /**
+     * Hosted-asset hashes per arm index, so the response can carry fresh
+     * signatures for whichever arm wins. Content-free like everything
+     * else on this wire: a sha256 of an image reveals nothing about it,
+     * and the config holding the actual URLs never leaves the page.
+     */
+    assets: z
+      .record(z.string().regex(/^\d{1,2}$/), z.array(hex64).min(1).max(8))
+      .optional(),
     // Bounds are re-checked against the request's own `dim` in superRefine:
     // an index >= dim reads past the model matrix and poisons it with NaN.
     featIdx: z.array(z.number().int().min(0).max(63)).max(16).optional(),
@@ -70,6 +79,15 @@ export const chooseRequestSchema = z
       .optional()
   })
   .superRefine((body, issues) => {
+    for (const key of Object.keys(body.assets ?? {})) {
+      if (Number(key) >= body.armCount) {
+        issues.addIssue({
+          code: "custom",
+          path: ["assets", key],
+          message: `arm ${key} is outside armCount ${body.armCount}`
+        });
+      }
+    }
     const dim = body.dim ?? 16;
     for (const [i, index] of (body.featIdx ?? []).entries()) {
       if (index >= dim) {

@@ -373,6 +373,39 @@ open deployment is an open redirector; the allowlist is what stops yours
 being used for phishing. Unset means allow-all, which is right while you
 are only serving your own campaigns.
 
+## Hosted images
+
+Uploads live at `POST /assets` (raw image body) and come back as a
+protected URL, with the `upload_image` tool exposing the same thing to
+assistants, so an LLM can generate a hero image, upload it, and hand
+`build_test` the URL in one conversation. The dashboard's builder has an
+Upload button per variant.
+
+The protection model, since it is the reason this exists at all:
+
+- **Storage is content-addressed.** The id is the sha256 of the bytes, so
+  uploads are idempotent, nothing can be replaced under its URL, and the
+  served bytes cache forever.
+- **The canonical URL does not work.** `/a/<hash>` answers 403 on its
+  own. Working URLs carry a short-lived HMAC signature, minted only by
+  the serve endpoints per redirect and by `/choose` for the SDK (which
+  sends content hashes, keeping that wire content-free, and refreshes
+  stale signatures from its cache). Uploading here is therefore not free
+  static hosting: every working URL was minted through a test's serving
+  flow, and each minting records an assignment somewhere visible.
+- **Raster images only.** SVG is refused: it is a script container, and
+  serving uploaded SVG from our origin would be stored XSS.
+
+Enabling it: bind an `ASSET_STORE` R2 bucket (already in the config) and
+set the `LV_ASSET_SECRET` secret; without the secret the routes do not
+exist. Storage is pluggable the same way `StateStore` is: implement the
+two-method `AssetStore` and pass it to `createApp`. Signing lives above
+the interface, so every backend inherits the whole protection story. On
+Cloudflare the Worker streams from R2, because egress is free and
+streaming costs I/O rather than billed CPU; a backend where relayed bytes
+cost real money (S3 behind a Node host) can implement the optional
+`redirectUrl` hook and `/a` will 302 to its presigned URL instead.
+
 ## Bring your own storage
 
 The server talks to storage through one interface, `StateStore`: an

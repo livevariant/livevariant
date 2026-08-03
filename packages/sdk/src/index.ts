@@ -1,4 +1,5 @@
 import {
+  assetIdFromUrl,
   base64UrlToUtf8,
   bucketKey,
   buildTestUrls,
@@ -10,6 +11,7 @@ import {
   normalizeCtx,
   splitAutoDims,
   utf8ToBase64Url,
+  withQuery,
   FEATURE_DIM,
   type TestConfig,
   type TestUrls
@@ -100,7 +102,13 @@ const DEFAULT_TIMEOUT_MS = 2_000;
 interface CachedAssignment {
   armIndex: number;
   idHash: string;
+  /** Signatures for the arm's hosted assets, and when they die. */
+  assetSignatures?: Record<string, string>;
+  assetsExpireAt?: number;
 }
+
+/** Refresh signatures this long before they expire, not after. */
+const ASSET_REFRESH_MARGIN_MS = 60_000;
 
 export async function createTest(
   config: TestConfig | string,
@@ -163,12 +171,40 @@ export async function createTest(
     ? await effectiveBucketPriors(resolved, testId)
     : undefined;
 
-  const { armIndex, fallback } = await resolveAssignment();
+  // Hosted assets need the server: their canonical URLs 403 on their own,
+  // and only /choose can mint working signatures for the winning arm. The
+  // hashes are content-free, so sending them keeps the privacy claim.
+  const armAssets: Record<string, string[]> = {};
+  resolved.arms.forEach((arm, i) => {
+    const hashes = [arm.formats.url, arm.formats.image]
+      .map(u => (u ? assetIdFromUrl(u) : null))
+      .filter((h): h is string => h !== null);
+    if (hashes.length > 0) {
+      armAssets[String(i)] = hashes;
+    }
+  });
+
+  const {
+    armIndex,
+    fallback,
+    assetSignatures = {}
+  } = await resolveAssignment();
   const arm = resolved.arms[armIndex] ?? resolved.arms[0];
+
+  /** Splice a minted signature into a hosted-asset format URL. */
+  function signed(format: string | undefined): string | undefined {
+    if (!format) {
+      return format;
+    }
+    const hash = assetIdFromUrl(format);
+    const sig = hash ? assetSignatures[hash] : undefined;
+    return sig ? withQuery(format, sig) : format;
+  }
 
   async function resolveAssignment(): Promise<{
     armIndex: number;
     fallback: boolean;
+    assetSignatures?: Record<string, string>;
   }> {
     if (handoff) {
       // The server already assigned this visitor during the redirect.
@@ -183,7 +219,27 @@ export async function createTest(
           // The cache is per-id: a login that changes the external id must
           // fall through to the server, which owns the sticky record.
           if (cached.idHash === idHash) {
-            return { armIndex: cached.armIndex, fallback: false };
+            const needsFreshSignatures =
+              armAssets[String(cached.armIndex)] !== undefined &&
+              (cached.assetsExpireAt ?? 0) - ASSET_REFRESH_MARGIN_MS <
+                Date.now();
+            if (!needsFreshSignatures) {
+              return {
+                armIndex: cached.armIndex,
+                fallback: false,
+                assetSignatures: cached.assetSignatures
+              };
+            }
+            // Stale signatures: re-ask the server. /choose is sticky, so
+            // this returns the same arm with fresh signatures; if it is
+            // unreachable, the cached arm still renders (its hosted
+            // images may 403 until the next successful refresh, which
+            // beats flipping the visitor to a different variant).
+            try {
+              return await chooseFromServer(cacheKey);
+            } catch {
+              return { armIndex: cached.armIndex, fallback: false };
+            }
           }
         } catch {
           storage.removeItem(cacheKey);
@@ -204,6 +260,7 @@ export async function createTest(
   async function chooseFromServer(cacheKey: string): Promise<{
     armIndex: number;
     fallback: boolean;
+    assetSignatures?: Record<string, string>;
   }> {
     const response = await fetchImpl(`${options.serverUrl}/choose`, {
       method: "POST",
@@ -223,14 +280,21 @@ export async function createTest(
         ctxKey: ctxKey ?? undefined,
         featIdx,
         autoDims,
-        autoCtx: Object.keys(autoCtx).length > 0 ? autoCtx : undefined
+        autoCtx: Object.keys(autoCtx).length > 0 ? autoCtx : undefined,
+        assets: Object.keys(armAssets).length > 0 ? armAssets : undefined
       })
     });
     if (!response.ok) {
       return { armIndex: 0, fallback: true };
     }
-    const { armIndex: chosen } = (await response.json()) as {
+    const {
+      armIndex: chosen,
+      assetSignatures: sigs,
+      assetsExpireAt
+    } = (await response.json()) as {
       armIndex: number;
+      assetSignatures?: Record<string, string>;
+      assetsExpireAt?: number;
     };
     // A nonsense index (a proxy rewriting the body, a future server
     // version) must not index past the arms and render nothing.
@@ -243,9 +307,14 @@ export async function createTest(
     }
     storage?.setItem(
       cacheKey,
-      JSON.stringify({ armIndex: chosen, idHash } satisfies CachedAssignment)
+      JSON.stringify({
+        armIndex: chosen,
+        idHash,
+        assetSignatures: sigs,
+        assetsExpireAt
+      } satisfies CachedAssignment)
     );
-    return { armIndex: chosen, fallback: false };
+    return { armIndex: chosen, fallback: false, assetSignatures: sigs };
   }
 
   /**
@@ -288,8 +357,8 @@ export async function createTest(
     variant: {
       index: armIndex,
       name: arm.name,
-      url: arm.formats.url,
-      image: arm.formats.image,
+      url: signed(arm.formats.url),
+      image: signed(arm.formats.image),
       html: arm.formats.html,
       md: arm.formats.md,
       text: arm.formats.text

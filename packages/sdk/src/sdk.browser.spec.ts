@@ -43,7 +43,17 @@ function fakeServer(armIndex = 1): FakeServer {
     const body = init?.body ? JSON.parse(String(init.body)) : null;
     if (url.endsWith("/choose")) {
       server.chooseCalls.push(body);
-      return Response.json({ armIndex });
+      const hashes: string[] = body?.assets?.[String(armIndex)] ?? [];
+      if (hashes.length === 0) {
+        return Response.json({ armIndex });
+      }
+      return Response.json({
+        armIndex,
+        assetSignatures: Object.fromEntries(
+          hashes.map((h: string) => [h, `e=99&s=sig-${h.slice(0, 6)}`])
+        ),
+        assetsExpireAt: Date.now() + 3600_000
+      });
     }
     if (url.endsWith("/reward")) {
       server.rewardCalls.push(body);
@@ -152,6 +162,89 @@ describe("assignment", () => {
     expect(server.chooseCalls[0].autoDims).toEqual([]);
     expect(server.chooseCalls[0].autoCtx).toBeUndefined();
     test.dispose();
+  });
+
+  it("splices minted signatures into hosted-asset formats", async () => {
+    // Hosted assets 403 on their canonical URLs; the SDK sends the
+    // content hashes (nothing else) and splices the winning arm's fresh
+    // signatures into the formats it hands the page.
+    const hash = "a".repeat(64);
+    const assetConfig: TestConfig = {
+      ...CONFIG,
+      arms: [
+        CONFIG.arms[0],
+        {
+          name: "hosted",
+          formats: { image: `https://livevariant.link/a/${hash}` }
+        }
+      ]
+    } as TestConfig;
+    const server = fakeServer(1);
+    const test = await createTest(assetConfig, {
+      ...options(server),
+      externalId: "asset-user"
+    });
+    expect(server.chooseCalls[0].assets).toEqual({ "1": [hash] });
+    expect(test.variant.image).toBe(
+      `https://livevariant.link/a/${hash}?e=99&s=sig-${hash.slice(0, 6)}`
+    );
+    // Non-asset formats pass through untouched.
+    expect(test.variant.text).toBeUndefined();
+    test.dispose();
+  });
+
+  it("re-asks the server when cached signatures have gone stale", async () => {
+    // The assignment cache normally skips the network entirely, but a
+    // cached signature that expired renders a broken image. /choose is
+    // sticky server-side, so re-asking returns the same arm with fresh
+    // signatures.
+    const hash = "b".repeat(64);
+    const assetConfig: TestConfig = {
+      ...CONFIG,
+      arms: [
+        CONFIG.arms[0],
+        {
+          name: "hosted",
+          formats: { image: `https://livevariant.link/a/${hash}` }
+        }
+      ]
+    } as TestConfig;
+    const server = fakeServer(1);
+    const first = await createTest(assetConfig, {
+      ...options(server),
+      externalId: "stale-user"
+    });
+    first.dispose();
+    expect(server.chooseCalls).toHaveLength(1);
+
+    // Sabotage the cache: same assignment, expired signatures.
+    const cacheKey = `lv:a:${first.testId}`;
+    const cached = JSON.parse(localStorage.getItem(cacheKey)!);
+    cached.assetsExpireAt = Date.now() - 1;
+    localStorage.setItem(cacheKey, JSON.stringify(cached));
+
+    const second = await createTest(assetConfig, {
+      ...options(server),
+      externalId: "stale-user"
+    });
+    expect(server.chooseCalls).toHaveLength(2);
+    expect(second.variant.image).toContain("?e=99&s=");
+    second.dispose();
+
+    // A plain text test with the same staleness never refetches: only
+    // hosted assets need the network again.
+    const plain = await createTest(CONFIG, {
+      ...options(server),
+      externalId: "u1"
+    });
+    const calls = server.chooseCalls.length;
+    plain.dispose();
+    const again = await createTest(CONFIG, {
+      ...options(server),
+      externalId: "u1"
+    });
+    expect(server.chooseCalls).toHaveLength(calls);
+    again.dispose();
   });
 
   it("caches the assignment in localStorage and skips the network", async () => {

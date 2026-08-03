@@ -67,3 +67,27 @@ export function autoContextDisabled(value: string | undefined): boolean {
   const flag = value?.trim().toLowerCase();
   return flag === "0" || flag === "false" || flag === "off" || flag === "no";
 }
+
+/**
+ * Hosted-asset addresses. An asset's canonical URL is /a/<sha256-of-bytes>
+ * on a deployment's serving origin, and it deliberately does not work on
+ * its own: the server only answers it with a valid short-lived signature,
+ * which the serve endpoints (and /choose, for the SDK) mint per request.
+ * These helpers are shared by the server (which signs) and the SDK (which
+ * recognizes asset URLs in a config and splices signatures in).
+ */
+const ASSET_URL_PATH = /^\/a\/([0-9a-f]{64})$/;
+
+/** The content hash when a URL is a hosted-asset address, else null. */
+export function assetIdFromUrl(target: string): string | null {
+  try {
+    return ASSET_URL_PATH.exec(new URL(target).pathname)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Appends a pre-built query fragment ("e=...&s=...") to a URL. */
+export function withQuery(target: string, query: string): string {
+  return `${target}${target.includes("?") ? "&" : "?"}${query}`;
+}

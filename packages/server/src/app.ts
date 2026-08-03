@@ -1,6 +1,7 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import {
+  assetIdFromUrl,
   autoContextDisabled,
   capArmPriors,
   configFromParams,
@@ -30,6 +31,13 @@ import {
   MAX_REWARD_AMOUNT
 } from "./api-schemas.js";
 import { createApi } from "./api.js";
+import { signAsset } from "./assets/sign.js";
+import {
+  createAssetRoutes,
+  signAssetUrl,
+  DEFAULT_ASSET_TTL_SECONDS,
+  type AssetOptions
+} from "./assets/routes.js";
 import { renderManagePage } from "./manage-page.js";
 import {
   paramsFromConfig,
@@ -56,6 +64,12 @@ export interface AppOptions {
    * config's own origins are not a trust boundary).
    */
   allowedDestinations?: string[];
+  /**
+   * Optional image hosting: uploads at /assets, signed serving at /a.
+   * Unset disables both routes entirely, and configs referencing hosted
+   * assets simply 403 at fetch time.
+   */
+  assets?: Omit<AssetOptions, "serveUrl">;
   /**
    * Origin to put in the links visitors follow. Unset means every URL is
    * built from the origin the request arrived on, so a one-domain deploy
@@ -202,6 +216,12 @@ export function createApp(options: AppOptions): Hono {
     h.toLowerCase().replace(/^\./, "")
   );
   function destinationAllowed(target: string): boolean {
+    // Hosted assets never leave this deployment, so the operator
+    // allowlist (an anti-phishing control on outbound redirects) does
+    // not apply to them.
+    if (assetIdFromUrl(target)) {
+      return true;
+    }
     if (allowedHosts.length === 0) {
       return true;
     }
@@ -348,6 +368,28 @@ export function createApp(options: AppOptions): Hono {
 
   app.get("/health", c => c.json({ ok: true }));
 
+  if (options.assets) {
+    app.route(
+      "/",
+      createAssetRoutes({ ...options.assets, serveUrl: options.serveUrl })
+    );
+  }
+
+  /**
+   * Redirect targets that are hosted assets get a fresh signature here,
+   * which is the only place working asset URLs come from: the canonical
+   * address in the config answers 403 on its own. When this deployment
+   * has no asset store the URL passes through untouched and fails at
+   * fetch time, which is honest about the misconfiguration.
+   */
+  async function maybeSignAsset(target: string): Promise<string> {
+    const assetId = assetIdFromUrl(target);
+    if (!assetId || !options.assets) {
+      return target;
+    }
+    return signAssetUrl(target, assetId, options.assets);
+  }
+
   // The tool API, OpenAPI document, Swagger page and MCP endpoint, all
   // generated from the shared registry. Always mounted: one domain doing
   // everything is the default shape, and a deployment that wants serving
@@ -403,7 +445,7 @@ export function createApp(options: AppOptions): Hono {
       ? maybeDecorate(decoded, identity, armIndex, target, query)
       : target;
     c.header("cache-control", NO_STORE);
-    return c.redirect(decorated, 302);
+    return c.redirect(await maybeSignAsset(decorated), 302);
   };
   app.get("/s/:cfg", serveHandler);
   app.get("/s", serveHandler);
@@ -452,7 +494,9 @@ export function createApp(options: AppOptions): Hono {
     }
     c.header("cache-control", NO_STORE);
     return c.redirect(
-      maybeDecorate(decoded, identity, armIndex, target, query),
+      await maybeSignAsset(
+        maybeDecorate(decoded, identity, armIndex, target, query)
+      ),
       302
     );
   };
@@ -549,7 +593,27 @@ export function createApp(options: AppOptions): Hono {
       srcHash: await sourceHash(r.testId, clientIp(c), Date.now()),
       signals
     });
-    return c.json({ armIndex });
+    // Signatures for the WINNING arm's hosted assets only. The SDK holds
+    // canonical asset URLs in its config that 403 on their own; this is
+    // the JS-mode counterpart of the redirect path signing its Location.
+    // Minting is deliberately scoped to the chosen arm: the caller told
+    // us every arm's hashes, but only one arm gets working URLs.
+    const wanted = options.assets ? (r.assets?.[String(armIndex)] ?? []) : [];
+    if (wanted.length === 0) {
+      return c.json({ armIndex });
+    }
+    const ttlSeconds =
+      options.assets?.urlTtlSeconds ?? DEFAULT_ASSET_TTL_SECONDS;
+    const expiresAt = Date.now() + ttlSeconds * 1000;
+    const assetSignatures: Record<string, string> = {};
+    for (const hash of new Set(wanted)) {
+      assetSignatures[hash] = await signAsset(
+        (options.assets as AssetOptions).signingSecret,
+        hash,
+        expiresAt
+      );
+    }
+    return c.json({ armIndex, assetSignatures, assetsExpireAt: expiresAt });
   });
 
   app.post("/reward", async c => {

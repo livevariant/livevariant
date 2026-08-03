@@ -3,6 +3,7 @@ import { decodeConfig, hashStatsSecret } from "@livevariant/core";
 import {
   TOOLS,
   buildTest,
+  uploadImage,
   findTool,
   generatePriors,
   getStats,
@@ -44,10 +45,14 @@ describe("the registry itself", () => {
     }
   });
 
-  it("only reaches the network where results are involved", () => {
+  it("only reaches the network where it must", () => {
     expect(getStats.reachesNetwork).toBe(true);
-    for (const tool of TOOLS.filter(t => t !== getStats)) {
+    expect(uploadImage.reachesNetwork).toBe(true);
+    // The one genuinely non-read-only tool: it stores bytes.
+    expect(uploadImage.readOnly).toBe(false);
+    for (const tool of TOOLS.filter(t => t !== getStats && t !== uploadImage)) {
       expect(tool.reachesNetwork).toBe(false);
+      expect(tool.readOnly).toBe(true);
     }
   });
 });
@@ -435,6 +440,80 @@ describe("get_stats", () => {
     // Twice the conversion rate by eye, and still nowhere near callable.
     expect(out.decision.canStop).toBe(false);
     expect(out.decision.advice).toMatch(/too early/i);
+  });
+});
+
+describe("upload_image", () => {
+  const PNG_B64 = btoa("\x89PNG-fake-bytes");
+
+  function assetServer(status = 201) {
+    const calls: Array<{ url: string; contentType?: string; size: number }> =
+      [];
+    const impl = (async (url: string | URL | Request, init?: RequestInit) => {
+      const body = init?.body as Uint8Array;
+      calls.push({
+        url: String(url),
+        contentType: (init?.headers as Record<string, string>)["content-type"],
+        size: body.byteLength
+      });
+      if (status !== 201) {
+        return Response.json({ error: "image exceeds 10 bytes" }, { status });
+      }
+      return Response.json(
+        {
+          assetId: "a".repeat(64),
+          url: `https://livevariant.link/a/${"a".repeat(64)}`,
+          previewUrl: `https://livevariant.link/a/${"a".repeat(64)}?e=1&s=x`,
+          size: body.byteLength,
+          contentType: (init?.headers as Record<string, string>)["content-type"]
+        },
+        { status: 201 }
+      );
+    }) as unknown as typeof globalThis.fetch;
+    return { calls, impl };
+  }
+
+  it("uploads decoded bytes and returns the protected URL", async () => {
+    const { calls, impl } = assetServer();
+    const out = await uploadImage.handler(
+      { data: PNG_B64, contentType: "image/png" },
+      { ...ctx, fetch: impl }
+    );
+    expect(calls[0].url).toBe("https://livevariant.link/assets");
+    expect(calls[0].contentType).toBe("image/png");
+    // Decoded, not forwarded as base64: the server hashes raw bytes.
+    expect(calls[0].size).toBe(atob(PNG_B64).length);
+    expect(out.url).toContain("/a/");
+    expect(out.previewUrl).toContain("e=");
+  });
+
+  it("says plainly when a deployment has no asset hosting", async () => {
+    const { impl } = assetServer(404);
+    await expect(
+      uploadImage.handler(
+        { data: PNG_B64, contentType: "image/png" },
+        { ...ctx, fetch: impl }
+      )
+    ).rejects.toThrow(/does not have asset hosting enabled/);
+  });
+
+  it("passes the server's own refusal through readably", async () => {
+    const { impl } = assetServer(413);
+    await expect(
+      uploadImage.handler(
+        { data: PNG_B64, contentType: "image/png" },
+        { ...ctx, fetch: impl }
+      )
+    ).rejects.toThrow(/exceeds 10 bytes/);
+  });
+
+  it("rejects garbage base64 before touching the network", async () => {
+    await expect(
+      uploadImage.handler(
+        { data: "not!!base64$$", contentType: "image/png" },
+        ctx
+      )
+    ).rejects.toThrow(/not valid base64/);
   });
 });
 

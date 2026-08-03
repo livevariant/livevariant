@@ -22,6 +22,17 @@
   "observability": {
     "enabled": true
   },
+  // Image hosting (optional at runtime): uploads at /assets, signed
+  // serving at /a. The bucket alone does nothing; the feature switches on
+  // when the LV_ASSET_SECRET secret is also set. Locally and in tests R2
+  // is simulated, so nothing needs creating. Delete this block if you
+  // want a deployment without image hosting at all.
+  "r2_buckets": [
+    {
+      "binding": "ASSET_STORE",
+      "bucket_name": "livevariant-assets"
+    }
+  ],
   // Offered by the Deploy to Cloudflare button, which reads them from here
   // and shows the descriptions in package.json's `cloudflare.bindings`.
   // Both are empty on purpose: empty is the correct answer for a
@@ -65,6 +76,8 @@
       "/manage/*",
       "/health",
       "/config",
+      "/assets",
+      "/a/*",
       "/api/*",
       "/mcp",
       "/openapi.json",
@@ -100,6 +113,12 @@
       },
       // vars are not inherited, so every key from the top level has to be
       // repeated or wrangler warns. Empty means unset, same as the base.
+      "r2_buckets": [
+        {
+          "binding": "ASSET_STORE",
+          "bucket_name": "livevariant-assets"
+        }
+      ],
       "vars": {
         "LV_SERVE_URL": "https://livevariant.link",
         "LV_ALLOWED_DESTINATIONS": ""

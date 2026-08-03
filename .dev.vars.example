@@ -1,0 +1,4 @@
+# Enables image hosting: uploads at /assets, signed downloads at /a.
+# Generate a value with: openssl rand -hex 32
+# Leave unset to run without image hosting.
+LV_ASSET_SECRET=

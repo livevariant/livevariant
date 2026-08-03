@@ -16,6 +16,7 @@ import {
   type TestPolicy,
   type TestShape
 } from "@livevariant/server";
+import { R2AssetStore } from "./r2-asset-store.js";
 import { TestStorage } from "./test-storage.js";
 
 /**
@@ -186,6 +187,15 @@ interface Env {
    * domain, to keep bulk email traffic off the dashboard's reputation.
    */
   LV_SERVE_URL?: string;
+  /**
+   * Image hosting, on only when BOTH are present: the bucket holds the
+   * bytes, the secret keys the signed URLs that are the only way to fetch
+   * them. Set the secret with `wrangler secret put LV_ASSET_SECRET`
+   * (generate one: `openssl rand -hex 32`); leave it unset to run without
+   * image hosting even though the bucket binding exists.
+   */
+  ASSET_STORE?: R2Bucket;
+  LV_ASSET_SECRET?: string;
 }
 
 /** Counter keys arrive as c:{testId}:{scope}; the DO stores scopes. */
@@ -248,7 +258,14 @@ export default {
               .map(h => h.trim())
               .filter(Boolean)
           : undefined,
-        serveUrl: env.LV_SERVE_URL
+        serveUrl: env.LV_SERVE_URL,
+        assets:
+          env.ASSET_STORE && env.LV_ASSET_SECRET
+            ? {
+                store: new R2AssetStore(env.ASSET_STORE),
+                signingSecret: env.LV_ASSET_SECRET
+              }
+            : undefined
       });
       apps.set(env, app);
     }

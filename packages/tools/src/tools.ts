@@ -896,6 +896,107 @@ export const variantBrief = defineTool({
 
 // ---------------------------------------------------------------------------
 
+export const uploadImage = defineTool({
+  name: "upload_image",
+  title: "Upload an image",
+  summary: "Store an image and get back a protected URL to use as a variant",
+  description:
+    "Uploads an image to the deployment's asset store and returns its URL, " +
+    "for use as a variant's `image` (email tests) or `url`.\n\n" +
+    "The returned URL is deliberately not fetchable on its own: assets are " +
+    "only served with a short-lived signature that the serve endpoints mint " +
+    "per request, so uploading here does not create free static hosting. " +
+    "Use `previewUrl` (valid for an hour) to check what was stored.\n\n" +
+    "Storage is content-addressed: the id is the sha256 of the bytes, so " +
+    "uploading the same image twice is harmless and returns the same URL. " +
+    "Raster images only; SVG is refused because it can carry scripts. Not " +
+    "every deployment enables asset hosting, and this tool says so plainly " +
+    "when yours does not.",
+  readOnly: false,
+  reachesNetwork: true,
+  input: z.object({
+    data: z
+      .string()
+      .min(1)
+      .max(8_000_000)
+      .describe(
+        "The image bytes, base64-encoded (plain base64, not a data: URL)."
+      ),
+    contentType: z
+      .enum([
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/avif"
+      ])
+      .describe(
+        "The image's actual type; the server stores and serves it as this."
+      ),
+    serverUrl: z
+      .string()
+      .url()
+      .optional()
+      .describe("Self-hosted deployments only.")
+  }),
+  output: z.object({
+    assetId: z.string().describe("sha256 of the bytes; the id inside the URL."),
+    url: z
+      .string()
+      .describe(
+        "Use this as the variant's image/url. 403s without a signature, by design."
+      ),
+    previewUrl: z
+      .string()
+      .describe("Signed for one hour, to verify the upload."),
+    size: z.number(),
+    contentType: z.string()
+  }),
+  async handler(input, context) {
+    let bytes: Uint8Array;
+    try {
+      bytes = Uint8Array.from(atob(input.data.replace(/\s/g, "")), c =>
+        c.charCodeAt(0)
+      );
+    } catch {
+      throw new ToolInputError(
+        "data is not valid base64 (send plain base64, not a data: URL)"
+      );
+    }
+    const origin = originOf(context, input.serverUrl);
+    const response = await context.fetch(`${origin}/assets`, {
+      method: "POST",
+      headers: { "content-type": input.contentType },
+      body: bytes as unknown as BodyInit
+    });
+    if (response.status === 404) {
+      throw new ToolInputError(
+        `${origin} does not have asset hosting enabled; host the image ` +
+          "yourself and pass its public URL to build_test instead",
+        404
+      );
+    }
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      throw new ToolInputError(
+        body?.error ?? `upload failed (${response.status})`,
+        response.status === 413 || response.status === 415 ? 400 : 502
+      );
+    }
+    return (await response.json()) as {
+      assetId: string;
+      url: string;
+      previewUrl: string;
+      size: number;
+      contentType: string;
+    };
+  }
+});
+
+// ---------------------------------------------------------------------------
+
 /** Every tool, in the order a person meets them. */
 export const TOOLS = [
   buildTest,
@@ -903,6 +1004,7 @@ export const TOOLS = [
   recommendAlgorithmTool,
   generatePriors,
   getStats,
+  uploadImage,
   variantBrief
 ] as const;
 

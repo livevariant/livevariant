@@ -6,6 +6,7 @@ export {
   getStats,
   inspectTest,
   recommendAlgorithmTool,
+  uploadImage,
   variantBrief,
   type ToolName
 } from "./tools.js";
