@@ -46,3 +46,4 @@ vitest.config.*.timestamp*
 !.env.example
 __screenshots__
 .vitest-attachments
+.gstack/

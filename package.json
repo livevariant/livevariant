@@ -14,7 +14,10 @@
     "typecheck": "nx run-many -t typecheck",
     "graph": "nx graph",
     "prepare": "husky",
-    "generate": "node scripts/generate-agent-assets.mjs"
+    "generate": "node scripts/generate-agent-assets.mjs",
+    "deploy": "wrangler deploy",
+    "deploy:production": "wrangler deploy --env production",
+    "dev:worker": "wrangler dev"
   },
   "lint-staged": {
     "*": "prettier --ignore-unknown --write"
@@ -45,7 +48,8 @@
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.63.0",
     "vite": "^8.1.4",
-    "vitest": "~4.1.10"
+    "vitest": "~4.1.10",
+    "wrangler": "^4.118.0"
   },
   "workspaces": [
     "packages/*",
@@ -53,5 +57,15 @@
   ],
   "nx": {
     "includedScripts": []
+  },
+  "cloudflare": {
+    "bindings": {
+      "LV_SERVE_URL": {
+        "description": "Optional. Leave empty to serve everything from one domain, which is the simplest setup. Set it to a second domain if you send bulk email and want campaign links on their own hostname, so a campaign's reputation never touches your dashboard's."
+      },
+      "LV_ALLOWED_DESTINATIONS": {
+        "description": "Optional, comma-separated hostnames. Anyone can author a test config pointing anywhere, so set this on a deployment reachable from the internet to stop yours being used as an open redirector."
+      }
+    }
   }
 }

@@ -1,7 +1,7 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
+  "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "livevariant",
-  "main": "src/index.ts",
+  "main": "packages/workers/src/index.ts",
   "compatibility_date": "2026-07-01",
   // One Durable Object per testId: single-threaded per test, so assignment
   // races and blob CAS conflicts cannot happen by construction.
@@ -21,11 +21,71 @@
   ],
   "observability": {
     "enabled": true
+  },
+  // Deliberately no routes and no LV_SERVE_URL here. This is the config a
+  // stranger gets when they deploy their own copy, and it has to work on
+  // their account: routes name zones only we own, and LV_SERVE_URL would
+  // put OUR domain in THEIR visitors' links. Both live under env.production
+  // instead, which is what the hosted deployment deploys with.
+  //
+  // The result for a self-hoster is one workers.dev origin serving
+  // everything, with every URL built from the request itself.
+  "workers_dev": true,
+  // The Worker also serves the site. run_worker_first lists the paths the
+  // app owns, because the single-page fallback would otherwise answer them
+  // with index.html; everything else is a static file, or the app shell
+  // standing in for one of its client-side routes.
+  //
+  // Bare and /-suffixed forms are both listed on purpose: /s and /s/:cfg
+  // are the query-parameter and encoded spellings of one endpoint, and
+  // "/s/*" alone would route one and not the other.
+  "assets": {
+    "directory": "apps/web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/s",
+      "/s/*",
+      "/c",
+      "/c/*",
+      "/px/*",
+      "/choose",
+      "/reward",
+      "/stats/*",
+      "/recompute/*",
+      "/exclude/*",
+      "/manage/*",
+      "/health",
+      "/config",
+      "/api/*",
+      "/mcp",
+      "/openapi.json",
+      "/docs"
+    ]
+  },
+  // Our own deployment: `wrangler deploy --env production`. Nothing here is
+  // reachable by anyone deploying this repository themselves.
+  "env": {
+    "production": {
+      "workers_dev": false,
+      // Repeated, not inherited: wrangler does NOT copy bindings down into
+      // a named environment, so leaving this out deploys a Worker with no
+      // state store at all.
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "TEST_STATE",
+            "class_name": "TestStateDO"
+          }
+        ]
+      },
+      "vars": {
+        "LV_SERVE_URL": "https://livevariant.link"
+      },
+      "routes": [
+        { "pattern": "livevariant.link/*", "zone_name": "livevariant.link" },
+        { "pattern": "livevariant.com/*", "zone_name": "livevariant.com" }
+      ]
+    }
   }
-  // Routes (livevariant.link serving + livevariant.com manage) are added at
-  // deploy time once the zones are on the Cloudflare account:
-  // "routes": [
-  //   { "pattern": "livevariant.link/*", "zone_name": "livevariant.link" },
-  //   { "pattern": "livevariant.com/*", "zone_name": "livevariant.com" }
-  // ]
 }

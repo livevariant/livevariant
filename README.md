@@ -48,6 +48,9 @@ registration, no dashboard required.
 | `POST /recompute/:cfg` | Creator-only: rebuild derived state from the event log      |
 | `POST /exclude/:cfg`   | Creator-only: quarantine traffic sources or time windows    |
 | `GET /manage/:cfg`     | Creator dashboard shell (secret travels in the `#fragment`) |
+| `POST /api/v1/*`       | The agent tools over plain HTTP (one endpoint per tool)     |
+| `ALL /mcp`             | The same tools over MCP, for clients that speak it          |
+| `GET /docs`            | Swagger UI over the generated OpenAPI document              |
 
 Serve and click redirects append `_lvt`/`_lvid`/`_lvvar` so the SDK on the
 destination site can adopt the assignment (`decorateRedirects: false` opts
@@ -70,7 +73,8 @@ twice, and CI regenerates and fails on any diff.
 | `get_stats`           | Results, win probabilities and a stop/continue call    |
 | `variant_brief`       | Channel-specific constraints for drafting the variants |
 
-Install the plugin (this repository is the marketplace):
+The hosted endpoint at `https://livevariant.com/mcp` needs nothing
+installed. Install the plugin (this repository is the marketplace):
 
 ```bash
 claude
@@ -89,12 +93,25 @@ reading results needs the stats secret that the server checks against the
 hash inside that config, so authority travels in the arguments. Set
 `LIVEVARIANT_SERVER_URL` to point the tools at a self-hosted deployment.
 
-**No MCP? Use the HTTP API.** An agent handed the SKILL cannot always
-install an MCP server, so every tool is also `POST /api/v1/<tool-name>`
-with the same input and output, documented at `/docs` (Swagger) and
-`/openapi.json`. Both call the same handler, so they cannot disagree. Set
-`LV_API_URL` to mount it; leaving it unset keeps the serving domain to
-serving, which is what livevariant.link wants.
+**Three ways in, one implementation.** The same registry is served as MCP
+over stdio (`npx -y @livevariant/mcp`), as MCP over HTTP at `/mcp` for
+clients that cannot spawn a local process, and as plain `POST
+/api/v1/<tool-name>` for agents that speak neither, documented at `/docs`
+and `/openapi.json`. All of them call the identical handler, so they
+cannot disagree.
+
+**One domain, no configuration.** A deployment serves everything from
+wherever it runs, and every URL it hands out is built from the origin the
+request arrived on, so a self-host needs no environment variables at all.
+Set `LV_SERVE_URL` only to put the links visitors follow on a separate
+domain, which is worth doing for bulk email so a campaign's reputation
+never touches the dashboard's. That is the only thing it changes: both
+domains still answer for everything, and the manage link still points
+where the creator was working.
+
+The hosted MCP endpoint is stateless, because every tool is a pure
+function of its arguments, so there is no session to keep and no question
+about affinity across Worker isolates.
 
 `get_stats` is the one worth knowing about. It returns the probability
 each variant is genuinely best and the expected cost of stopping now,
@@ -316,6 +333,37 @@ a `bucketed` test averaging too few pulls per bucket is told to switch to
 Acting on it costs nothing: `alg` is excluded from the identity hash, so
 changing it keeps the same testId, and `POST /recompute` rebuilds the
 model from the full event log. No history is lost.
+
+## Run your own
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/livevariant/livevariant)
+
+That clones this repository into your own GitHub account, provisions the
+Durable Object, and deploys. You get a `workers.dev` URL serving
+everything: the dashboard, the tools API, `/docs`, the MCP endpoint and
+the serving redirects. Nothing to configure, because every URL a test
+hands out is built from the origin the request arrived on.
+
+Two optional variables, both offered during setup:
+
+| Variable                  | Why you might set it                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------- |
+| `LV_SERVE_URL`            | A second domain for campaign links, so bulk email never touches your dashboard's reputation |
+| `LV_ALLOWED_DESTINATIONS` | Comma-separated hostnames redirects may point at. Set this on anything internet-reachable   |
+
+Or deploy it yourself:
+
+```bash
+npm install
+npm run build
+npx wrangler deploy
+```
+
+`LV_ALLOWED_DESTINATIONS` deserves a moment's thought before you expose a
+deployment publicly. Anyone can author a config pointing anywhere, so an
+open deployment is an open redirector; the allowlist is what stops yours
+being used for phishing. Unset means allow-all, which is right while you
+are only serving your own campaigns.
 
 ## Development
 
