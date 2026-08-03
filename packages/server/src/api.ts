@@ -52,11 +52,17 @@ export function createApi(options: ApiOptions): Hono {
    * the caller actually reached. That is what makes the single-domain
    * deployment need no configuration.
    */
+  // Blank counts as unset. The deploy button offers LV_SERVE_URL with an
+  // empty default and tells people to leave it alone unless they run a
+  // second domain, so an empty string is the expected input, not a typo.
+  // Passed through, it built origin-less URLs like "/s/<config>", which in
+  // an email resolve against the mail client and serve nothing.
+  const serveUrl = options.serveUrl?.trim() || undefined;
   const contextFor = (url: string): ToolContext => {
     const origin = new URL(url).origin;
     return {
       serverUrl: origin,
-      serveUrl: options.serveUrl ?? origin,
+      serveUrl: serveUrl ?? origin,
       fetch: options.fetch
     };
   };
@@ -99,7 +105,7 @@ export function createApi(options: ApiOptions): Hono {
   // makes the builder default to livevariant.link on the hosted service
   // and to a self-hoster's own origin on theirs, with nothing baked in.
   app.get("/config", c =>
-    c.json({ serveUrl: options.serveUrl ?? new URL(c.req.url).origin })
+    c.json({ serveUrl: serveUrl ?? new URL(c.req.url).origin })
   );
 
   app.get("/openapi.json", c =>

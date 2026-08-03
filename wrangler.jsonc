@@ -22,7 +22,15 @@
   "observability": {
     "enabled": true
   },
-  // Deliberately no routes and no LV_SERVE_URL here. This is the config a
+  // Offered by the Deploy to Cloudflare button, which reads them from here
+  // and shows the descriptions in package.json's `cloudflare.bindings`.
+  // Both are empty on purpose: empty is the correct answer for a
+  // single-domain deployment, and the server treats blank as unset.
+  "vars": {
+    "LV_SERVE_URL": "",
+    "LV_ALLOWED_DESTINATIONS": ""
+  },
+  // Deliberately no routes here. This is the config a
   // stranger gets when they deploy their own copy, and it has to work on
   // their account: routes name zones only we own, and LV_SERVE_URL would
   // put OUR domain in THEIR visitors' links. Both live under env.production
@@ -90,8 +98,11 @@
           }
         ]
       },
+      // vars are not inherited, so every key from the top level has to be
+      // repeated or wrangler warns. Empty means unset, same as the base.
       "vars": {
-        "LV_SERVE_URL": "https://livevariant.link"
+        "LV_SERVE_URL": "https://livevariant.link",
+        "LV_ALLOWED_DESTINATIONS": ""
       },
       "routes": [
         { "pattern": "livevariant.link/*", "zone_name": "livevariant.link" },

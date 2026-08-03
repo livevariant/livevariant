@@ -356,7 +356,7 @@ Or deploy it yourself:
 ```bash
 npm install
 npm run build
-npx wrangler deploy
+npm run deploy
 ```
 
 That deploys the base configuration, which is the one meant for your own

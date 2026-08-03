@@ -89,6 +89,29 @@ describe("the tool API", () => {
     expect(doc.servers[0].url).toBe("https://livevariant.com");
   });
 
+  it("treats a blank serving domain as no serving domain", async () => {
+    // The deploy button offers LV_SERVE_URL empty and tells people to leave
+    // it that way unless they run a second domain, so "" is expected input.
+    // Passed through it built "/s/<config>", which in an email resolves
+    // against the mail client and serves nothing.
+    const blank = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(1),
+      serveUrl: "   "
+    });
+    const res = await blank.request("https://ab.internal/api/v1/build-test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ variants: [{ url: A }, { url: B }] })
+    });
+    const out = (await res.json()) as Record<string, any>;
+    expect(out.urls.serve).toBe(`https://ab.internal/s/${out.config}`);
+    // And the dashboard is told the same thing, or the builder would show
+    // whitespace as the serving server.
+    const config = await blank.request("https://ab.internal/config");
+    expect(await config.json()).toEqual({ serveUrl: "https://ab.internal" });
+  });
+
   it("tells the dashboard where its links should point", async () => {
     // The builder is a static build and cannot know this at compile time,
     // so a hardcoded default would be wrong for the hosted service or for
