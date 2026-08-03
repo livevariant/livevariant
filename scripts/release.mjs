@@ -73,13 +73,23 @@ if (dryRun) {
   process.exit(0);
 }
 
+// nx's lock-file update runs `npm install --package-lock-only`, and npm
+// has a long-standing habit of pruning nested platform-fallback entries
+// (rolldown's wasm binding pins @emnapi/*@2.0.0-alpha.3) in that mode. A
+// full install reconciles the lockfile so the release commit survives the
+// `npm ci` that CI and Workers Builds will run against it.
+run("npm install");
+run("git add package-lock.json");
+
 // The generated manifests embed the version, so they are part of the
 // release commit or the drift check fails on it.
 run("npm run generate");
 run("git add SKILL.md plugins .claude-plugin .agents");
 
 run(`git commit -m "release: v${workspaceVersion}"`);
-run(`git tag v${workspaceVersion}`);
+// Annotated, not lightweight: `git push --follow-tags` only pushes
+// annotated tags, and a tag that stays local defeats its purpose.
+run(`git tag -a v${workspaceVersion} -m "v${workspaceVersion}"`);
 
 const results = await releasePublish({ dryRun, verbose, firstRelease, otp });
 const failed = Object.values(results).filter(r => r.code !== 0).length;
