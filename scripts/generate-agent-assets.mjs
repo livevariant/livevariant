@@ -29,7 +29,12 @@ const TOOLS_MARKER = "<!-- TOOLS_TABLE -->";
 export const PLUGIN = {
   name: "livevariant",
   displayName: "LiveVariant",
-  version: "0.0.1",
+  // The npm packages' lockstep version, read rather than written so a
+  // release bump (scripts/release.mjs regenerates after versioning) flows
+  // into every manifest without a second place to edit.
+  version: JSON.parse(
+    fs.readFileSync(path.join(root, "packages", "mcp", "package.json"), "utf8")
+  ).version,
   description:
     "Run A/B tests that pick their own winner. Build tests from a set of " +
     "variants, get URLs for email or web, and read results with real win " +

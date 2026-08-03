@@ -56,5 +56,18 @@
       "dependsOn": ["^build"]
     }
   },
-  "analytics": false
+  "analytics": false,
+  "release": {
+    "projectsRelationship": "fixed",
+    "projects": [
+      "@livevariant/core",
+      "@livevariant/tools",
+      "@livevariant/server",
+      "@livevariant/mcp",
+      "@livevariant/sdk"
+    ],
+    "version": {
+      "preVersionCommand": "npx nx run-many -t build"
+    }
+  }
 }
