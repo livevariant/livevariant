@@ -1,11 +1,8 @@
 {
   "mcpServers": {
     "livevariant": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@livevariant/mcp@0.0.1"
-      ]
+      "type": "http",
+      "url": "https://livevariant.com/mcp"
     }
   }
 }

@@ -39,20 +39,23 @@ export const PLUGIN = {
   author: "LiveVariant",
   category: "Productivity",
   license: "AGPL-3.0",
-  apiUrl: "https://livevariant.com"
+  apiUrl: "https://livevariant.com",
+  mcpUrl: "https://livevariant.com/mcp"
 };
 
 /**
- * The MCP server runs locally over stdio via npx. Nothing to host and
- * nothing to authorize: every tool carries its own authority in its
- * arguments, so there is no account to connect.
+ * The hosted endpoint rather than a local stdio process: it needs nothing
+ * installed, works in clients that cannot spawn one, and there is no
+ * account to connect because every tool carries its own authority in its
+ * arguments. `npx -y @livevariant/mcp` remains available for anyone who
+ * would rather run it themselves or point at a self-hosted deployment.
  */
 function mcpServersConfig() {
   return {
     mcpServers: {
       [PLUGIN.name]: {
-        command: "npx",
-        args: ["-y", `@livevariant/mcp@${PLUGIN.version}`]
+        type: "http",
+        url: PLUGIN.mcpUrl
       }
     }
   };

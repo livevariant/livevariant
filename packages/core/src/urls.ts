@@ -32,17 +32,25 @@ export interface TestUrls {
 /** Query flag that suppresses server-derived context on a serve link. */
 export const NO_AUTO_PARAM = "auto=0";
 
+/**
+ * `base` is where visitors are sent; `manageBase` is where the creator
+ * reads results, and defaults to the same place. They differ only when a
+ * deployment puts serving on its own domain to keep bulk email traffic
+ * away from the dashboard's reputation.
+ */
 export function buildTestUrls(
   base: string,
   encoded: string,
-  statsSecret?: string
+  statsSecret?: string,
+  manageBase?: string
 ): TestUrls {
   const origin = base.replace(/\/+$/, "");
+  const manageOrigin = (manageBase ?? base).replace(/\/+$/, "");
   return {
     serve: `${origin}/s/${encoded}`,
     click: `${origin}/c/${encoded}`,
     pixel: `${origin}/px/${encoded}`,
-    manage: `${origin}/manage/${encoded}${statsSecret ? `#${statsSecret}` : ""}`,
+    manage: `${manageOrigin}/manage/${encoded}${statsSecret ? `#${statsSecret}` : ""}`,
     noAuto: {
       serve: `${origin}/s/${encoded}?${NO_AUTO_PARAM}`,
       click: `${origin}/c/${encoded}?${NO_AUTO_PARAM}`

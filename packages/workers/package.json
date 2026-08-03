@@ -1,7 +1,7 @@
 {
   "name": "@livevariant/workers",
   "version": "0.0.1",
-  "description": "Cloudflare Workers deployment of the LiveVariant server: one SQLite-backed Durable Object per test as the state store, serving livevariant.link and livevariant.com",
+  "description": "Cloudflare Workers deployment of the LiveVariant server: one SQLite-backed Durable Object per test as the state store",
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
@@ -10,10 +10,7 @@
   },
   "private": true,
   "type": "module",
-  "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
-  },
+  "scripts": {},
   "nx": {
     "includedScripts": []
   },

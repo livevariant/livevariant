@@ -17,6 +17,9 @@
     },
     {
       "path": "../tools/tsconfig.lib.json"
+    },
+    {
+      "path": "../mcp/tsconfig.lib.json"
     }
   ],
   "exclude": ["src/**/*.spec.ts"]

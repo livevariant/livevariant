@@ -35,7 +35,3 @@ export function removeTest(testId: string): void {
     JSON.stringify(loadTests().filter(t => t.testId !== testId))
   );
 }
-
-/** Default serving origin; self-hosters change it in the builder. */
-export const DEFAULT_SERVER_URL =
-  "https://livevariant.livevariant-workers.workers.dev";

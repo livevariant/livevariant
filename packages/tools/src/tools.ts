@@ -98,8 +98,17 @@ function formatsOf(v: z.infer<typeof variantInput>) {
   };
 }
 
+/** Where the dashboard and every credentialed call live. */
 function originOf(context: ToolContext, override?: string): string {
   return (override ?? context.serverUrl).replace(/\/+$/, "");
+}
+
+/** Where visitors are sent. The same place, unless serving is split off. */
+function serveOriginOf(context: ToolContext, override?: string): string {
+  return (override ?? context.serveUrl ?? context.serverUrl).replace(
+    /\/+$/,
+    ""
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -228,8 +237,14 @@ export const buildTest = defineTool({
       );
     }
 
-    const origin = originOf(context, input.serverUrl);
-    const urls = buildTestUrls(origin, encoded.encoded, statsSecret);
+    const serveOrigin = serveOriginOf(context, input.serverUrl);
+    const manageOrigin = originOf(context, input.serverUrl);
+    const urls = buildTestUrls(
+      serveOrigin,
+      encoded.encoded,
+      statsSecret,
+      manageOrigin
+    );
     const warnings = [...encoded.warnings];
     const inlineOnly = input.variants.filter(v => !v.url && !v.image);
     if (inlineOnly.length > 0 && inlineOnly.length < input.variants.length) {
@@ -265,10 +280,10 @@ export const buildTest = defineTool({
       },
       emailTemplate: {
         imageSrc:
-          `${origin}/s?${input.variants.map((_, i) => `v={{variant_${i + 1}_url}}`).join("&")}` +
+          `${serveOrigin}/s?${input.variants.map((_, i) => `v={{variant_${i + 1}_url}}`).join("&")}` +
           `&auto=0&id={{recipient_id}}&kh=${configInput.statsKeyHash}`,
         linkHref:
-          `${origin}/c?${input.variants.map((_, i) => `v={{variant_${i + 1}_url}}`).join("&")}` +
+          `${serveOrigin}/c?${input.variants.map((_, i) => `v={{variant_${i + 1}_url}}`).join("&")}` +
           `&r={{landing_url}}&auto=0&id={{recipient_id}}&kh=${configInput.statsKeyHash}`
       },
       warnings
@@ -670,12 +685,13 @@ export const getStats = defineTool({
     // self-hoster is told to configure their deployment instead of quietly
     // querying the wrong server.
     const origin = originOf(context);
-    if (resolved.serverUrl && resolved.serverUrl !== origin) {
+    const known = [origin, serveOriginOf(context)];
+    if (resolved.serverUrl && !known.includes(resolved.serverUrl)) {
       throw new ToolInputError(
         `that URL points at ${resolved.serverUrl}, but this client is ` +
-          `configured for ${origin}. The stats secret is only ever sent to ` +
-          "the configured server. If that deployment is yours, set " +
-          "LIVEVARIANT_SERVER_URL to it; otherwise do not trust the link."
+          `configured for ${known.join(" and ")}. The stats secret is only ` +
+          "ever sent to the configured server. If that deployment is yours, " +
+          "set LIVEVARIANT_SERVER_URL to it; otherwise do not trust the link."
       );
     }
     const encoded = (await encodeConfig(resolved.config)).encoded;

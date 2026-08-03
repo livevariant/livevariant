@@ -57,11 +57,12 @@ export interface AppOptions {
    */
   allowedDestinations?: string[];
   /**
-   * Public origin for the tool API's generated URLs and OpenAPI document.
-   * Unset leaves the API unmounted, which is right for a deployment that
-   * only serves variants.
+   * Origin to put in the links visitors follow. Unset means every URL is
+   * built from the origin the request arrived on, so a one-domain deploy
+   * needs no configuration; set it when serving has its own domain, to
+   * keep bulk email traffic off the dashboard's reputation.
    */
-  apiUrl?: string;
+  serveUrl?: string;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -347,11 +348,22 @@ export function createApp(options: AppOptions): Hono {
 
   app.get("/health", c => c.json({ ok: true }));
 
-  // The tool API, OpenAPI document and Swagger page, all generated from
-  // the shared registry the MCP server also registers.
-  if (options.apiUrl) {
-    app.route("/", createApi({ serverUrl: options.apiUrl }));
-  }
+  // The tool API, OpenAPI document, Swagger page and MCP endpoint, all
+  // generated from the shared registry. Always mounted: one domain doing
+  // everything is the default shape, and a deployment that wants serving
+  // on its own domain sets serveUrl rather than turning anything off.
+  //
+  // The injected fetch routes back into this same app rather than over the
+  // network, which is what lets get_stats read /stats: a Worker cannot
+  // fetch its own hostname.
+  app.route(
+    "/",
+    createApi({
+      serveUrl: options.serveUrl,
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+        app.fetch(new Request(input as RequestInfo, init))) as typeof fetch
+    })
+  );
 
   // Redirect-mode serve: 302 to the assigned arm's url/image. Registered
   // twice: /s/:cfg carries a base64 config, bare /s spells the same test

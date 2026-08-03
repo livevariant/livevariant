@@ -19,7 +19,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/select";
-import { DEFAULT_SERVER_URL, saveTest } from "@/lib/tests-store";
+import { saveTest } from "@/lib/tests-store";
+import { useServeUrl } from "@/lib/serve-url";
 
 interface ArmDraft {
   name: string;
@@ -30,7 +31,14 @@ interface ArmDraft {
 export function Builder() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
-  const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
+  // Detected from the deployment, until the person types their own.
+  const detectedServerUrl = useServeUrl();
+  const [serverOverride, setServerOverride] = useState<string | null>(null);
+  const serverUrl = serverOverride ?? detectedServerUrl;
+  // Guarded at use, not in the change handler: an empty field has to stay
+  // empty while someone clears it to type a new one, but an empty serving
+  // origin would build relative URLs that serve nothing.
+  const effectiveServerUrl = serverUrl.trim() || detectedServerUrl;
   const [arms, setArms] = useState<ArmDraft[]>([
     { name: "control", url: "", text: "" },
     { name: "variant-b", url: "", text: "" }
@@ -41,6 +49,13 @@ export function Builder() {
   const [rewardEvents, setRewardEvents] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The exact condition the click endpoint enforces: it needs ?to=, a
+  // per-variant redirectUrl, or this one. Variants with a destination are
+  // the case where someone is likely to want click tracking and be
+  // surprised by a 400 in the middle of a campaign.
+  const needsRedirectUrl =
+    redirectUrl.trim() === "" && arms.some(arm => arm.url.trim() !== "");
 
   const dims = useMemo(
     () =>
@@ -95,7 +110,7 @@ export function Builder() {
         encoded,
         testId,
         statsSecret,
-        serverUrl: serverUrl.replace(/\/+$/, ""),
+        serverUrl: effectiveServerUrl.replace(/\/+$/, ""),
         createdAt: Date.now()
       });
       if (warnings.length > 0) {
@@ -138,7 +153,7 @@ export function Builder() {
             <Input
               id="server"
               value={serverUrl}
-              onChange={e => setServerUrl(e.target.value)}
+              onChange={e => setServerOverride(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
               The hosted server, or your own (AGPL, self-hostable).
@@ -252,13 +267,27 @@ export function Builder() {
             )}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="redirect">Click redirect URL</Label>
+            <Label htmlFor="redirect">Click redirect URL (optional)</Label>
             <Input
               id="redirect"
               placeholder="https://yoursite.com/thanks"
               value={redirectUrl}
               onChange={e => setRedirectUrl(e.target.value)}
             />
+            <p className="text-xs text-muted-foreground">
+              Where the click link sends people after counting the click. Only
+              the click link needs it, and only when nothing else already says
+              where to go: a per-variant destination, or a <code>&amp;r=</code>{" "}
+              on the link itself, both count. Leave it empty for an SDK test, or
+              when your variants are themselves the destinations.
+            </p>
+            {needsRedirectUrl && (
+              <p className="text-xs text-amber-700 dark:text-amber-500">
+                Your variants have destination URLs but no click target. The
+                serve link works either way; the click link will refuse until
+                one of the three is set, rather than send people nowhere.
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="rewards">
