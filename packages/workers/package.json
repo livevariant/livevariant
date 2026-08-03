@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/workers",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Cloudflare Workers deployment of the LiveVariant server: one SQLite-backed Durable Object per test as the state store",
   "license": "AGPL-3.0",
   "repository": {
@@ -15,8 +15,8 @@
     "includedScripts": []
   },
   "dependencies": {
-    "@livevariant/core": "0.0.1",
-    "@livevariant/server": "0.0.1"
+    "@livevariant/core": "0.0.2",
+    "@livevariant/server": "0.0.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260801.1",

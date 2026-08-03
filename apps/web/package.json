@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/web",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "livevariant.com: product website and account-free admin (test builder, stats) served as static assets by the Worker",
   "license": "AGPL-3.0",
   "private": true,
@@ -9,7 +9,7 @@
     "includedScripts": []
   },
   "dependencies": {
-    "@livevariant/core": "0.0.1",
+    "@livevariant/core": "0.0.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.28.0",
