@@ -359,6 +359,11 @@ npm run build
 npx wrangler deploy
 ```
 
+That deploys the base configuration, which is the one meant for your own
+account: a single origin, no routes, and every URL built from the request.
+Our hosted deployment is `env.production` in the same file, and ships from
+Cloudflare Workers Builds on every push to `main`.
+
 `LV_ALLOWED_DESTINATIONS` deserves a moment's thought before you expose a
 deployment publicly. Anyone can author a config pointing anywhere, so an
 open deployment is an open redirector; the allowlist is what stops yours

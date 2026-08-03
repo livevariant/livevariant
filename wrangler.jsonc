@@ -63,8 +63,11 @@
       "/docs"
     ]
   },
-  // Our own deployment: `wrangler deploy --env production`. Nothing here is
-  // reachable by anyone deploying this repository themselves.
+  // Our own deployment, shipped by Cloudflare Workers Builds on every push
+  // to main (`npm run deploy:production` by hand). Nothing here is reachable
+  // by anyone deploying this repository to their own account: a bare
+  // `wrangler deploy` uses the base config above, which is the point of the
+  // split.
   "env": {
     "production": {
       "workers_dev": false,

@@ -15,9 +15,8 @@
     "graph": "nx graph",
     "prepare": "husky",
     "generate": "node scripts/generate-agent-assets.mjs",
-    "deploy": "wrangler deploy",
-    "deploy:production": "wrangler deploy --env production",
-    "dev:worker": "wrangler dev"
+    "dev:worker": "wrangler dev",
+    "deploy:production": "wrangler deploy --env production"
   },
   "lint-staged": {
     "*": "prettier --ignore-unknown --write"
