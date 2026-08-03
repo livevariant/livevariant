@@ -25,7 +25,10 @@ import { useServeUrl } from "@/lib/serve-url";
 interface ArmDraft {
   name: string;
   url: string;
+  image: string;
   text: string;
+  uploading?: boolean;
+  uploadError?: string;
 }
 
 export function Builder() {
@@ -40,8 +43,8 @@ export function Builder() {
   // origin would build relative URLs that serve nothing.
   const effectiveServerUrl = serverUrl.trim() || detectedServerUrl;
   const [arms, setArms] = useState<ArmDraft[]>([
-    { name: "control", url: "", text: "" },
-    { name: "variant-b", url: "", text: "" }
+    { name: "control", url: "", image: "", text: "" },
+    { name: "variant-b", url: "", image: "", text: "" }
   ]);
   const [redirectUrl, setRedirectUrl] = useState("");
   const [ctxKeys, setCtxKeys] = useState("");
@@ -72,6 +75,38 @@ export function Builder() {
   );
   const effectiveAlg = alg === "auto" ? recommendation.alg : alg;
 
+  /**
+   * Uploads to the deployment's asset store and drops the returned
+   * protected URL into the image field. The URL 403s outside a test's
+   * serving flow, which is the point: hosting here is for variants, not
+   * for hotlinking.
+   */
+  async function uploadImage(index: number, file: File) {
+    setArm(index, { uploading: true, uploadError: undefined });
+    try {
+      const res = await fetch(`${effectiveServerUrl}/assets`, {
+        method: "POST",
+        headers: { "content-type": file.type },
+        body: file
+      });
+      const body = (await res.json()) as { url?: string; error?: string };
+      if (!res.ok || !body.url) {
+        throw new Error(
+          body.error ??
+            (res.status === 404
+              ? "this server has image hosting disabled"
+              : `upload failed (${res.status})`)
+        );
+      }
+      setArm(index, { image: body.url, uploading: false });
+    } catch (err) {
+      setArm(index, {
+        uploading: false,
+        uploadError: err instanceof Error ? err.message : String(err)
+      });
+    }
+  }
+
   function setArm(index: number, patch: Partial<ArmDraft>) {
     setArms(current =>
       current.map((arm, i) => (i === index ? { ...arm, ...patch } : arm))
@@ -90,6 +125,7 @@ export function Builder() {
           name: arm.name,
           formats: {
             url: arm.url || undefined,
+            image: arm.image || undefined,
             text: arm.text || undefined
           }
         })),
@@ -203,6 +239,39 @@ export function Builder() {
                 value={arm.text}
                 onChange={e => setArm(i, { text: e.target.value })}
               />
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="Image URL (email tests)"
+                  value={arm.image}
+                  onChange={e => setArm(i, { image: e.target.value })}
+                />
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp,image/avif"
+                  className="hidden"
+                  id={`arm-${i}-upload`}
+                  onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      void uploadImage(i, file);
+                    }
+                    e.target.value = "";
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={arm.uploading}
+                  onClick={() =>
+                    document.getElementById(`arm-${i}-upload`)?.click()
+                  }
+                >
+                  {arm.uploading ? "Uploading…" : "Upload"}
+                </Button>
+              </div>
+              {arm.uploadError && (
+                <p className="text-xs text-red-600">{arm.uploadError}</p>
+              )}
             </div>
           ))}
           <Button
@@ -212,6 +281,7 @@ export function Builder() {
               setArms(current => [
                 ...current,
                 {
+                  image: "",
                   // a..z, then plain numbers past 26 variants.
                   name: `variant-${
                     current.length < 26

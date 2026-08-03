@@ -19,6 +19,17 @@ export {
 } from "./api-schemas.js";
 export { MemoryStore } from "./store/memory.js";
 export {
+  MemoryAssetStore,
+  type AssetStore,
+  type StoredAsset
+} from "./assets/types.js";
+export {
+  createAssetRoutes,
+  DEFAULT_ASSET_TTL_SECONDS,
+  type AssetOptions
+} from "./assets/routes.js";
+export { signAsset, verifyAssetSignature } from "./assets/sign.js";
+export {
   arrayToCounts,
   blobToLinearState,
   countsToArray,

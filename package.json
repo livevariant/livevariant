@@ -69,6 +69,9 @@
       },
       "LV_ALLOWED_DESTINATIONS": {
         "description": "Optional, comma-separated hostnames. Anyone can author a test config pointing anywhere, so set this on a deployment reachable from the internet to stop yours being used as an open redirector."
+      },
+      "LV_ASSET_SECRET": {
+        "description": "Optional. Enables image hosting (uploads at /assets, download URLs signed per serve). Generate one with `openssl rand -hex 32`. Leave empty to run without image hosting."
       }
     }
   }

@@ -105,9 +105,11 @@ export {
   passthroughParams
 } from "./params.js";
 export {
+  assetIdFromUrl,
   autoContextDisabled,
   buildTestUrls,
   NO_AUTO_PARAM,
+  withQuery,
   type TestUrls
 } from "./urls.js";
 export {

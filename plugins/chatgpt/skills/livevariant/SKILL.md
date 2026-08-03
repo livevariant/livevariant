@@ -35,6 +35,7 @@ Two consequences that will bite you if you skip them:
 | `recommend_algorithm` | Pick ts / bucketed / linear from the context and traffic, with reasoning |
 | `generate_priors`     | Turn your predictions into capped pseudo-counts and embed them           |
 | `get_stats`           | Live results plus win probabilities and a stop/continue call             |
+| `upload_image`        | Store an image and get back a protected URL to use as a variant          |
 | `variant_brief`       | Channel-specific specs and rules for drafting the variants themselves    |
 
 ## Working flow
