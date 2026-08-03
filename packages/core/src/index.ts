@@ -103,6 +103,7 @@ export {
   CONFIG_PARAMS,
   RUNTIME_PARAMS,
   configFromParams,
+  configToParams,
   decorateDestination,
   fallbackTarget,
   isReservedParam,

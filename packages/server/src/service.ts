@@ -1,45 +1,50 @@
 import {
-  bucketKey,
   applyExclusions,
+  bucketKey,
+  cellCount,
+  choose,
   composeBucketKey,
+  decodeCell,
   deriveAutoCtx,
-  mergeFeatureIndices,
-  recommendFromObserved,
-  requestSignals,
-  urlSignals,
-  chooseArm,
-  effectiveArmPriors,
-  effectiveBucketPriors,
-  effectiveLinearPriors,
+  dimForShape,
+  effectivePriors,
   featureIndices,
-  linearObserve,
-  linearReward,
+  marginalOutcomes,
+  mergeFeatureIndices,
   newDerivedState,
   normalizeCtx,
-  splitAutoDims,
+  observe,
   recomputeState,
-  FEATURE_DIM,
-  type ArmPrior,
+  requestSignals,
+  reward as modelReward,
+  slotEntries,
+  slotSizes as configSlotSizes,
+  splitAutoDims,
+  urlSignals,
+  validCell,
+  variantName,
   type AssignmentRecord,
-  type DecodedConfig,
-  type AlgorithmRecommendation,
   type CloudflareGeo,
+  type DecodedConfig,
   type DerivedState,
   type ExclusionPolicy,
+  type JointModel,
   type RequestSignals,
-  type LinearPrior,
-  type Rng
+  type Rng,
+  type VariantPrior
 } from "@livevariant/core";
 import {
   arrayToCounts,
-  blobToLinearState,
+  blobToModel,
+  modelToBlob,
   pullDelta,
   successDelta
 } from "./store/snapshot.js";
 import {
   counterKey,
   GLOBAL_SCOPE,
-  linearKey,
+  modelKey,
+  sameShape,
   type StateStore,
   type TestPolicy
 } from "./store/types.js";
@@ -48,40 +53,44 @@ import {
  * The serving logic both modes share. Redirect mode derives ServingParams
  * from the full config; JS mode receives them directly in the request
  * body (which is how the server serves /choose without ever seeing
- * variant content).
+ * variant content). There is no algorithm to name anywhere here: every
+ * test runs the one joint model, and these params are just its shape.
  */
 export interface ServingParams {
   testId: string;
-  armCount: number;
-  alg: "ts" | "bucketed" | "linear";
+  /** Variant counts per slot, canonical (sorted-key) order. */
+  slotSizes: number[];
+  /** Model dimension; dimForShape(slotSizes, ctxDims) on both ends. */
   dim: number;
-  /** Choose-path only (bucketed fallback threshold); rewards never read it. */
-  minBucketPulls?: number;
-  armPriors?: ArmPrior[];
-  bucketPriors?: Record<string, ArmPrior[]>;
-  linearPriors?: LinearPrior[];
+  priors?: VariantPrior[];
   noise?: number;
 }
 
-export async function paramsFromConfig(
-  decoded: DecodedConfig
-): Promise<ServingParams> {
+export function paramsFromConfig(decoded: DecodedConfig): ServingParams {
   const { config, testId } = decoded;
+  const sizes = configSlotSizes(config);
   return {
     testId,
-    armCount: config.arms.length,
-    alg: config.alg,
-    dim: FEATURE_DIM,
-    minBucketPulls: config.minBucketPulls,
-    armPriors: effectiveArmPriors(config),
-    bucketPriors: await effectiveBucketPriors(config, testId),
-    linearPriors: effectiveLinearPriors(config)
+    slotSizes: sizes,
+    dim: dimForShape(sizes, config.ctx?.dims.length ?? 0),
+    priors: effectivePriors(config)
   };
+}
+
+/** Per-slot variant display names, for stats and URL stamps. */
+export function labelsFromConfig(
+  decoded: DecodedConfig
+): Array<{ key: string; variants: string[] }> {
+  return slotEntries(decoded.config).map(([key, variants]) => ({
+    key,
+    variants: variants.map((v, i) => variantName(v, i))
+  }));
 }
 
 export interface RequestIdentity {
   idHash: string | null;
   ctxKey: string | null;
+  /** Context feature indices only; the full set is derived at choose time. */
   featIdx: number[];
   /** Opaque source bucket for the stats breakdown; null when unknown. */
   srcHash?: string | null;
@@ -105,6 +114,7 @@ export interface RequestContext {
 /** Resolves raw request context into the opaque forms used everywhere else. */
 export async function resolveIdentity(
   decoded: DecodedConfig,
+  dim: number,
   externalIdHashed: string | null,
   rawCtx: Record<string, string> | null,
   srcHash: string | null = null,
@@ -136,7 +146,7 @@ export async function resolveIdentity(
   return {
     idHash: externalIdHashed,
     ctxKey: await composeBucketKey(decoded.testId, callerKey, autoCtx),
-    featIdx: mergeFeatureIndices(featureIndices(callerCtx), autoCtx),
+    featIdx: mergeFeatureIndices(featureIndices(callerCtx, dim), autoCtx, dim),
     srcHash,
     signals
   };
@@ -163,14 +173,17 @@ export interface TestBackend {
   assign(
     params: ServingParams,
     identity: RequestIdentity
-  ): Promise<{ armIndex: number; created: boolean }>;
+  ): Promise<{ cell: number; created: boolean }>;
   reward(
     testId: string,
     idHash: string,
     amount: number
-  ): Promise<{ armIndex: number; first: boolean } | null>;
+  ): Promise<{ cell: number; first: boolean } | null>;
   recompute(params: ServingParams): Promise<number>;
-  stats(params: ServingParams, armNames?: string[]): Promise<TestStats>;
+  stats(
+    params: ServingParams,
+    labels?: Array<{ key: string; variants: string[] }>
+  ): Promise<TestStats>;
   /** Creator-authorized quarantine; returns the merged policy. */
   updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy>;
 }
@@ -182,8 +195,11 @@ export class TestService implements TestBackend {
   ) {}
 
   /** Stats from the event log, with the cap policy applied. */
-  async stats(params: ServingParams, armNames?: string[]): Promise<TestStats> {
-    return buildStats(this.store, params, armNames);
+  async stats(
+    params: ServingParams,
+    labels?: Array<{ key: string; variants: string[] }>
+  ): Promise<TestStats> {
+    return buildStats(this.store, params, labels);
   }
 
   /** Creator-authorized quarantine; the caller checks the stats secret. */
@@ -193,7 +209,7 @@ export class TestService implements TestBackend {
 
   /**
    * Pins the shape a test is first served with. JS-mode callers declare
-   * armCount/alg/dim themselves and testIds are public, so a later caller
+   * slotSizes/dim themselves and testIds are public, so a later caller
    * claiming a different shape is rejected here rather than writing
    * records the real config cannot represent.
    */
@@ -201,68 +217,57 @@ export class TestService implements TestBackend {
     params: ServingParams,
     authoritative = false
   ): Promise<boolean> {
+    const shape = { slotSizes: params.slotSizes, dim: params.dim };
     const pinned = await this.store.pinShape(
       params.testId,
-      {
-        armCount: params.armCount,
-        alg: params.alg,
-        dim: params.dim
-      },
+      shape,
       authoritative
     );
-    return (
-      pinned.armCount === params.armCount &&
-      pinned.alg === params.alg &&
-      pinned.dim === params.dim
-    );
+    return sameShape(pinned, shape);
   }
 
   /**
    * Sticky assignment: an existing record always wins; otherwise the
-   * bandit picks, the record is written (id'd traffic only), and the
-   * derived cache is updated exactly once even under races.
+   * model picks a combination, the record is written (id'd traffic only),
+   * and the derived cache is updated exactly once even under races.
    */
   async assign(
     params: ServingParams,
     identity: RequestIdentity
-  ): Promise<{ armIndex: number; created: boolean }> {
+  ): Promise<{ cell: number; created: boolean }> {
     const { idHash } = identity;
     if (idHash) {
       const existing = await this.store.getAssignment(params.testId, idHash);
       if (existing) {
-        return { armIndex: existing.armIndex, created: false };
+        return { cell: existing.cell, created: false };
       }
     }
 
-    const state = await this.loadState(params, identity.ctxKey);
-    const armIndex = chooseArm(
+    const state = await this.loadState(params);
+    const { cell, featIdx } = choose(
       state,
-      { ctxKey: identity.ctxKey, featIdx: identity.featIdx },
-      {
-        armPriors: params.armPriors,
-        bucketPriors: params.bucketPriors,
-        minBucketPulls: params.minBucketPulls,
-        noise: params.noise
-      },
-      this.rng
+      identity.featIdx,
+      this.rng,
+      params.noise
     );
 
     if (!idHash) {
       // Anonymous traffic gets a choice but no record: it can never be
       // rewarded, so counting its pulls would only dilute the estimates.
-      return { armIndex, created: false };
+      return { cell, created: false };
     }
 
     const rec: AssignmentRecord = {
-      armIndex,
+      cell,
+      // Serving snapshot: the cell's coordinate system and the model's
+      // dimension at serve time, so /reward and replay run from the
+      // record alone and never re-derive hashing.
+      slotSizes: params.slotSizes,
+      dim: params.dim,
+      featIdx,
       ctxKey: identity.ctxKey,
-      featIdx: identity.featIdx,
       rewardTotal: 0,
       firstSeen: Date.now(),
-      // Serving snapshot: lets /reward run from the record alone.
-      alg: params.alg,
-      armCount: params.armCount,
-      dim: params.dim,
       srcHash: identity.srcHash ?? null,
       signals: identity.signals ?? null
     };
@@ -272,12 +277,12 @@ export class TestService implements TestBackend {
       rec
     );
     if (!result.created) {
-      // Lost a same-id race; the winner's arm is authoritative and the
+      // Lost a same-id race; the winner's cell is authoritative and the
       // winner's request already updated the cache.
-      return { armIndex: result.rec.armIndex, created: false };
+      return { cell: result.rec.cell, created: false };
     }
     await this.recordPull(params, rec);
-    return { armIndex, created: true };
+    return { cell, created: true };
   }
 
   /**
@@ -290,24 +295,22 @@ export class TestService implements TestBackend {
     testId: string,
     idHash: string,
     amount: number
-  ): Promise<{ armIndex: number; first: boolean } | null> {
+  ): Promise<{ cell: number; first: boolean } | null> {
     const result = await this.store.addReward(testId, idHash, amount);
     if (!result) {
       return null;
     }
-    // Records written before the serving-snapshot fields existed can't
-    // update the cache here; a recompute reconciles them.
-    if (result.first && result.rec.alg !== undefined) {
+    if (result.first) {
       const rec = result.rec;
       await this.recordFirstReward(
-        { testId, armCount: rec.armCount, alg: rec.alg, dim: rec.dim },
+        { testId, slotSizes: rec.slotSizes, dim: rec.dim },
         rec
       );
     }
-    return { armIndex: result.rec.armIndex, first: result.first };
+    return { cell: result.rec.cell, first: result.first };
   }
 
-  /** Rebuilds the derived cache from the event log (alg changes, repair). */
+  /** Rebuilds the derived cache from the event log (prior changes, repair). */
   async recompute(params: ServingParams): Promise<number> {
     const all: AssignmentRecord[] = [];
     for await (const rec of this.store.scanAssignments(params.testId)) {
@@ -318,138 +321,107 @@ export class TestService implements TestBackend {
     // before a source was quarantined is cleaned up by recomputing.
     const events = applyExclusions(all, exclusionsFrom(policy)).applied;
     const state = recomputeState(events, {
-      alg: params.alg,
-      armCount: params.armCount,
+      slotSizes: params.slotSizes,
       dim: params.dim,
-      linearPriors: params.linearPriors
+      priors: params.priors
     });
     await this.store.replaceDerived(params.testId, state);
     return all.length;
   }
 
-  private async loadState(
-    params: ServingParams,
-    ctxKey: string | null
-  ): Promise<DerivedState> {
-    const { testId, armCount } = params;
-    switch (params.alg) {
-      case "ts": {
-        const flat = await this.store.getCounters(
-          counterKey(testId, GLOBAL_SCOPE),
-          armCount * 2
-        );
-        return { alg: "ts", arms: arrayToCounts(flat, armCount) };
-      }
-      case "bucketed": {
-        const globalFlat = await this.store.getCounters(
-          counterKey(testId, GLOBAL_SCOPE),
-          armCount * 2
-        );
-        const buckets: Record<string, ReturnType<typeof arrayToCounts>> = {};
-        if (ctxKey) {
-          const bucketFlat = await this.store.getCounters(
-            counterKey(testId, ctxKey),
-            armCount * 2
-          );
-          buckets[ctxKey] = arrayToCounts(bucketFlat, armCount);
-        }
-        return {
-          alg: "bucketed",
-          global: arrayToCounts(globalFlat, armCount),
-          buckets
-        };
-      }
-      case "linear":
-        return this.loadLinearState(params);
-    }
+  private async loadState(params: ServingParams): Promise<DerivedState> {
+    const cells = cellCount(params.slotSizes);
+    const flat = await this.store.getCounters(
+      counterKey(params.testId, GLOBAL_SCOPE),
+      cells * 2
+    );
+    return {
+      slotSizes: params.slotSizes,
+      dim: params.dim,
+      cells: arrayToCounts(flat, cells),
+      model: await this.loadModel(params)
+    };
   }
 
-  private async loadLinearState(
-    params: ServingParams
-  ): Promise<Extract<DerivedState, { alg: "linear" }>> {
-    const blob = await this.store.getBlob(linearKey(params.testId));
+  private async loadModel(params: ServingParams): Promise<JointModel> {
+    const blob = await this.store.getBlob(modelKey(params.testId));
     if (blob) {
-      return blobToLinearState(blob.data);
+      const stored = blobToModel(blob.data);
+      // A blob written under another shape indexes different features;
+      // shape pinning makes this unreachable in normal operation, so a
+      // mismatch means corruption and a fresh model is the safe answer
+      // (a recompute rebuilds the real one from the log).
+      if (
+        stored.dim === params.dim &&
+        stored.slotSizes.length === params.slotSizes.length &&
+        stored.slotSizes.every((n, i) => n === params.slotSizes[i])
+      ) {
+        return stored.model;
+      }
     }
     return newDerivedState({
-      alg: "linear",
-      armCount: params.armCount,
+      slotSizes: params.slotSizes,
       dim: params.dim,
-      linearPriors: params.linearPriors
-    }) as Extract<DerivedState, { alg: "linear" }>;
+      priors: params.priors
+    }).model;
+  }
+
+  /**
+   * A record's stored features, bounded to the model's dimension. An
+   * index past `dim` reads undefined out of the matrix and turns the
+   * whole model into NaN, so hostile or stale indices are dropped.
+   */
+  private safeFeatIdx(dim: number, featIdx: number[] | null): number[] {
+    const indices = (featIdx ?? [0]).filter(
+      i => Number.isInteger(i) && i >= 0 && i < dim
+    );
+    return indices.length > 0 ? indices : [0];
   }
 
   private async recordPull(
     params: ServingParams,
     rec: AssignmentRecord
   ): Promise<void> {
-    const { testId, armCount } = params;
-    if (params.alg === "linear") {
-      await this.updateLinearWithRetry(params, state =>
-        linearObserve(state.arms[rec.armIndex], rec.featIdx ?? [0])
-      );
-      return;
-    }
     await this.store.incrCounters(
-      counterKey(testId, GLOBAL_SCOPE),
-      pullDelta(armCount, rec.armIndex)
+      counterKey(params.testId, GLOBAL_SCOPE),
+      pullDelta(cellCount(params.slotSizes), rec.cell)
     );
-    if (params.alg === "bucketed" && rec.ctxKey) {
-      await this.store.incrCounters(
-        counterKey(testId, rec.ctxKey),
-        pullDelta(armCount, rec.armIndex)
-      );
-    }
+    await this.updateModelWithRetry(params, model =>
+      observe(model, this.safeFeatIdx(params.dim, rec.featIdx))
+    );
   }
 
   private async recordFirstReward(
     params: ServingParams,
     rec: AssignmentRecord
   ): Promise<void> {
-    const { testId, armCount } = params;
-    if (params.alg === "linear") {
-      await this.updateLinearWithRetry(params, state =>
-        linearReward(state.arms[rec.armIndex], rec.featIdx ?? [0])
-      );
-      return;
-    }
     await this.store.incrCounters(
-      counterKey(testId, GLOBAL_SCOPE),
-      successDelta(armCount, rec.armIndex)
+      counterKey(params.testId, GLOBAL_SCOPE),
+      successDelta(cellCount(params.slotSizes), rec.cell)
     );
-    if (params.alg === "bucketed" && rec.ctxKey) {
-      await this.store.incrCounters(
-        counterKey(testId, rec.ctxKey),
-        successDelta(armCount, rec.armIndex)
-      );
-    }
+    await this.updateModelWithRetry(params, model =>
+      modelReward(model, this.safeFeatIdx(params.dim, rec.featIdx))
+    );
   }
 
   /**
-   * Linear state is a read-modify-write blob behind CAS. On persistent
+   * Model state is a read-modify-write blob behind CAS. On persistent
    * conflict the update is dropped: the cache self-heals on the next
    * recompute, and losing one observation is preferable to blocking the
    * serving path.
    */
-  private async updateLinearWithRetry(
+  private async updateModelWithRetry(
     params: ServingParams,
-    mutate: (state: Extract<DerivedState, { alg: "linear" }>) => void
+    mutate: (model: JointModel) => void
   ): Promise<void> {
-    const key = linearKey(params.testId);
+    const key = modelKey(params.testId);
     for (let attempt = 0; attempt < CAS_RETRIES; attempt++) {
       const blob = await this.store.getBlob(key);
-      const state = blob
-        ? blobToLinearState(blob.data)
-        : (newDerivedState({
-            alg: "linear",
-            armCount: params.armCount,
-            dim: params.dim,
-            linearPriors: params.linearPriors
-          }) as Extract<DerivedState, { alg: "linear" }>);
-      mutate(state);
+      const model = await this.loadModel(params);
+      mutate(model);
       const ok = await this.store.putBlob(
         key,
-        JSON.stringify({ dim: state.dim, arms: state.arms }),
+        modelToBlob({ slotSizes: params.slotSizes, dim: params.dim, model }),
         blob?.version ?? 0
       );
       if (ok) {
@@ -459,8 +431,17 @@ export class TestService implements TestBackend {
   }
 }
 
-export interface ArmStats {
-  name?: string;
+export interface VariantStats {
+  name: string;
+  pulls: number;
+  conversions: number;
+  conversionRate: number | null;
+}
+
+export interface CombinationStats {
+  cell: number;
+  /** Variant name per slot, canonical slot order. */
+  choice: string[];
   pulls: number;
   conversions: number;
   rewardTotal: number;
@@ -469,11 +450,17 @@ export interface ArmStats {
 
 export interface TestStats {
   testId: string;
-  alg: string;
   totalAssignments: number;
-  arms: ArmStats[];
+  /** Exact outcomes per served combination (single-slot: per variant). */
+  combinations: CombinationStats[];
+  /**
+   * Per-slot marginal rollups: how each variant did across every
+   * combination it appeared in. The multi-slot answer to "how is hero B
+   * doing overall"; for a single-slot test it mirrors `combinations`.
+   */
+  slots: Record<string, VariantStats[]>;
+  /** Per-context-bucket outcomes, arrays indexed by cell. */
   buckets: Record<string, { pulls: number[]; conversions: number[] }>;
-  linearTheta?: number[][];
   /** What the creator's quarantine removed, so the numbers are auditable. */
   excluded: {
     total: number;
@@ -492,20 +479,13 @@ export interface TestStats {
     string,
     Record<string, { pulls: number; conversions: number }>
   >;
-  /**
-   * Advice based on what this test actually saw, not what it declared.
-   * Null when the current algorithm still fits. Acting on it is a config
-   * edit plus a recompute: `alg` is outside the identity hash, so the
-   * test keeps its id and its history.
-   */
-  suggestion: AlgorithmRecommendation | null;
 }
 
 /** Aggregates stats straight from the event log (the source of truth). */
 export async function buildStats(
   store: StateStore,
   params: ServingParams,
-  armNames?: string[]
+  labels?: Array<{ key: string; variants: string[] }>
 ): Promise<TestStats> {
   const all: AssignmentRecord[] = [];
   for await (const rec of store.scanAssignments(params.testId)) {
@@ -515,26 +495,25 @@ export async function buildStats(
     all,
     exclusionsFrom(await store.getPolicy(params.testId))
   );
-  const arms: ArmStats[] = Array.from({ length: params.armCount }, (_, i) => ({
-    name: armNames?.[i],
+  const cells = cellCount(params.slotSizes);
+  const outcomes = Array.from({ length: cells }, () => ({
     pulls: 0,
     conversions: 0,
-    rewardTotal: 0,
-    conversionRate: null
+    rewardTotal: 0
   }));
   const buckets: TestStats["buckets"] = {};
   const bySignal: TestStats["bySignal"] = {};
   let total = 0;
   for (const rec of kept.applied) {
     total++;
-    const arm = arms[rec.armIndex];
-    if (!arm) {
-      continue; // record from an older arm list; recompute will drop it
+    if (!validCell(params.slotSizes, rec.cell)) {
+      continue; // record from an older shape; recompute will drop it
     }
-    arm.pulls++;
+    const outcome = outcomes[rec.cell];
+    outcome.pulls++;
     if (rec.rewardTotal > 0) {
-      arm.conversions++;
-      arm.rewardTotal += rec.rewardTotal;
+      outcome.conversions++;
+      outcome.rewardTotal += rec.rewardTotal;
     }
     for (const [signal, value] of Object.entries(rec.signals ?? {})) {
       const perValue = (bySignal[signal] ??= {});
@@ -546,43 +525,55 @@ export async function buildStats(
     }
     if (rec.ctxKey) {
       const bucket = (buckets[rec.ctxKey] ??= {
-        pulls: new Array<number>(params.armCount).fill(0),
-        conversions: new Array<number>(params.armCount).fill(0)
+        pulls: new Array<number>(cells).fill(0),
+        conversions: new Array<number>(cells).fill(0)
       });
-      bucket.pulls[rec.armIndex]++;
+      bucket.pulls[rec.cell]++;
       if (rec.rewardTotal > 0) {
-        bucket.conversions[rec.armIndex]++;
+        bucket.conversions[rec.cell]++;
       }
     }
   }
-  for (const arm of arms) {
-    arm.conversionRate = arm.pulls > 0 ? arm.conversions / arm.pulls : null;
+
+  const slotLabels =
+    labels ??
+    params.slotSizes.map((size, i) => ({
+      key: params.slotSizes.length === 1 ? "main" : `slot${i}`,
+      variants: Array.from({ length: size }, (_, v) => `v${v + 1}`)
+    }));
+
+  const combinations: CombinationStats[] = outcomes.map((outcome, cell) => {
+    const choice = decodeCell(params.slotSizes, cell);
+    return {
+      cell,
+      choice: choice.map(
+        (v, slot) => slotLabels[slot]?.variants[v] ?? `v${v + 1}`
+      ),
+      ...outcome,
+      conversionRate:
+        outcome.pulls > 0 ? outcome.conversions / outcome.pulls : null
+    };
+  });
+
+  const slots: TestStats["slots"] = {};
+  for (let slot = 0; slot < params.slotSizes.length; slot++) {
+    const marginal = marginalOutcomes(outcomes, params.slotSizes, slot);
+    slots[slotLabels[slot].key] = marginal.map((m, v) => ({
+      name: slotLabels[slot].variants[v] ?? `v${v + 1}`,
+      pulls: m.pulls,
+      conversions: m.conversions,
+      conversionRate: m.pulls > 0 ? m.conversions / m.pulls : null
+    }));
   }
 
-  const stats: TestStats = {
+  return {
     testId: params.testId,
-    alg: params.alg,
     totalAssignments: total,
-    arms,
+    combinations,
+    slots,
     buckets,
     bySignal,
     excluded: kept.excluded,
-    perSource: kept.perSource,
-    suggestion: recommendFromObserved({
-      alg: params.alg,
-      bucketCount: Object.keys(buckets).length,
-      totalAssignments: total,
-      minBucketPulls: params.minBucketPulls
-    })
+    perSource: kept.perSource
   };
-  if (params.alg === "linear") {
-    const blob = await store.getBlob(linearKey(params.testId));
-    if (blob) {
-      const state = blobToLinearState(blob.data);
-      stats.linearTheta = state.arms.map(({ aInv, b }) =>
-        aInv.map(row => row.reduce((sum, cell, j) => sum + cell * b[j], 0))
-      );
-    }
-  }
-  return stats;
 }

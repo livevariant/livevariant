@@ -93,6 +93,36 @@ describe("multi-slot query form", () => {
   });
 });
 
+describe("configToParams", () => {
+  it("round-trips through configFromParams to the same testId", async () => {
+    const { configToParams } = await import("./params.js");
+    const original = await configFromParams(
+      query(
+        `s=hero&v=${A}&v=${B}&s=cta&v=https://example.com/x&v=https://example.com/y` +
+          `&vn=warm&vn=cool&vn=go&vn=wait&n=Summer&ctx=country:country,persona` +
+          `&r=https://example.com/lp&stamp=utm_content`
+      )
+    );
+    const params = configToParams(original.config);
+    expect(params).not.toBeNull();
+    const reparsed = await configFromParams(params as URLSearchParams);
+    expect(reparsed.testId).toBe(original.testId);
+  });
+
+  it("returns null for configs the parameter form cannot express", async () => {
+    const { configToParams } = await import("./params.js");
+    const { testConfigSchema } = await import("./schema.js");
+    const inline = testConfigSchema.parse({
+      variants: ["Ship faster", "Ship safer"]
+    });
+    expect(configToParams(inline)).toBeNull();
+    const partialNames = testConfigSchema.parse({
+      variants: [{ url: A, name: "hero" }, { url: B }]
+    });
+    expect(configToParams(partialNames)).toBeNull();
+  });
+});
+
 describe("passthroughParams", () => {
   it("keeps attribution and drops everything of ours", async () => {
     const params = passthroughParams(

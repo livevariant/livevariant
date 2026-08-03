@@ -1,7 +1,7 @@
 import type { AssignmentRecord, DerivedState } from "@livevariant/core";
 import {
   counterKey,
-  linearKey,
+  modelKey,
   type StateStore,
   type TestPolicy,
   type TestShape
@@ -62,7 +62,7 @@ export class MemoryStore implements StateStore {
     if (existing) {
       return { rec: existing, created: false };
     }
-    const stored = { ...rec, featIdx: rec.featIdx ? [...rec.featIdx] : null };
+    const stored = { ...rec, featIdx: [...rec.featIdx] };
     byId.set(idHash, stored);
     return { rec: stored, created: true };
   }
@@ -129,14 +129,10 @@ export class MemoryStore implements StateStore {
     for (const [key, values] of counters) {
       this.counters.set(key, values);
     }
-    const existing = this.blobs.get(linearKey(testId));
-    if (blob) {
-      this.blobs.set(linearKey(testId), {
-        data: blob,
-        version: (existing?.version ?? 0) + 1
-      });
-    } else {
-      this.blobs.delete(linearKey(testId));
-    }
+    const existing = this.blobs.get(modelKey(testId));
+    this.blobs.set(modelKey(testId), {
+      data: blob,
+      version: (existing?.version ?? 0) + 1
+    });
   }
 }

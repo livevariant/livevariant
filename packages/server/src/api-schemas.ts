@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { ctxDimSchema } from "@livevariant/core";
+import { cellCount, ctxDimSchema, MAX_CELLS } from "@livevariant/core";
 
 /**
  * JS-mode request bodies. Deliberately content-free: the SDK sends only
- * hashes, indices, and tuning numbers, never variant content or raw ids.
+ * hashes, indices, and shape numbers, never variant content or raw ids.
  *
  * The one exception is `autoCtx`, whose values are raw. Those dimensions
  * are the coarse ones the server derives from the request itself anyway
@@ -14,27 +14,34 @@ import { ctxDimSchema } from "@livevariant/core";
 
 const hex64 = z.string().regex(/^[0-9a-f]{64}$/);
 
-const armPrior = z.object({
-  alpha: z.number().nonnegative(),
-  beta: z.number().nonnegative()
-});
-
 /** Shared bound so /px and /reward can never drift apart again. */
 export const MAX_REWARD_AMOUNT = 1_000_000;
 
-const servingFields = {
-  testId: hex64,
-  armCount: z.number().int().min(2).max(50),
-  alg: z.enum(["ts", "bucketed", "linear"]),
-  dim: z.number().int().min(2).max(64).optional(),
-  minBucketPulls: z.number().int().positive().optional(),
-  priorStrengthCap: z.number().positive().optional(),
-  noise: z.number().positive().max(5).optional()
-};
+/**
+ * A warm-start prior for one slot variant. The caller supplies both the
+ * priors and their cap, so the server clamps strength to its own ceiling
+ * before use (see /choose): a hostile prior must not be able to pin a
+ * variant.
+ */
+const variantPrior = z.object({
+  slot: z.number().int().min(0).max(15),
+  variant: z.number().int().min(0).max(63),
+  mean: z.number().min(0).max(1),
+  strength: z.number().nonnegative()
+});
 
 export const chooseRequestSchema = z
   .object({
-    ...servingFields,
+    testId: hex64,
+    /**
+     * Variant counts per slot, canonical (sorted-key) order. The whole
+     * serving shape in one array: a plain A/B test is [2].
+     */
+    slotSizes: z.array(z.number().int().min(1).max(64)).min(1).max(16),
+    /** Model dimension; the SDK computes it with core's dimForShape. */
+    dim: z.number().int().min(16).max(256),
+    priorStrengthCap: z.number().positive().optional(),
+    noise: z.number().positive().max(5).optional(),
     idHash: hex64.optional(),
     ctxKey: hex64.optional(),
     /**
@@ -56,78 +63,72 @@ export const chooseRequestSchema = z
     /** Caller-supplied values for those dimensions, before signals. */
     autoCtx: z.record(z.string().min(1), z.string().min(1).max(64)).optional(),
     /**
-     * Hosted-asset hashes per arm index, so the response can carry fresh
-     * signatures for whichever arm wins. Content-free like everything
-     * else on this wire: a sha256 of an image reveals nothing about it,
-     * and the config holding the actual URLs never leaves the page.
+     * Hosted-asset hashes per slot variant ("slot:variant" keys), so the
+     * response can carry fresh signatures for whichever combination wins.
+     * Content-free like everything else on this wire: a sha256 of an
+     * image reveals nothing about it, and the config holding the actual
+     * URLs never leaves the page.
      */
     assets: z
-      .record(z.string().regex(/^\d{1,2}$/), z.array(hex64).min(1).max(8))
+      .record(
+        z.string().regex(/^\d{1,2}:\d{1,2}$/),
+        z.array(hex64).min(1).max(8)
+      )
       .optional(),
     // Bounds are re-checked against the request's own `dim` in superRefine:
     // an index >= dim reads past the model matrix and poisons it with NaN.
-    featIdx: z.array(z.number().int().min(0).max(63)).max(16).optional(),
-    armPriors: z.array(armPrior).optional(),
-    bucketPriors: z.record(hex64, z.array(armPrior)).optional(),
-    linearPriors: z
-      .array(
-        z.object({
-          mean: z.number().min(0).max(1),
-          strength: z.number().nonnegative()
-        })
-      )
-      .optional()
+    featIdx: z.array(z.number().int().min(0).max(255)).max(32).optional(),
+    priors: z.array(variantPrior).max(128).optional()
   })
   .superRefine((body, issues) => {
+    const cells = cellCount(body.slotSizes);
+    if (cells < 2 || cells > MAX_CELLS) {
+      issues.addIssue({
+        code: "custom",
+        path: ["slotSizes"],
+        message: `slotSizes spans ${cells} combinations; must be 2..${MAX_CELLS}`
+      });
+    }
     for (const key of Object.keys(body.assets ?? {})) {
-      if (Number(key) >= body.armCount) {
+      const [slot, variant] = key.split(":").map(Number);
+      if (
+        slot >= body.slotSizes.length ||
+        variant >= (body.slotSizes[slot] ?? 0)
+      ) {
         issues.addIssue({
           code: "custom",
           path: ["assets", key],
-          message: `arm ${key} is outside armCount ${body.armCount}`
+          message: `"${key}" is outside slotSizes [${body.slotSizes.join(", ")}]`
         });
       }
     }
-    const dim = body.dim ?? 16;
     for (const [i, index] of (body.featIdx ?? []).entries()) {
-      if (index >= dim) {
+      if (index >= body.dim) {
         issues.addIssue({
           code: "custom",
           path: ["featIdx", i],
-          message: `feature index ${index} is outside dim ${dim}`
+          message: `feature index ${index} is outside dim ${body.dim}`
         });
       }
     }
-    const priorCounts: Array<[string, number | undefined]> = [
-      ["armPriors", body.armPriors?.length],
-      ["linearPriors", body.linearPriors?.length]
-    ];
-    for (const [field, count] of priorCounts) {
-      if (count !== undefined && count !== body.armCount) {
+    for (const [i, prior] of (body.priors ?? []).entries()) {
+      if (
+        prior.slot >= body.slotSizes.length ||
+        prior.variant >= (body.slotSizes[prior.slot] ?? 0)
+      ) {
         issues.addIssue({
           code: "custom",
-          path: [field],
-          message: `${field} must have one entry per arm (${body.armCount})`
-        });
-      }
-    }
-    // Every bucket's array is an arm-prior list with the same arity rule.
-    // A short one leaves the trailing arms on the uniform prior while arm
-    // 0 keeps a strong one, which biases selection for that bucket, and
-    // bucket keys are derivable by anyone who can see a serve URL.
-    for (const [key, priors] of Object.entries(body.bucketPriors ?? {})) {
-      if (priors.length !== body.armCount) {
-        issues.addIssue({
-          code: "custom",
-          path: ["bucketPriors", key],
-          message: `bucketPriors must have one entry per arm (${body.armCount})`
+          path: ["priors", i],
+          message:
+            `prior (slot ${prior.slot}, variant ${prior.variant}) is ` +
+            `outside slotSizes [${body.slotSizes.join(", ")}]`
         });
       }
     }
   });
 
 // Deliberately minimal: the assignment record carries its own serving
-// snapshot, so rewards need no algorithm parameters. This is also what
+// snapshot, so rewards need no shape parameters. This is also what
 // keeps the redirect handoff token small (_lvt + _lvid suffice).
 export const rewardRequestSchema = z.object({
   testId: hex64,

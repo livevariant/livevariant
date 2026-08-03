@@ -27,15 +27,24 @@ import type { AssignmentRecord, DerivedState } from "@livevariant/core";
  *   rebuilds the cache from the log. Wrong until healed, not forever.
  */
 /**
- * The serving shape a test was first seen with. JS-mode callers supply
- * armCount/alg/dim in the request body (the server never sees configs on
+ * The serving shape a test was first seen with: variant counts per slot
+ * (canonical sorted order) and the model dimension. JS-mode callers
+ * supply these in the request body (the server never sees configs on
  * that path), and a testId is public, so without pinning anyone could
  * claim a foreign shape and write records the real config can't represent.
  */
 export interface TestShape {
-  armCount: number;
-  alg: "ts" | "bucketed" | "linear";
+  slotSizes: number[];
   dim: number;
+}
+
+/** Structural equality for shapes; array-valued, so no ===. */
+export function sameShape(a: TestShape, b: TestShape): boolean {
+  return (
+    a.dim === b.dim &&
+    a.slotSizes.length === b.slotSizes.length &&
+    a.slotSizes.every((n, i) => n === b.slotSizes[i])
+  );
 }
 
 /**
@@ -148,7 +157,7 @@ export interface StateStore {
   /** Reads a counter array, zero-filled to `length`. */
   getCounters(key: string, length: number): Promise<number[]>;
 
-  /** Versioned blob for linear-model state. */
+  /** Versioned blob for the joint-model state. */
   getBlob(key: string): Promise<{ data: string; version: number } | null>;
 
   /**
@@ -156,7 +165,7 @@ export interface StateStore {
    * `expectedVersion`, and at most one concurrent writer per version may
    * win. False means the caller reloads and retries. An adapter that
    * lets two writers succeed at one version silently discards one arm
-   * of the linear model's update.
+   * of the model's update.
    */
   putBlob(key: string, data: string, expectedVersion: number): Promise<boolean>;
 
@@ -167,14 +176,14 @@ export interface StateStore {
   replaceDerived(testId: string, state: DerivedState): Promise<void>;
 }
 
-/** Counter key for a test's global (contextless) scope. */
+/** Counter key for a test's per-cell pulls/successes array. */
 export function counterKey(testId: string, scope: string): string {
   return `c:${testId}:${scope}`;
 }
 
 export const GLOBAL_SCOPE = "global";
 
-/** Blob key for a test's linear-model state. */
-export function linearKey(testId: string): string {
-  return `l:${testId}`;
+/** Blob key for a test's joint-model state. */
+export function modelKey(testId: string): string {
+  return `m:${testId}`;
 }

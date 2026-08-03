@@ -162,10 +162,10 @@ describe("upload and protected serving", () => {
 describe("serve-time signing", () => {
   async function assetTest(url: string) {
     const config: TestConfigInput = {
-      v: 1,
-      arms: [
-        { name: "hosted", formats: { image: url } },
-        { name: "hostedToo", formats: { image: url } }
+      v: 2,
+      variants: [
+        { name: "hosted", image: url },
+        { name: "hostedToo", image: url }
       ],
       statsKeyHash: await hashStatsSecret(STATS_SECRET),
       decorateRedirects: false
@@ -214,10 +214,10 @@ describe("asset-path spoofing (the allowlist bypass that was)", () => {
 
   async function spoofTest() {
     return encodeConfig({
-      v: 1,
-      arms: [
-        { name: "a", formats: { url: SPOOF } },
-        { name: "b", formats: { url: SPOOF } }
+      v: 2,
+      variants: [
+        { name: "a", url: SPOOF },
+        { name: "b", url: SPOOF }
       ],
       statsKeyHash: await hashStatsSecret(STATS_SECRET),
       decorateRedirects: false
@@ -274,10 +274,10 @@ describe("asset-path spoofing (the allowlist bypass that was)", () => {
     const { url } = (await up.json()) as { url: string };
     expect(url.startsWith("https://livevariant.link/a/")).toBe(true);
     const { encoded } = await encodeConfig({
-      v: 1,
-      arms: [
-        { name: "a", formats: { image: url } },
-        { name: "b", formats: { image: url } }
+      v: 2,
+      variants: [
+        { name: "a", image: url },
+        { name: "b", image: url }
       ],
       statsKeyHash: await hashStatsSecret(STATS_SECRET)
     });
@@ -326,8 +326,8 @@ describe("/choose asset signatures (the SDK contract)", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         testId: "c".repeat(64),
-        armCount: 2,
-        alg: "ts",
+        slotSizes: [2],
+        dim: 16,
         idHash: "d".repeat(64),
         ...body
       })
@@ -335,26 +335,28 @@ describe("/choose asset signatures (the SDK contract)", () => {
     return { status: res.status, body: await res.json() };
   }
 
-  it("signs the winning arm's assets and no others", async () => {
+  it("signs the winning variant's assets and no others", async () => {
     const { assetId, url } = await upload();
     const other = "e".repeat(64);
     const { status, body } = await choose({
-      assets: { "0": [assetId], "1": [other] }
+      assets: { "0:0": [assetId], "0:1": [other] }
     });
     expect(status).toBe(200);
     const out = body as {
-      armIndex: number;
+      cell: number;
+      choice: number[];
       assetSignatures: Record<string, string>;
       assetsExpireAt: number;
     };
+    expect(out.choice).toEqual([out.cell]);
     const winners = Object.keys(out.assetSignatures);
-    // Exactly the chosen arm's hashes were signed: minting is scoped.
-    expect(winners).toEqual(out.armIndex === 0 ? [assetId] : [other]);
+    // Exactly the chosen variant's hashes were signed: minting is scoped.
+    expect(winners).toEqual(out.cell === 0 ? [assetId] : [other]);
     expect(out.assetsExpireAt).toBeGreaterThan(Date.now());
 
     // And a signature actually opens the asset, spliced the way the SDK
     // splices it.
-    if (out.armIndex === 0) {
+    if (out.cell === 0) {
       const fetched = await app.request(
         withQuery(url, out.assetSignatures[assetId])
       );
@@ -364,12 +366,17 @@ describe("/choose asset signatures (the SDK contract)", () => {
 
   it("returns no signature block when the caller sent no assets", async () => {
     const { body } = await choose({});
-    expect(body).toEqual({ armIndex: expect.any(Number) });
+    expect(body).toEqual({
+      cell: expect.any(Number),
+      choice: [expect.any(Number)]
+    });
   });
 
-  it("rejects asset entries outside the arm count", async () => {
-    const { status } = await choose({ assets: { "9": ["f".repeat(64)] } });
+  it("rejects asset entries outside the shape", async () => {
+    const { status } = await choose({ assets: { "0:9": ["f".repeat(64)] } });
     expect(status).toBe(400);
+    const bad = await choose({ assets: { "9:0": ["f".repeat(64)] } });
+    expect(bad.status).toBe(400);
   });
 
   it("omits signatures entirely when assets are not configured", async () => {
@@ -379,11 +386,14 @@ describe("/choose asset signatures (the SDK contract)", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         testId: "c".repeat(64),
-        armCount: 2,
-        alg: "ts",
-        assets: { "0": ["a".repeat(64)] }
+        slotSizes: [2],
+        dim: 16,
+        assets: { "0:0": ["a".repeat(64)] }
       })
     });
-    expect(await res.json()).toEqual({ armIndex: expect.any(Number) });
+    expect(await res.json()).toEqual({
+      cell: expect.any(Number),
+      choice: [expect.any(Number)]
+    });
   });
 });

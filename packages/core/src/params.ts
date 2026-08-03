@@ -1,5 +1,9 @@
 import { AUTO_SIGNALS, type AutoSignal } from "./signals.js";
-import { testConfigSchema, type TestConfigInput } from "./schema.js";
+import {
+  testConfigSchema,
+  type TestConfig,
+  type TestConfigInput
+} from "./schema.js";
 import { computeTestId, type DecodedConfig } from "./codec.js";
 
 /**
@@ -131,6 +135,80 @@ export async function configFromParams(
   };
   const config = testConfigSchema.parse(input);
   return { config, testId: await computeTestId(config) };
+}
+
+/**
+ * The inverse of configFromParams: spells a config out as readable query
+ * parameters, or returns null when the config uses features the parameter
+ * form cannot express. Powers the manage page's "show as plain URL"
+ * toggle, so a creator can SEE how their test would be written by hand.
+ *
+ * Only identity-relevant fields matter for fidelity: identity-excluded
+ * tuning (priors, decorateRedirects, ...) is defaulted by the parameter
+ * form without changing the testId. Not expressible: non-URL variant
+ * content, per-variant redirects, ctx value allowlists, reward events,
+ * and partially-named variants (vn is positional, so it is all or none).
+ */
+export function configToParams(config: TestConfig): URLSearchParams | null {
+  const entries = Object.entries(config.slots);
+  const variants = entries.flatMap(([, list]) => list);
+  const expressible =
+    variants.every(
+      v =>
+        v.url !== undefined &&
+        v.image === undefined &&
+        v.html === undefined &&
+        v.md === undefined &&
+        v.text === undefined &&
+        v.redirectUrl === undefined
+    ) &&
+    (config.ctx?.dims ?? []).every(dim => dim.values === undefined) &&
+    config.rewardEvents === undefined;
+  if (!expressible) {
+    return null;
+  }
+  const named = variants.filter(v => v.name !== undefined).length;
+  if (named !== 0 && named !== variants.length) {
+    return null;
+  }
+
+  const query = new URLSearchParams();
+  if (config.name) {
+    query.set("n", config.name);
+  }
+  const singleMain = entries.length === 1 && entries[0][0] === "main";
+  for (const [slotKey, list] of entries) {
+    if (!singleMain) {
+      query.append("s", slotKey);
+    }
+    for (const variant of list) {
+      query.append("v", variant.url as string);
+      if (variant.name !== undefined) {
+        query.append("vn", variant.name);
+      }
+    }
+  }
+  if (config.ctx) {
+    query.set(
+      "ctx",
+      config.ctx.dims
+        .map(dim => (dim.from ? `${dim.key}:${dim.from}` : dim.key))
+        .join(",")
+    );
+  }
+  if (config.redirectUrl) {
+    query.set("r", config.redirectUrl);
+  }
+  if (config.variantParam) {
+    query.set("stamp", config.variantParam);
+  }
+  if (!config.forwardParams) {
+    query.set("fw", "0");
+  }
+  if (config.statsKeyHash) {
+    query.set("kh", config.statsKeyHash);
+  }
+  return query;
 }
 
 /**

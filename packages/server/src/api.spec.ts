@@ -167,7 +167,9 @@ describe("the tool API", () => {
     );
     const out = (await res.json()) as Record<string, any>;
     expect(out.urls.serve).toContain("https://livevariant.link/s/");
-    expect(out.emailTemplate.imageSrc).toContain("https://livevariant.link/s?");
+    expect(out.emailTemplate.main.imageSrc).toContain(
+      "https://livevariant.link/s?"
+    );
     expect(out.urls.manage).toContain("https://livevariant.com/manage/");
   });
 

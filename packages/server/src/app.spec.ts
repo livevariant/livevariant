@@ -3,9 +3,9 @@ import type { Hono } from "hono";
 import {
   bucketKey,
   configFromParams,
+  dimForShape,
   encodeConfig,
   featureIndices,
-  FEATURE_DIM,
   externalIdHash,
   hashStatsSecret,
   mulberry32,
@@ -34,21 +34,44 @@ function hex(seed: string): string {
 }
 
 async function makeTest(overrides: Partial<TestConfigInput> = {}) {
-  const config: TestConfigInput = {
-    v: 1,
+  const config = {
+    v: 2,
     name: "landing page test",
-    arms: [
+    variants: [
       {
         name: "control",
-        formats: { url: "https://example.com/a" },
+        url: "https://example.com/a",
         redirectUrl: "https://example.com/thanks-a"
       },
-      { name: "variant", formats: { url: "https://example.com/b" } }
+      { name: "variant", url: "https://example.com/b" }
     ],
     redirectUrl: "https://example.com/thanks",
     statsKeyHash: await hashStatsSecret(SECRET),
     ...overrides
-  };
+  } as TestConfigInput;
+  const { encoded, testId } = await encodeConfig(config);
+  return { config, encoded, testId };
+}
+
+/** A two-element test: hero image and call-to-action, 2x2 combinations. */
+async function makeMultiTest(overrides: Partial<TestConfigInput> = {}) {
+  const config = {
+    v: 2,
+    name: "email test",
+    slots: {
+      hero: [
+        { name: "warm", url: "https://example.com/hero-warm" },
+        { name: "cool", url: "https://example.com/hero-cool" }
+      ],
+      cta: [
+        { name: "go", url: "https://example.com/cta-go" },
+        { name: "wait", url: "https://example.com/cta-wait" }
+      ]
+    },
+    redirectUrl: "https://example.com/thanks",
+    statsKeyHash: await hashStatsSecret(SECRET),
+    ...overrides
+  } as TestConfigInput;
   const { encoded, testId } = await encodeConfig(config);
   return { config, encoded, testId };
 }
@@ -69,8 +92,16 @@ async function stats(encoded: string): Promise<any> {
   return res.json();
 }
 
+function sumConversions(s: any): number {
+  return s.combinations.reduce((sum: number, c: any) => sum + c.conversions, 0);
+}
+
+function sumRewards(s: any): number {
+  return s.combinations.reduce((sum: number, c: any) => sum + c.rewardTotal, 0);
+}
+
 describe("redirect serving", () => {
-  it("302s to an arm url with handoff decoration for id'd traffic", async () => {
+  it("302s to a variant url with handoff decoration for id'd traffic", async () => {
     const { encoded, testId } = await makeTest();
     const res = await app.request(`/s/${encoded}?id=user1`);
     expect(res.status).toBe(302);
@@ -122,13 +153,89 @@ describe("redirect serving", () => {
   });
 });
 
-describe("click and reward", () => {
-  it("redirects with precedence to > arm.redirectUrl > config.redirectUrl", async () => {
+describe("multi-slot serving", () => {
+  it("requires ?slot= when a test has several", async () => {
+    const { encoded } = await makeMultiTest();
+    const res = await app.request(`/s/${encoded}?id=u1`);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/slot/);
+    const unknown = await app.request(`/s/${encoded}?id=u1&slot=nope`);
+    expect(unknown.status).toBe(400);
+  });
+
+  it("serves each slot from ONE sticky whole-combination assignment", async () => {
+    const { encoded } = await makeMultiTest();
+    // The email's two images: same recipient, one link per slot.
+    const hero = await app.request(`/s/${encoded}?id=r1&slot=hero`);
+    const cta = await app.request(`/s/${encoded}?id=r1&slot=cta`);
+    expect(hero.headers.get("location")).toMatch(/hero-(warm|cool)/);
+    expect(cta.headers.get("location")).toMatch(/cta-(go|wait)/);
+    // Both slots resolved from one assignment, not two.
+    const s = await stats(encoded);
+    expect(s.totalAssignments).toBe(1);
+    // Repeat opens keep the whole combination.
+    for (let i = 0; i < 3; i++) {
+      const again = await app.request(`/s/${encoded}?id=r1&slot=hero`);
+      expect(again.headers.get("location")).toBe(hero.headers.get("location"));
+    }
+  });
+
+  it("reports per-slot marginals and per-combination outcomes", async () => {
+    const { encoded } = await makeMultiTest();
+    for (let i = 0; i < 6; i++) {
+      await app.request(`/s/${encoded}?id=m${i}&slot=hero`);
+    }
+    await app.request(`/px/${encoded}?id=m0`);
+    const s = await stats(encoded);
+    expect(s.totalAssignments).toBe(6);
+    expect(s.combinations).toHaveLength(4);
+    expect(s.combinations[0].choice).toHaveLength(2);
+    // Marginals: slot rollups cover all six assignments each.
+    for (const key of ["hero", "cta"]) {
+      const pulls = s.slots[key].reduce(
+        (sum: number, v: any) => sum + v.pulls,
+        0
+      );
+      expect(pulls).toBe(6);
+    }
+    expect(s.slots.hero.map((v: any) => v.name)).toEqual(["warm", "cool"]);
+    expect(sumConversions(s)).toBe(1);
+  });
+
+  it("stamps the combination and redirects clicks per slot variant", async () => {
+    const { encoded } = await makeMultiTest({ variantParam: "utm_content" });
+    const serve = await app.request(`/s/${encoded}?id=c1&slot=hero`);
+    const stamped = new URL(serve.headers.get("location")!).searchParams.get(
+      "utm_content"
+    )!;
+    // Combined spelling: one name per slot, joined.
+    expect(stamped).toMatch(/^(go|wait)\+(warm|cool)$/);
+    const click = await app.request(`/c/${encoded}?id=c1&slot=cta`);
+    expect(click.status).toBe(302);
+    const clickUrl = new URL(click.headers.get("location")!);
+    expect(clickUrl.origin + clickUrl.pathname).toBe(
+      "https://example.com/thanks"
+    );
+    expect(sumConversions(await stats(encoded))).toBe(1);
+  });
+
+  it("defaults the slot only when there is exactly one", async () => {
     const { encoded } = await makeTest();
-    // Pin the arm via stickiness so the assertion is deterministic.
+    const res = await app.request(`/s/${encoded}?id=one`);
+    expect(res.status).toBe(302);
+    // Naming the single slot explicitly works too.
+    const named = await app.request(`/s/${encoded}?id=one&slot=main`);
+    expect(named.status).toBe(302);
+  });
+});
+
+describe("click and reward", () => {
+  it("redirects with precedence to > variant.redirectUrl > config.redirectUrl", async () => {
+    const { encoded } = await makeTest();
+    // Pin the variant via stickiness so the assertion is deterministic.
     const serve = await app.request(`/s/${encoded}?id=u1`);
-    const armIndex =
-      serve.headers.get("location") === "https://example.com/a" ? 0 : 1;
+    const variantIndex =
+      new URL(serve.headers.get("location")!).pathname === "/a" ? 0 : 1;
 
     const explicit = await app.request(
       `/c/${encoded}?id=u1&to=${encodeURIComponent("https://example.com/custom")}`
@@ -144,8 +251,8 @@ describe("click and reward", () => {
     const fallback = await app.request(`/c/${encoded}?id=u1`);
     const fallbackUrl = new URL(fallback.headers.get("location")!);
     expect(fallbackUrl.origin + fallbackUrl.pathname).toBe(
-      armIndex === 0
-        ? "https://example.com/thanks-a" // arm-level override
+      variantIndex === 0
+        ? "https://example.com/thanks-a" // variant-level override
         : "https://example.com/thanks" // config-level fallback
     );
   });
@@ -156,7 +263,7 @@ describe("click and reward", () => {
       `/c/${encoded}?id=u9&to=${encodeURIComponent("https://evil.example/phish")}`
     );
     expect(res.status).toBe(400);
-    // Same-origin as a configured arm URL is allowed.
+    // Same-origin as a configured variant URL is allowed.
     const ok = await app.request(
       `/c/${encoded}?id=u9&to=${encodeURIComponent("https://example.com/other-page")}`
     );
@@ -171,16 +278,8 @@ describe("click and reward", () => {
     await app.request(`/c/${encoded}?id=u1`);
     await app.request(`/c/${encoded}?id=u1`);
     const s = await stats(encoded);
-    const conversions = s.arms.reduce(
-      (sum: number, a: any) => sum + a.conversions,
-      0
-    );
-    expect(conversions).toBe(1);
-    const rewardTotal = s.arms.reduce(
-      (sum: number, a: any) => sum + a.rewardTotal,
-      0
-    );
-    expect(rewardTotal).toBe(2); // both clicks accumulate on the record
+    expect(sumConversions(s)).toBe(1);
+    expect(sumRewards(s)).toBe(2); // both clicks accumulate on the record
   });
 });
 
@@ -193,17 +292,14 @@ describe("handoff (email -> landing page -> SDK reward flow)", () => {
       "_lvid"
     )!;
     // The SDK on the destination site later rewards with ONLY the token
-    // contents: no algorithm params, no config.
+    // contents: no shape params, no config.
     const reward = await app.request("/reward", {
       method: "POST",
       body: JSON.stringify({ testId, idHash, amount: 5 }),
       headers: { "content-type": "application/json" }
     });
     expect(await reward.json()).toEqual({ rewarded: true, first: true });
-    const s = await stats(encoded);
-    expect(s.arms.reduce((sum: number, a: any) => sum + a.rewardTotal, 0)).toBe(
-      5
-    );
+    expect(sumRewards(await stats(encoded))).toBe(5);
   });
 });
 
@@ -217,12 +313,8 @@ describe("conversion pixel (email -> landing page flow)", () => {
     expect(px.status).toBe(200);
     expect(px.headers.get("content-type")).toBe("image/gif");
     const s = await stats(encoded);
-    expect(s.arms.reduce((sum: number, a: any) => sum + a.conversions, 0)).toBe(
-      1
-    );
-    expect(s.arms.reduce((sum: number, a: any) => sum + a.rewardTotal, 0)).toBe(
-      3
-    );
+    expect(sumConversions(s)).toBe(1);
+    expect(sumRewards(s)).toBe(3);
   });
 
   it("never errors toward the embedding page", async () => {
@@ -239,10 +331,7 @@ describe("conversion pixel (email -> landing page flow)", () => {
     for (const amount of ["1e308", "-5", "NaN", "2000000"]) {
       await app.request(`/px/${encoded}?id=r1&amount=${amount}`);
     }
-    const s = await stats(encoded);
-    expect(s.arms.reduce((sum: number, a: any) => sum + a.rewardTotal, 0)).toBe(
-      0
-    );
+    expect(sumRewards(await stats(encoded))).toBe(0);
   });
 
   it("drops pixel rewards for ids that were never served", async () => {
@@ -256,7 +345,7 @@ describe("JS mode (choose/reward)", () => {
   it("assigns sticky by idHash and rewards first-only", async () => {
     const { testId } = await makeTest();
     const idHash = await externalIdHash(testId, "sdk-user");
-    const body = { testId, armCount: 2, alg: "ts" as const, idHash };
+    const body = { testId, slotSizes: [2], dim: 16, idHash };
 
     const chosen: number[] = [];
     for (let i = 0; i < 3; i++) {
@@ -266,28 +355,61 @@ describe("JS mode (choose/reward)", () => {
         headers: { "content-type": "application/json" }
       });
       expect(res.status).toBe(200);
-      chosen.push((await res.json()).armIndex);
+      const out = await res.json();
+      expect(out.choice).toEqual([out.cell]);
+      chosen.push(out.cell);
     }
     expect(new Set(chosen).size).toBe(1);
 
     const r1 = await app.request("/reward", {
       method: "POST",
-      body: JSON.stringify({ ...body, amount: 2 }),
+      body: JSON.stringify({ testId, idHash, amount: 2 }),
       headers: { "content-type": "application/json" }
     });
     expect(await r1.json()).toEqual({ rewarded: true, first: true });
     const r2 = await app.request("/reward", {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify({ testId, idHash }),
       headers: { "content-type": "application/json" }
     });
     expect(await r2.json()).toEqual({ rewarded: true, first: false });
   });
 
+  it("decodes multi-slot choices", async () => {
+    const { testId } = await makeMultiTest();
+    const res = await app.request("/choose", {
+      method: "POST",
+      body: JSON.stringify({
+        testId,
+        slotSizes: [2, 2],
+        dim: dimForShape([2, 2]),
+        idHash: hex("multi")
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    const out = await res.json();
+    expect(out.cell).toBeGreaterThanOrEqual(0);
+    expect(out.cell).toBeLessThan(4);
+    expect(out.choice).toHaveLength(2);
+    for (const v of out.choice) {
+      expect([0, 1]).toContain(v);
+    }
+  });
+
   it("validates request bodies", async () => {
     const res = await app.request("/choose", {
       method: "POST",
-      body: JSON.stringify({ testId: "short", armCount: 2, alg: "ts" }),
+      body: JSON.stringify({ testId: "short", slotSizes: [2], dim: 16 }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a shape with fewer than two combinations", async () => {
+    const { testId } = await makeTest();
+    const res = await app.request("/choose", {
+      method: "POST",
+      body: JSON.stringify({ testId, slotSizes: [1], dim: 16 }),
       headers: { "content-type": "application/json" }
     });
     expect(res.status).toBe(400);
@@ -296,13 +418,12 @@ describe("JS mode (choose/reward)", () => {
   it("rejects feature indices outside the model dimension", async () => {
     const { testId } = await makeTest();
     // dim 16 with index 63 would read past the matrix and write NaN into
-    // the linear model.
+    // the model.
     const res = await app.request("/choose", {
       method: "POST",
       body: JSON.stringify({
         testId,
-        armCount: 2,
-        alg: "linear",
+        slotSizes: [2],
         dim: 16,
         featIdx: [0, 63]
       }),
@@ -311,37 +432,36 @@ describe("JS mode (choose/reward)", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rejects bucket prior arrays that disagree with armCount", async () => {
+  it("rejects priors that name a variant outside the shape", async () => {
     const { testId } = await makeTest();
-    // A short bucket array would leave arms 1..n on the uniform prior
-    // while arm 0 keeps a strong one, and bucket keys are derivable by
-    // anyone who can see a serve URL.
     const res = await app.request("/choose", {
       method: "POST",
       body: JSON.stringify({
         testId,
-        armCount: 2,
-        alg: "bucketed",
-        bucketPriors: { ["a".repeat(64)]: [{ alpha: 20, beta: 1 }] }
+        slotSizes: [2],
+        dim: 16,
+        priors: [{ slot: 0, variant: 5, mean: 0.9, strength: 30 }]
       }),
       headers: { "content-type": "application/json" }
     });
     expect(res.status).toBe(400);
   });
 
-  it("rejects prior arrays that disagree with armCount", async () => {
-    const { testId } = await makeTest();
+  it("pins the shape: a disagreeing caller is rejected", async () => {
+    const { encoded, testId } = await makeTest();
+    // The config's own serve pins the authoritative shape.
+    await app.request(`/s/${encoded}?id=pin`);
     const res = await app.request("/choose", {
       method: "POST",
       body: JSON.stringify({
         testId,
-        armCount: 2,
-        alg: "ts",
-        armPriors: [{ alpha: 1, beta: 1 }]
+        slotSizes: [5, 5],
+        dim: 64,
+        idHash: hex("forger")
       }),
       headers: { "content-type": "application/json" }
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
   });
 
   it("rejects reward amounts beyond the cap", async () => {
@@ -371,34 +491,34 @@ describe("cors", () => {
     expect(preflight.headers.get("access-control-allow-headers")).toMatch(
       /content-type/i
     );
-    const stats = await app.request(`/stats/${encoded}`, {
+    const statsRes = await app.request(`/stats/${encoded}`, {
       headers: {
         origin: "https://livevariant.com",
         authorization: `Bearer ${SECRET}`
       }
     });
-    expect(stats.status).toBe(200);
-    expect(stats.headers.get("access-control-allow-origin")).toBe("*");
+    expect(statsRes.status).toBe(200);
+    expect(statsRes.headers.get("access-control-allow-origin")).toBe("*");
   });
 });
 
 describe("destination allowlist", () => {
   const allowed = { allowedDestinations: ["example.com"] };
 
-  it("refuses a config whose arms leave the allowlist, without recording", async () => {
+  it("refuses a config whose variants leave the allowlist, without recording", async () => {
     const gated = createApp({
       store: new MemoryStore(),
       rng: mulberry32(3),
       ...allowed
     });
     const { encoded } = await makeTest({
-      arms: [
-        { name: "ok", formats: { url: "https://example.com/a" } },
-        { name: "offsite", formats: { url: "https://elsewhere.test/b" } }
+      variants: [
+        { name: "ok", url: "https://example.com/a" },
+        { name: "offsite", url: "https://elsewhere.test/b" }
       ]
     });
     // Twice: a sticky assignment made before the check would pin this
-    // visitor to an arm they could never be served.
+    // visitor to a variant they could never be served.
     for (let i = 0; i < 2; i++) {
       const res = await gated.request(`/s/${encoded}?id=u1`);
       expect(res.status).toBe(403);
@@ -420,9 +540,9 @@ describe("destination allowlist", () => {
     expect(res.status).toBe(302);
     // Subdomains of an allowed host count too.
     const sub = await makeTest({
-      arms: [
-        { name: "a", formats: { url: "https://cdn.example.com/a" } },
-        { name: "b", formats: { url: "https://example.com/b" } }
+      variants: [
+        { name: "a", url: "https://cdn.example.com/a" },
+        { name: "b", url: "https://example.com/b" }
       ]
     });
     expect((await gated.request(`/s/${sub.encoded}?id=u2`)).status).toBe(302);
@@ -436,9 +556,9 @@ describe("destination allowlist", () => {
     });
     const { encoded } = await makeTest({
       redirectUrl: "https://elsewhere.test/thanks",
-      arms: [
-        { name: "a", formats: { url: "https://example.com/a" } },
-        { name: "b", formats: { url: "https://example.com/b" } }
+      variants: [
+        { name: "a", url: "https://example.com/a" },
+        { name: "b", url: "https://example.com/b" }
       ]
     });
     expect((await gated.request(`/c/${encoded}?id=u1`)).status).toBe(403);
@@ -454,7 +574,7 @@ describe("source visibility and creator quarantine", () => {
   async function choose(testId: string, idHash: string, ip: string) {
     return app.request("/choose", {
       method: "POST",
-      body: JSON.stringify({ testId, armCount: 2, alg: "ts", idHash }),
+      body: JSON.stringify({ testId, slotSizes: [2], dim: 16, idHash }),
       headers: { "content-type": "application/json", "cf-connecting-ip": ip }
     });
   }
@@ -592,61 +712,62 @@ describe("source visibility and creator quarantine", () => {
     expect(html).toContain("Bearer");
     expect(html).toContain("loading…");
   });
+
+  it("offers the plain-URL toggle when the config can be spelled that way", async () => {
+    // Per-variant redirectUrl has no query spelling, so use a config
+    // without one.
+    const { encoded } = await makeTest({
+      variants: [
+        { name: "control", url: "https://example.com/a" },
+        { name: "variant", url: "https://example.com/b" }
+      ]
+    });
+    const html = await (await app.request(`/manage/${encoded}`)).text();
+    expect(html).toContain('id="toggle-plain"');
+    // Inline text variants have no query spelling, so no toggle.
+    const inline = await makeTest({
+      variants: ["Ship faster", "Ship safer"] as any
+    });
+    const inlineHtml = await (
+      await app.request(`/manage/${inline.encoded}`)
+    ).text();
+    expect(inlineHtml).not.toContain('id="toggle-plain"');
+  });
 });
 
-describe("mid-test algorithm change", () => {
+describe("mid-test prior change", () => {
   it("keeps the testId and recomputes state from events", async () => {
-    const base = await makeTest({ ctx: { dims: [{ key: "device" }] } });
-    // Traffic on the original ts config, with context recorded.
+    const base = await makeTest();
     for (let i = 0; i < 10; i++) {
-      await app.request(`/s/${base.encoded}?id=u${i}&c_device=mobile`);
+      await app.request(`/s/${base.encoded}?id=u${i}`);
     }
     await app.request(`/px/${base.encoded}?id=u3`);
 
-    // Same test, switched to bucketed: identity must not change.
-    const switched = await makeTest({
-      ctx: { dims: [{ key: "device" }] },
-      alg: "bucketed"
+    // Same test, priors added: identity must not change.
+    const warmed = await makeTest({
+      priors: {
+        main: [
+          { mean: 0.02, strength: 20 },
+          { mean: 0.08, strength: 20 }
+        ]
+      }
     });
-    expect(switched.testId).toBe(base.testId);
+    expect(warmed.testId).toBe(base.testId);
 
-    const rc = await app.request(`/recompute/${switched.encoded}`, {
+    const rc = await app.request(`/recompute/${warmed.encoded}`, {
       method: "POST",
       headers: { authorization: `Bearer ${SECRET}` }
     });
     expect(rc.status).toBe(200);
     expect((await rc.json()).events).toBe(10);
 
-    const s = await stats(switched.encoded);
-    expect(s.alg).toBe("bucketed");
+    const s = await stats(warmed.encoded);
     expect(s.totalAssignments).toBe(10);
-    // The context bucket exists in the recomputed view.
-    expect(Object.keys(s.buckets)).toHaveLength(1);
+    expect(sumConversions(s)).toBe(1);
 
-    // Serving continues on the switched config against the same state.
-    const res = await app.request(
-      `/s/${switched.encoded}?id=u3&c_device=mobile`
-    );
+    // Serving continues on the warmed config against the same state.
+    const res = await app.request(`/s/${warmed.encoded}?id=u3`);
     expect(res.status).toBe(302);
-  });
-});
-
-describe("linear serving", () => {
-  it("serves, rewards, and reports theta", async () => {
-    const linear = await makeTest({
-      alg: "linear",
-      ctx: { dims: [{ key: "device" }] }
-    });
-    for (let i = 0; i < 20; i++) {
-      await app.request(
-        `/s/${linear.encoded}?id=lu${i}&c_device=${i % 2 ? "mobile" : "desktop"}`
-      );
-    }
-    await app.request(`/px/${linear.encoded}?id=lu1`);
-    const s = await stats(linear.encoded);
-    expect(s.totalAssignments).toBe(20);
-    expect(s.linearTheta).toHaveLength(2);
-    expect(s.linearTheta[0]).toHaveLength(16);
   });
 });
 
@@ -712,8 +833,7 @@ describe("auto-context from the platform", () => {
   });
 
   it("records signals even when no dimension uses them", async () => {
-    // A plain non-contextual test still gets a legible breakdown, which
-    // is what makes the algorithm suggestion possible later.
+    // A plain non-contextual test still gets a legible breakdown.
     const { encoded } = await makeTest();
     await app.request(
       cfRequest(
@@ -794,53 +914,6 @@ describe("auto-context from the platform", () => {
   });
 });
 
-describe("algorithm suggestion from observed traffic", () => {
-  it("says nothing while the chosen algorithm still fits", async () => {
-    const { encoded } = await makeTest();
-    await app.request(`/s/${encoded}?id=solo`);
-    const s = await stats(encoded);
-    expect(s.suggestion).toBeNull();
-  });
-
-  it("flags a plain test that is quietly receiving context", async () => {
-    // Declared dims lie: this test says `ts`, but context is arriving,
-    // so a contextual algorithm could serve a per-segment winner.
-    const { encoded } = await makeTest({
-      alg: "ts",
-      ctx: { dims: [{ key: "country", from: "country" }] }
-    });
-    for (const [i, country] of ["NL", "DE", "FR"].entries()) {
-      const req = new Request(`http://localhost/s/${encoded}?id=sug${i}`, {
-        headers: { accept: BROWSER_ACCEPT }
-      });
-      Object.defineProperty(req, "cf", { value: { country } });
-      await app.request(req);
-    }
-    const s = await stats(encoded);
-    expect(s.suggestion?.alg).toBe("linear");
-    expect(s.suggestion?.reasoning).toContain("3 buckets");
-  });
-
-  it("tells a starving bucketed test to generalize instead", async () => {
-    // City is the trap: it looks like one dimension and fragments into
-    // thousands of buckets that each fall back to the global model.
-    const { encoded } = await makeTest({
-      alg: "bucketed",
-      ctx: { dims: [{ key: "city", from: "city" }] }
-    });
-    for (let i = 0; i < 12; i++) {
-      const req = new Request(`http://localhost/s/${encoded}?id=city${i}`, {
-        headers: { accept: BROWSER_ACCEPT }
-      });
-      Object.defineProperty(req, "cf", { value: { city: `town${i}` } });
-      await app.request(req);
-    }
-    const s = await stats(encoded);
-    expect(s.suggestion?.alg).toBe("linear");
-    expect(s.suggestion?.reasoning).toContain("recompute");
-  });
-});
-
 describe("auto-context across serving channels", () => {
   /**
    * The invariant that makes `from` dimensions usable at all: one
@@ -877,26 +950,23 @@ describe("auto-context across serving channels", () => {
     { key: "country", from: "country" as const },
     { key: "persona" }
   ];
+  const DIM = dimForShape([2], DIMS.length);
 
   /** The choose body the SDK builds for a given caller context. */
   async function sdkBody(testId: string, idHash: string, persona: string) {
     return {
       testId,
-      armCount: 2,
-      alg: "bucketed" as const,
-      dim: FEATURE_DIM,
+      slotSizes: [2],
+      dim: DIM,
       idHash,
       ctxKey: await bucketKey(testId, { persona }),
-      featIdx: featureIndices({ persona }),
+      featIdx: featureIndices({ persona }, DIM),
       autoDims: [{ key: "country", from: "country" }]
     };
   }
 
   it("puts an SDK visitor and a redirect visitor in one bucket", async () => {
-    const { encoded, testId } = await makeTest({
-      alg: "bucketed",
-      ctx: { dims: DIMS }
-    });
+    const { encoded, testId } = await makeTest({ ctx: { dims: DIMS } });
     await app.request(
       cfGet(`/s/${encoded}?id=viaEmail&c_persona=power`, { country: "NL" })
     );
@@ -917,10 +987,7 @@ describe("auto-context across serving channels", () => {
     // The SDK knows this visitor is Dutch from the user's own profile;
     // their IP says Germany. They still belong with the redirect visitor
     // whose Dutch IP produced the same value.
-    const { encoded, testId } = await makeTest({
-      alg: "bucketed",
-      ctx: { dims: DIMS }
-    });
+    const { encoded, testId } = await makeTest({ ctx: { dims: DIMS } });
     await app.request(
       cfGet(`/s/${encoded}?id=derived&c_persona=power`, { country: "NL" })
     );
@@ -940,10 +1007,7 @@ describe("auto-context across serving channels", () => {
   });
 
   it("keeps genuinely different contexts apart", async () => {
-    const { encoded, testId } = await makeTest({
-      alg: "bucketed",
-      ctx: { dims: DIMS }
-    });
+    const { encoded, testId } = await makeTest({ ctx: { dims: DIMS } });
     await app.request(
       cfGet(`/s/${encoded}?id=nl&c_persona=power`, { country: "NL" })
     );
@@ -961,10 +1025,7 @@ describe("auto-context across serving channels", () => {
   it("ignores an SDK caller that declares no auto dimensions", async () => {
     // An older SDK build predates `from` support. Its traffic must still
     // be served, just without the derived dimension.
-    const { encoded, testId } = await makeTest({
-      alg: "bucketed",
-      ctx: { dims: DIMS }
-    });
+    const { encoded, testId } = await makeTest({ ctx: { dims: DIMS } });
     const body = await sdkBody(testId, hex("oldSdk"), "power");
     const res = await app.request(
       cfPost({ ...body, autoDims: undefined }, { country: "NL" })
@@ -994,7 +1055,6 @@ describe("opting a link out of derived context", () => {
   }
 
   const AUTO_COUNTRY = {
-    alg: "bucketed" as const,
     ctx: { dims: [{ key: "country", from: "country" as const }] }
   };
 
@@ -1098,6 +1158,17 @@ describe("query-parameter tests (the ESP template form)", () => {
     const res = await get(`/s?v=${A}&v=${B}&id=r1`);
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toMatch(/example\.com\/(a|b)/);
+  });
+
+  it("serves a multi-slot test with s= groups and ?slot=", async () => {
+    const H1 = "https://example.com/h1";
+    const H2 = "https://example.com/h2";
+    const spelled = `s=hero&v=${H1}&v=${H2}&s=cta&v=${A}&v=${B}`;
+    const hero = await get(`/s?${spelled}&id=r1&slot=hero`);
+    expect(hero.status).toBe(302);
+    expect(hero.headers.get("location")).toMatch(/example\.com\/h(1|2)/);
+    const cta = await get(`/s?${spelled}&id=r1&slot=cta`);
+    expect(cta.headers.get("location")).toMatch(/example\.com\/(a|b)/);
   });
 
   it("is the same test as its base64 spelling", async () => {
@@ -1228,7 +1299,7 @@ describe("campaign tags as context", () => {
     return stats(encoded);
   }
 
-  const TEST = `v=${A}&v=${B}&alg=bucketed&ctx=source:utm_source`;
+  const TEST = `v=${A}&v=${B}&ctx=source:utm_source`;
 
   it("buckets by the tag the sender wrote", async () => {
     await get(

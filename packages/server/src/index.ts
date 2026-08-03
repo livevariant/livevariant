@@ -2,14 +2,16 @@ export { createApp, type AppOptions } from "./app.js";
 export { createApi, type ApiOptions } from "./api.js";
 export {
   buildStats,
+  labelsFromConfig,
   paramsFromConfig,
   resolveIdentity,
   TestService,
-  type ArmStats,
+  type CombinationStats,
   type RequestIdentity,
   type ServingParams,
   type TestBackend,
-  type TestStats
+  type TestStats,
+  type VariantStats
 } from "./service.js";
 export {
   chooseRequestSchema,
@@ -31,17 +33,20 @@ export {
 export { signAsset, verifyAssetSignature } from "./assets/sign.js";
 export {
   arrayToCounts,
-  blobToLinearState,
+  blobToModel,
   countsToArray,
   derivedToArtifacts,
+  modelToBlob,
   pullDelta,
-  successDelta
+  successDelta,
+  type ModelBlob
 } from "./store/snapshot.js";
 export {
   counterKey,
   mergePolicy,
+  modelKey,
+  sameShape,
   GLOBAL_SCOPE,
-  linearKey,
   type StateStore,
   type TestPolicy,
   type TestShape

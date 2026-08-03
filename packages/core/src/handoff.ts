@@ -9,13 +9,14 @@
 export const HANDOFF_PARAMS = {
   testId: "_lvt",
   idHash: "_lvid",
-  armIndex: "_lvvar"
+  cell: "_lvvar"
 } as const;
 
 export interface Handoff {
   testId: string;
   idHash: string;
-  armIndex: number;
+  /** The served combination, encoded (cells.ts). */
+  cell: number;
 }
 
 /** Appends handoff params to a destination URL, preserving its own query. */
@@ -28,7 +29,7 @@ export function decorateUrl(target: string, handoff: Handoff): string {
   }
   url.searchParams.set(HANDOFF_PARAMS.testId, handoff.testId);
   url.searchParams.set(HANDOFF_PARAMS.idHash, handoff.idHash);
-  url.searchParams.set(HANDOFF_PARAMS.armIndex, String(handoff.armIndex));
+  url.searchParams.set(HANDOFF_PARAMS.cell, String(handoff.cell));
   return url.toString();
 }
 
@@ -37,20 +38,20 @@ export function parseHandoff(search: string): Handoff | null {
   const params = new URLSearchParams(search);
   const testId = params.get(HANDOFF_PARAMS.testId);
   const idHash = params.get(HANDOFF_PARAMS.idHash);
-  const armIndex = Number(params.get(HANDOFF_PARAMS.armIndex));
+  const cell = Number(params.get(HANDOFF_PARAMS.cell));
   if (
     !testId ||
     !/^[0-9a-f]{64}$/.test(testId) ||
     !idHash ||
     !/^[0-9a-f]{64}$/.test(idHash) ||
-    !Number.isInteger(armIndex) ||
-    armIndex < 0 ||
-    // Sanity bound; callers with the config must still check armCount.
-    armIndex >= 100
+    !Number.isInteger(cell) ||
+    cell < 0 ||
+    // Sanity bound (MAX_CELLS); callers with the config still validate.
+    cell >= 512
   ) {
     return null;
   }
-  return { testId, idHash, armIndex };
+  return { testId, idHash, cell };
 }
 
 /** The query string with handoff params removed (for history.replaceState). */
