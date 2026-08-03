@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { bucketKey, computeTestId, type TestConfig } from "@livevariant/core";
+import {
+  bucketKey,
+  computeTestId,
+  testConfigSchema,
+  type TestConfigInput
+} from "@livevariant/core";
 import { createTest, type CreateTestOptions } from "./index.js";
 import { gaClientId } from "./identity.js";
 import { eventNameOf, resetDataLayerInterception } from "./ga.js";
@@ -10,25 +15,19 @@ import { eventNameOf, resetDataLayerInterception } from "./ga.js";
  * The server is faked with an injected fetch so assertions are exact.
  */
 
-const CONFIG: TestConfig = {
-  v: 1,
+const CONFIG: TestConfigInput = {
   name: "sdk test",
-  arms: [
+  variants: [
     {
       name: "control",
-      formats: {
-        text: "Buy now",
-        html: "<b>Buy now</b>",
-        url: "https://example.com/a"
-      }
+      text: "Buy now",
+      html: "<b>Buy now</b>",
+      url: "https://example.com/a"
     },
-    { name: "variant", formats: { text: "Get started" } }
+    { name: "variant", text: "Get started" }
   ],
-  alg: "ts",
-  priorStrengthCap: 50,
-  minBucketPulls: 100,
   statsKeyHash: "0".repeat(64)
-} as TestConfig;
+};
 
 interface FakeServer {
   fetch: typeof fetch;
@@ -36,19 +35,21 @@ interface FakeServer {
   rewardCalls: any[];
 }
 
-function fakeServer(armIndex = 1): FakeServer {
+function fakeServer(cell = 1): FakeServer {
   const server: FakeServer = { chooseCalls: [], rewardCalls: [], fetch: null! };
   server.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const body = init?.body ? JSON.parse(String(init.body)) : null;
     if (url.endsWith("/choose")) {
       server.chooseCalls.push(body);
-      const hashes: string[] = body?.assets?.[String(armIndex)] ?? [];
+      // Single-slot fake: the cell IS the variant index of slot 0.
+      const hashes: string[] = body?.assets?.[`0:${cell}`] ?? [];
       if (hashes.length === 0) {
-        return Response.json({ armIndex });
+        return Response.json({ cell, choice: [cell] });
       }
       return Response.json({
-        armIndex,
+        cell,
+        choice: [cell],
         assetSignatures: Object.fromEntries(
           hashes.map((h: string) => [h, `e=99&s=sig-${h.slice(0, 6)}`])
         ),
@@ -101,10 +102,10 @@ describe("assignment", () => {
 
   it("sends only hashes and numbers, never content or raw ids", async () => {
     const server = fakeServer();
-    const ctxConfig: TestConfig = {
+    const ctxConfig: TestConfigInput = {
       ...CONFIG,
       ctx: { dims: [{ key: "country" }] }
-    } as TestConfig;
+    };
     const test = await createTest(ctxConfig, {
       ...options(server),
       externalId: "michael@example.com",
@@ -127,12 +128,12 @@ describe("assignment", () => {
     // page itself knows, which the server composes the same way it does
     // for an email redirect.
     const server = fakeServer();
-    const autoConfig: TestConfig = {
+    const autoConfig: TestConfigInput = {
       ...CONFIG,
       ctx: {
         dims: [{ key: "country", from: "country" }, { key: "persona" }]
       }
-    } as TestConfig;
+    };
     const test = await createTest(autoConfig, {
       ...options(server),
       externalId: "u-auto",
@@ -144,17 +145,19 @@ describe("assignment", () => {
     // The hashed key covers persona alone: country is composed on top of
     // it by the server, for SDK and redirect traffic alike.
     expect(call.ctxKey).toBe(
-      await bucketKey(await computeTestId(autoConfig), { persona: "power" })
+      await bucketKey(await computeTestId(testConfigSchema.parse(autoConfig)), {
+        persona: "power"
+      })
     );
     test.dispose();
   });
 
   it("omits auto fields entirely for a config that declares none", async () => {
     const server = fakeServer();
-    const ctxConfig: TestConfig = {
+    const ctxConfig: TestConfigInput = {
       ...CONFIG,
       ctx: { dims: [{ key: "persona" }] }
-    } as TestConfig;
+    };
     const test = await createTest(ctxConfig, {
       ...options(server),
       context: { persona: "power" }
@@ -169,22 +172,19 @@ describe("assignment", () => {
     // content hashes (nothing else) and splices the winning arm's fresh
     // signatures into the formats it hands the page.
     const hash = "a".repeat(64);
-    const assetConfig: TestConfig = {
+    const assetConfig: TestConfigInput = {
       ...CONFIG,
-      arms: [
-        CONFIG.arms[0],
-        {
-          name: "hosted",
-          formats: { image: `https://livevariant.link/a/${hash}` }
-        }
+      variants: [
+        CONFIG.variants![0],
+        { name: "hosted", image: `https://livevariant.link/a/${hash}` }
       ]
-    } as TestConfig;
+    };
     const server = fakeServer(1);
     const test = await createTest(assetConfig, {
       ...options(server),
       externalId: "asset-user"
     });
-    expect(server.chooseCalls[0].assets).toEqual({ "1": [hash] });
+    expect(server.chooseCalls[0].assets).toEqual({ "0:1": [hash] });
     expect(test.variant.image).toBe(
       `https://livevariant.link/a/${hash}?e=99&s=sig-${hash.slice(0, 6)}`
     );
@@ -199,16 +199,13 @@ describe("assignment", () => {
     // sticky server-side, so re-asking returns the same arm with fresh
     // signatures.
     const hash = "b".repeat(64);
-    const assetConfig: TestConfig = {
+    const assetConfig: TestConfigInput = {
       ...CONFIG,
-      arms: [
-        CONFIG.arms[0],
-        {
-          name: "hosted",
-          formats: { image: `https://livevariant.link/a/${hash}` }
-        }
+      variants: [
+        CONFIG.variants![0],
+        { name: "hosted", image: `https://livevariant.link/a/${hash}` }
       ]
-    } as TestConfig;
+    };
     const server = fakeServer(1);
     const first = await createTest(assetConfig, {
       ...options(server),
@@ -264,6 +261,49 @@ describe("assignment", () => {
     (await createTest(CONFIG, options(server, { externalId: "u1" }))).dispose();
     (await createTest(CONFIG, options(server, { externalId: "u2" }))).dispose();
     expect(server.chooseCalls).toHaveLength(2);
+  });
+
+  it("accepts the readable shorthands: bare strings and `variants`", async () => {
+    // The documented story: a whole test, legible in page source.
+    const server = fakeServer(1);
+    const test = await createTest(
+      { variants: ["Ship faster", "Ship safer"] },
+      options(server, { externalId: "reader" })
+    );
+    expect(test.variant.text).toBe("Ship safer");
+    expect(test.variant.name).toBe("v2");
+    expect(server.chooseCalls[0].slotSizes).toEqual([2]);
+    test.dispose();
+  });
+
+  it("renders the chosen variant per slot for a multi-slot test", async () => {
+    const server: FakeServer = {
+      chooseCalls: [],
+      rewardCalls: [],
+      fetch: null!
+    };
+    server.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      server.chooseCalls.push(JSON.parse(String(init?.body)));
+      // 2x2 shape, cell 3 = choice [1, 1] (row-major).
+      return Response.json({ cell: 3, choice: [1, 1] });
+    }) as typeof fetch;
+    const test = await createTest(
+      {
+        slots: {
+          headline: ["A headline", "B headline"],
+          cta: ["Buy", "Try"]
+        }
+      },
+      options(server, { externalId: "multi" })
+    );
+    expect(server.chooseCalls[0].slotSizes).toEqual([2, 2]);
+    expect(test.cell).toBe(3);
+    // Canonical slot order is sorted: cta first, then headline.
+    expect(test.slots.cta.text).toBe("Try");
+    expect(test.slots.headline.text).toBe("B headline");
+    // `variant` is the first slot's choice.
+    expect(test.variant.text).toBe("Try");
+    test.dispose();
   });
 
   it("accepts a pre-encoded config string and builds matching urls", async () => {
@@ -329,9 +369,9 @@ describe("resilience: the page must render regardless", () => {
     test.dispose();
   });
 
-  it("renders control when the server answers with a nonsense arm", async () => {
+  it("renders control when the server answers with a nonsense cell", async () => {
     const nonsense = (async () =>
-      Response.json({ armIndex: 99 })) as unknown as typeof fetch;
+      Response.json({ cell: 99, choice: [99] })) as unknown as typeof fetch;
     const test = await createTest(CONFIG, {
       serverUrl: "https://livevariant.link",
       fetch: nonsense,

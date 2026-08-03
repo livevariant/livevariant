@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { computeTestId, type TestConfig } from "@livevariant/core";
+import { computeTestId, testConfigSchema } from "@livevariant/core";
 import { createTest } from "./index.js";
 import { autoTrack } from "./auto-track.js";
 import { captureHandoff, getHandoff, listHandoffs } from "./handoff.js";
@@ -11,19 +11,14 @@ import { resetDataLayerInterception } from "./ga.js";
  * autoTrack mode that rewards stored handoffs from GA events.
  */
 
-const CONFIG: TestConfig = {
-  v: 1,
+const CONFIG = testConfigSchema.parse({
   name: "handoff test",
-  arms: [
-    { name: "control", formats: { text: "A" } },
-    { name: "variant", formats: { text: "B" } }
+  variants: [
+    { name: "control", text: "A" },
+    { name: "variant", text: "B" }
   ],
-  alg: "ts",
-  priorStrengthCap: 50,
-  minBucketPulls: 100,
-  decorateRedirects: true,
   statsKeyHash: "0".repeat(64)
-} as TestConfig;
+});
 
 const ID_HASH = "ab".repeat(32);
 
@@ -34,7 +29,7 @@ function fakeServer() {
       url: String(input),
       body: init?.body ? JSON.parse(String(init.body)) : null
     });
-    return Response.json({ armIndex: 0, rewarded: true, first: true });
+    return Response.json({ cell: 0, choice: [0], rewarded: true, first: true });
   }) as typeof fetch;
   return { calls, fetchImpl };
 }
@@ -58,7 +53,7 @@ describe("captureHandoff", () => {
     const testId = await computeTestId(CONFIG);
     visitWithParams({ _lvt: testId, _lvid: ID_HASH, _lvvar: "1" });
     const captured = captureHandoff(window, localStorage);
-    expect(captured?.armIndex).toBe(1);
+    expect(captured?.cell).toBe(1);
     expect(location.search).toBe("?utm_source=mail"); // _lv* gone, utm kept
     expect(getHandoff(localStorage, testId)?.idHash).toBe(ID_HASH);
   });
@@ -76,7 +71,7 @@ describe("captureHandoff", () => {
       JSON.stringify({
         testId: "11".repeat(32),
         idHash: ID_HASH,
-        armIndex: 0,
+        cell: 0,
         capturedAt: Date.now() - 31 * 24 * 60 * 60 * 1000 // expired
       })
     );
@@ -85,7 +80,7 @@ describe("captureHandoff", () => {
       JSON.stringify({
         testId: "22".repeat(32),
         idHash: ID_HASH,
-        armIndex: 1,
+        cell: 1,
         capturedAt: Date.now() // live
       })
     );
@@ -96,9 +91,10 @@ describe("captureHandoff", () => {
     expect(localStorage.getItem(`lv:h:${"11".repeat(32)}`)).toBeNull();
   });
 
-  it("ignores handoffs whose armIndex exceeds the config", async () => {
+  it("ignores handoffs whose cell exceeds the config", async () => {
     const testId = await computeTestId(CONFIG);
-    visitWithParams({ _lvt: testId, _lvid: ID_HASH, _lvvar: "7" }); // only 2 arms
+    // Only 2 combinations exist.
+    visitWithParams({ _lvt: testId, _lvid: ID_HASH, _lvvar: "7" });
     const { calls, fetchImpl } = fakeServer();
     const test = await createTest(CONFIG, {
       serverUrl: "https://livevariant.link",
@@ -117,7 +113,7 @@ describe("captureHandoff", () => {
       JSON.stringify({
         testId,
         idHash: ID_HASH,
-        armIndex: 1,
+        cell: 1,
         capturedAt: Date.now() - 31 * 24 * 60 * 60 * 1000
       })
     );
@@ -156,7 +152,7 @@ describe("autoTrack (GTM one-tag mode)", () => {
       JSON.stringify({
         testId: otherTest,
         idHash: "ef".repeat(32),
-        armIndex: 0,
+        cell: 0,
         capturedAt: Date.now()
       })
     );
