@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { encodeCell } from "./cells.js";
 import { dimForShape, observe, reward } from "./model.js";
 import { mulberry32, type Rng } from "./rng.js";
@@ -14,7 +14,12 @@ import {
  * to be earned: a single model (joint linear Thompson sampling) serves
  * plain A/B, contextual, and multi-slot tests well enough that nobody
  * ever chooses an algorithm.
+ *
+ * These run tens of thousands of Thompson draws. Deterministic, ~1s on a
+ * laptop, but CI containers can be many times slower and the default 5s
+ * per-test timeout has flaked there, so the budget is explicit.
  */
+vi.setConfig({ testTimeout: 60_000 });
 
 /** One simulated visitor: choose, observe, maybe reward. */
 function play(
