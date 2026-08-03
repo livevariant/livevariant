@@ -373,6 +373,54 @@ open deployment is an open redirector; the allowlist is what stops yours
 being used for phishing. Unset means allow-all, which is right while you
 are only serving your own campaigns.
 
+## Bring your own storage
+
+The server talks to storage through one interface, `StateStore`: an
+event log of assignments (the source of truth) plus a derived cache of
+counters and model blobs. The bundled `MemoryStore` backs local dev, and
+the Cloudflare deployment runs the same service inside a Durable Object.
+Any other backend is an adapter away:
+
+```ts
+import { createApp, TestService, type StateStore } from "@livevariant/server";
+
+class MyStore implements StateStore {
+  /* ... */
+}
+
+// Mount the whole HTTP surface in your own app...
+const app = createApp({ store: new MyStore() });
+// ...or skip HTTP and call the service directly.
+const service = new TestService(new MyStore(), mulberry32(randomSeed()));
+```
+
+Prove the adapter with the conformance suite, which ships with the
+package (vitest required):
+
+```ts
+import { storeContract } from "@livevariant/server/testing";
+
+storeContract("MyStore", () => new MyStore(client));
+```
+
+The sequential cases define what the methods mean. The concurrency cases
+are the point: an adapter written as read-then-write over a plain
+key-value API satisfies every type signature, passes every sequential
+test, and corrupts data under real traffic. The rules, also written on
+the interface itself:
+
+- **The event log must be atomic, and mistakes there are permanent.**
+  `putAssignmentIfAbsent` is a single conditional insert, never a get
+  followed by a put, or one visitor gets two variants. `addReward` is an
+  atomic accumulate, or concurrent conversions collapse into one.
+- **The derived cache must be atomic too, but mistakes there are
+  repairable.** `incrCounters` is a true increment and `putBlob` a true
+  compare-and-swap; get either wrong and serving skews until `POST
+/recompute` rebuilds the cache from the log.
+
+The Durable Object gets serialization for free, which is why it needs
+none of this care. Everything else does.
+
 ## Development
 
 Requires Node 24 (`nvm use`) and npm.
