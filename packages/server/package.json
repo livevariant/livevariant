@@ -58,5 +58,8 @@
     "vitest": {
       "optional": true
     }
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
