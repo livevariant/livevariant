@@ -99,7 +99,7 @@ export class TestStateDO extends DurableObject {
   assign(
     params: ServingParams,
     identity: RequestIdentity
-  ): Promise<{ armIndex: number; created: boolean }> {
+  ): Promise<{ cell: number; created: boolean }> {
     return this.service(params.testId).assign(params, identity);
   }
 
@@ -107,7 +107,7 @@ export class TestStateDO extends DurableObject {
     testId: string,
     idHash: string,
     amount: number
-  ): Promise<{ armIndex: number; first: boolean } | null> {
+  ): Promise<{ cell: number; first: boolean } | null> {
     return this.service(testId).reward(testId, idHash, amount);
   }
 
@@ -115,8 +115,11 @@ export class TestStateDO extends DurableObject {
     return this.service(params.testId).recompute(params);
   }
 
-  stats(params: ServingParams, armNames?: string[]) {
-    return this.service(params.testId).stats(params, armNames);
+  stats(
+    params: ServingParams,
+    labels?: Array<{ key: string; variants: string[] }>
+  ) {
+    return this.service(params.testId).stats(params, labels);
   }
 
   updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy> {
@@ -235,8 +238,11 @@ class DurableObjectBackend implements TestBackend {
     return this.stub(params.testId).recompute(params);
   }
 
-  stats(params: ServingParams, armNames?: string[]) {
-    return this.stub(params.testId).stats(params, armNames);
+  stats(
+    params: ServingParams,
+    labels?: Array<{ key: string; variants: string[] }>
+  ) {
+    return this.stub(params.testId).stats(params, labels);
   }
 
   updatePolicy(testId: string, patch: TestPolicy) {

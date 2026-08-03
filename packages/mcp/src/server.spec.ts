@@ -113,20 +113,43 @@ describe("the MCP server", () => {
   it("carries a stats fetch all the way through", async () => {
     const body = {
       testId: "a".repeat(64),
-      alg: "ts",
       totalAssignments: 4000,
-      arms: [
+      combinations: [
         {
-          name: "control",
+          cell: 0,
+          choice: ["control"],
           pulls: 2000,
           conversions: 100,
+          rewardTotal: 100,
           conversionRate: 0.05
         },
-        { name: "variant", pulls: 2000, conversions: 180, conversionRate: 0.09 }
+        {
+          cell: 1,
+          choice: ["variant"],
+          pulls: 2000,
+          conversions: 180,
+          rewardTotal: 180,
+          conversionRate: 0.09
+        }
       ],
+      slots: {
+        main: [
+          {
+            name: "control",
+            pulls: 2000,
+            conversions: 100,
+            conversionRate: 0.05
+          },
+          {
+            name: "variant",
+            pulls: 2000,
+            conversions: 180,
+            conversionRate: 0.09
+          }
+        ]
+      },
       buckets: {},
       bySignal: {},
-      suggestion: null,
       excluded: { total: 0, bySource: 0, byWindow: 0 }
     };
     const fetchImpl = (async () =>
@@ -150,6 +173,6 @@ describe("the MCP server", () => {
     ).structuredContent as Record<string, any>;
 
     expect(stats.decision.leader).toBe("variant");
-    expect(stats.variants[1].probabilityBest).toBeGreaterThan(0.99);
+    expect(stats.combinations[1].probabilityBest).toBeGreaterThan(0.99);
   });
 });

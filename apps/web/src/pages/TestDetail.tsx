@@ -13,8 +13,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { loadTests } from "@/lib/tests-store";
 
-interface ArmStats {
-  name?: string;
+interface VariantStats {
+  name: string;
+  pulls: number;
+  conversions: number;
+  conversionRate: number | null;
+}
+
+interface CombinationStats {
+  cell: number;
+  choice: string[];
   pulls: number;
   conversions: number;
   rewardTotal: number;
@@ -22,9 +30,9 @@ interface ArmStats {
 }
 
 interface Stats {
-  alg: string;
   totalAssignments: number;
-  arms: ArmStats[];
+  combinations: CombinationStats[];
+  slots: Record<string, VariantStats[]>;
   buckets: Record<string, unknown>;
 }
 
@@ -143,7 +151,11 @@ element.textContent = test.variant.text;`;
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-semibold">{test.name}</h1>
-        {stats && <Badge variant="secondary">{stats.alg}</Badge>}
+        {stats && Object.keys(stats.slots).length > 1 && (
+          <Badge variant="secondary">
+            {stats.combinations.length} combinations
+          </Badge>
+        )}
         <Button
           className="ml-auto"
           variant="outline"
@@ -167,33 +179,76 @@ element.textContent = test.variant.text;`;
           </CardDescription>
         </CardHeader>
         {stats && (
-          <CardContent>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="py-2 font-medium">Variant</th>
-                  <th className="py-2 font-medium">Pulls</th>
-                  <th className="py-2 font-medium">Conversions</th>
-                  <th className="py-2 font-medium">Rate</th>
-                  <th className="py-2 font-medium">Reward</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats.arms.map((arm, i) => (
-                  <tr key={i} className="border-b last:border-0">
-                    <td className="py-2">{arm.name ?? `arm ${i}`}</td>
-                    <td className="py-2">{arm.pulls}</td>
-                    <td className="py-2">{arm.conversions}</td>
-                    <td className="py-2">
-                      {arm.conversionRate === null
-                        ? "–"
-                        : `${(arm.conversionRate * 100).toFixed(1)}%`}
-                    </td>
-                    <td className="py-2">{arm.rewardTotal}</td>
+          <CardContent className="space-y-6">
+            {/* Per-slot marginals: how each variant did across every
+                combination it appeared in. For a single-slot test this IS
+                the whole picture. */}
+            {Object.entries(stats.slots).map(([slotKey, variants]) => (
+              <table key={slotKey} className="w-full text-sm">
+                {Object.keys(stats.slots).length > 1 && (
+                  <caption className="pb-2 text-left font-medium">
+                    {slotKey}
+                  </caption>
+                )}
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="py-2 font-medium">Variant</th>
+                    <th className="py-2 font-medium">Pulls</th>
+                    <th className="py-2 font-medium">Conversions</th>
+                    <th className="py-2 font-medium">Rate</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {variants.map((variant, i) => (
+                    <tr key={i} className="border-b last:border-0">
+                      <td className="py-2">{variant.name}</td>
+                      <td className="py-2">{variant.pulls}</td>
+                      <td className="py-2">{variant.conversions}</td>
+                      <td className="py-2">
+                        {variant.conversionRate === null
+                          ? "–"
+                          : `${(variant.conversionRate * 100).toFixed(1)}%`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ))}
+            {/* Exact per-combination outcomes, the answer a multi-element
+                test exists to give. */}
+            {Object.keys(stats.slots).length > 1 && (
+              <table className="w-full text-sm">
+                <caption className="pb-2 text-left font-medium">
+                  Combinations
+                </caption>
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="py-2 font-medium">Combination</th>
+                    <th className="py-2 font-medium">Pulls</th>
+                    <th className="py-2 font-medium">Conversions</th>
+                    <th className="py-2 font-medium">Rate</th>
+                    <th className="py-2 font-medium">Reward</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...stats.combinations]
+                    .sort((a, b) => b.pulls - a.pulls)
+                    .map(combo => (
+                      <tr key={combo.cell} className="border-b last:border-0">
+                        <td className="py-2">{combo.choice.join(" + ")}</td>
+                        <td className="py-2">{combo.pulls}</td>
+                        <td className="py-2">{combo.conversions}</td>
+                        <td className="py-2">
+                          {combo.conversionRate === null
+                            ? "–"
+                            : `${(combo.conversionRate * 100).toFixed(1)}%`}
+                        </td>
+                        <td className="py-2">{combo.rewardTotal}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            )}
           </CardContent>
         )}
       </Card>
@@ -274,14 +329,16 @@ element.textContent = test.variant.text;`;
             manage link above.
           </p>
           <p className="text-muted-foreground text-sm">
-            Add another <code>v=</code> for a third variant, and{" "}
-            <code>vn=</code> to name them (they default to v1, v2, …).{" "}
-            <code>stamp=utm_content</code> writes the served variant into that
-            parameter on the way out, so the test shows up in your own analytics
-            without installing anything; drop it to turn that off. Any parameter
-            we do not recognize, <code>utm_source</code> and <code>gclid</code>{" "}
-            included, is carried through to the destination, and{" "}
-            <code>ctx=source:utm_source</code> turns a campaign tag into a
+            Add another <code>v=</code> for a third variant, <code>vn=</code> to
+            name them (they default to v1, v2, …), and <code>s=</code> to open a
+            second element (<code>s=hero&amp;v=…&amp;s=cta&amp;v=…</code>, each
+            link then adding <code>&amp;slot=</code> to say which element it
+            serves). <code>stamp=utm_content</code> writes the served variant
+            into that parameter on the way out, so the test shows up in your own
+            analytics without installing anything; drop it to turn that off. Any
+            parameter we do not recognize, <code>utm_source</code> and{" "}
+            <code>gclid</code> included, is carried through to the destination,
+            and <code>ctx=source:utm_source</code> turns a campaign tag into a
             context dimension the bandit learns per segment.
           </p>
         </CardContent>

@@ -1,11 +1,12 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { Plus, Trash2, Wand2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import {
+  cellCount,
   encodeConfig,
   generateStatsSecret,
   hashStatsSecret,
-  recommendAlgorithm,
+  MAX_CELLS,
   type TestConfigInput
 } from "@livevariant/core";
 import { Button } from "@/components/ui/button";
@@ -18,17 +19,34 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { NativeSelect } from "@/components/ui/select";
 import { saveTest } from "@/lib/tests-store";
 import { useServeUrl } from "@/lib/serve-url";
 
-interface ArmDraft {
+interface VariantDraft {
   name: string;
   url: string;
   image: string;
   text: string;
   uploading?: boolean;
   uploadError?: string;
+}
+
+interface SlotDraft {
+  key: string;
+  variants: VariantDraft[];
+}
+
+function freshVariant(index: number): VariantDraft {
+  return {
+    // a..z, then plain numbers past 26 variants.
+    name:
+      index === 0
+        ? "control"
+        : `variant-${index < 26 ? String.fromCharCode(96 + index) : index + 1}`,
+    url: "",
+    image: "",
+    text: ""
+  };
 }
 
 export function Builder() {
@@ -42,23 +60,28 @@ export function Builder() {
   // empty while someone clears it to type a new one, but an empty serving
   // origin would build relative URLs that serve nothing.
   const effectiveServerUrl = serverUrl.trim() || detectedServerUrl;
-  const [arms, setArms] = useState<ArmDraft[]>([
-    { name: "control", url: "", image: "", text: "" },
-    { name: "variant-b", url: "", image: "", text: "" }
+  // One slot is the classic A/B test; more slots make the test optimize
+  // the COMBINATION of elements (hero x cta), which is the point of the
+  // one-model design.
+  const [slots, setSlots] = useState<SlotDraft[]>([
+    { key: "main", variants: [freshVariant(0), freshVariant(1)] }
   ]);
   const [redirectUrl, setRedirectUrl] = useState("");
   const [ctxKeys, setCtxKeys] = useState("");
-  const [alg, setAlg] = useState<"auto" | "ts" | "bucketed" | "linear">("auto");
   const [rewardEvents, setRewardEvents] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const multiSlot = slots.length > 1;
+  const combinations = cellCount(slots.map(slot => slot.variants.length));
 
   // The exact condition the click endpoint enforces: it needs ?to=, a
   // per-variant redirectUrl, or this one. Variants with a destination are
   // the case where someone is likely to want click tracking and be
   // surprised by a 400 in the middle of a campaign.
   const needsRedirectUrl =
-    redirectUrl.trim() === "" && arms.some(arm => arm.url.trim() !== "");
+    redirectUrl.trim() === "" &&
+    slots.some(slot => slot.variants.some(v => v.url.trim() !== ""));
 
   const dims = useMemo(
     () =>
@@ -69,11 +92,31 @@ export function Builder() {
         .map(key => ({ key })),
     [ctxKeys]
   );
-  const recommendation = useMemo(
-    () => recommendAlgorithm({ ctxDims: dims }),
-    [dims]
-  );
-  const effectiveAlg = alg === "auto" ? recommendation.alg : alg;
+
+  function setSlot(slotIndex: number, patch: Partial<SlotDraft>) {
+    setSlots(current =>
+      current.map((slot, i) => (i === slotIndex ? { ...slot, ...patch } : slot))
+    );
+  }
+
+  function setVariant(
+    slotIndex: number,
+    index: number,
+    patch: Partial<VariantDraft>
+  ) {
+    setSlots(current =>
+      current.map((slot, i) =>
+        i === slotIndex
+          ? {
+              ...slot,
+              variants: slot.variants.map((variant, j) =>
+                j === index ? { ...variant, ...patch } : variant
+              )
+            }
+          : slot
+      )
+    );
+  }
 
   /**
    * Uploads to the deployment's asset store and drops the returned
@@ -81,8 +124,8 @@ export function Builder() {
    * serving flow, which is the point: hosting here is for variants, not
    * for hotlinking.
    */
-  async function uploadImage(index: number, file: File) {
-    setArm(index, { uploading: true, uploadError: undefined });
+  async function uploadImage(slotIndex: number, index: number, file: File) {
+    setVariant(slotIndex, index, { uploading: true, uploadError: undefined });
     try {
       const res = await fetch(`${effectiveServerUrl}/assets`, {
         method: "POST",
@@ -98,19 +141,13 @@ export function Builder() {
               : `upload failed (${res.status})`)
         );
       }
-      setArm(index, { image: body.url, uploading: false });
+      setVariant(slotIndex, index, { image: body.url, uploading: false });
     } catch (err) {
-      setArm(index, {
+      setVariant(slotIndex, index, {
         uploading: false,
         uploadError: err instanceof Error ? err.message : String(err)
       });
     }
-  }
-
-  function setArm(index: number, patch: Partial<ArmDraft>) {
-    setArms(current =>
-      current.map((arm, i) => (i === index ? { ...arm, ...patch } : arm))
-    );
   }
 
   async function create() {
@@ -119,17 +156,19 @@ export function Builder() {
     try {
       const statsSecret = generateStatsSecret();
       const config: TestConfigInput = {
-        v: 1,
+        v: 2,
         name: name || undefined,
-        arms: arms.map(arm => ({
-          name: arm.name,
-          formats: {
-            url: arm.url || undefined,
-            image: arm.image || undefined,
-            text: arm.text || undefined
-          }
-        })),
-        alg: effectiveAlg,
+        slots: Object.fromEntries(
+          slots.map(slot => [
+            slot.key.trim(),
+            slot.variants.map(variant => ({
+              name: variant.name,
+              url: variant.url || undefined,
+              image: variant.image || undefined,
+              text: variant.text || undefined
+            }))
+          ])
+        ),
         ctx: dims.length > 0 ? { dims } : undefined,
         redirectUrl: redirectUrl || undefined,
         rewardEvents: rewardEvents
@@ -166,7 +205,9 @@ export function Builder() {
         <h1 className="text-2xl font-semibold">Create a test</h1>
         <p className="text-sm text-muted-foreground">
           Everything is built in your browser: the config becomes a URL, the
-          stats secret stays with you, and nothing is registered anywhere.
+          stats secret stays with you, and nothing is registered anywhere. There
+          is no algorithm to pick; every test runs the same adaptive model,
+          sized from its shape.
         </p>
       </div>
 
@@ -198,106 +239,175 @@ export function Builder() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Variants</CardTitle>
-          <CardDescription>
-            Give each variant a destination URL (email/redirect tests), inline
-            text (SDK tests), or both.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {arms.map((arm, i) => (
-            <div key={i} className="space-y-2 rounded-lg border p-4">
+      {slots.map((slot, slotIndex) => (
+        <Card key={slotIndex}>
+          <CardHeader>
+            {multiSlot ? (
               <div className="flex items-center gap-2">
+                <CardTitle className="shrink-0">Element</CardTitle>
                 <Input
-                  aria-label={`Variant ${i + 1} name`}
-                  className="max-w-48"
-                  value={arm.name}
-                  onChange={e => setArm(i, { name: e.target.value })}
-                />
-                {arms.length > 2 && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label="Remove variant"
-                    onClick={() =>
-                      setArms(current => current.filter((_, j) => j !== i))
-                    }
-                  >
-                    <Trash2 />
-                  </Button>
-                )}
-              </div>
-              <Input
-                placeholder="Destination URL (https://…)"
-                value={arm.url}
-                onChange={e => setArm(i, { url: e.target.value })}
-              />
-              <Input
-                placeholder="Inline text (for SDK serving)"
-                value={arm.text}
-                onChange={e => setArm(i, { text: e.target.value })}
-              />
-              <div className="flex items-center gap-2">
-                <Input
-                  placeholder="Image URL (email tests)"
-                  value={arm.image}
-                  onChange={e => setArm(i, { image: e.target.value })}
-                />
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/gif,image/webp,image/avif"
-                  className="hidden"
-                  id={`arm-${i}-upload`}
-                  onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      void uploadImage(i, file);
-                    }
-                    e.target.value = "";
-                  }}
+                  aria-label={`Element ${slotIndex + 1} name`}
+                  className="max-w-40"
+                  value={slot.key}
+                  onChange={e =>
+                    setSlot(slotIndex, {
+                      key: e.target.value
+                        .toLowerCase()
+                        .replace(/[^a-z0-9_-]/g, "")
+                    })
+                  }
                 />
                 <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={arm.uploading}
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Remove element"
+                  className="ml-auto"
                   onClick={() =>
-                    document.getElementById(`arm-${i}-upload`)?.click()
+                    setSlots(current =>
+                      current.filter((_, j) => j !== slotIndex)
+                    )
                   }
                 >
-                  {arm.uploading ? "Uploading…" : "Upload"}
+                  <Trash2 />
                 </Button>
               </div>
-              {arm.uploadError && (
-                <p className="text-xs text-red-600">{arm.uploadError}</p>
-              )}
-            </div>
-          ))}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              setArms(current => [
-                ...current,
-                {
-                  image: "",
-                  // a..z, then plain numbers past 26 variants.
-                  name: `variant-${
-                    current.length < 26
-                      ? String.fromCharCode(97 + current.length)
-                      : current.length + 1
-                  }`,
-                  url: "",
-                  text: ""
-                }
-              ])
-            }
-          >
-            <Plus /> Add variant
-          </Button>
-        </CardContent>
-      </Card>
+            ) : (
+              <CardTitle>Variants</CardTitle>
+            )}
+            <CardDescription>
+              Give each variant a destination URL (email/redirect tests), inline
+              text (SDK tests), or both.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {slot.variants.map((variant, i) => (
+              <div key={i} className="space-y-2 rounded-lg border p-4">
+                <div className="flex items-center gap-2">
+                  <Input
+                    aria-label={`Variant ${i + 1} name`}
+                    className="max-w-48"
+                    value={variant.name}
+                    onChange={e =>
+                      setVariant(slotIndex, i, { name: e.target.value })
+                    }
+                  />
+                  {slot.variants.length > 2 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Remove variant"
+                      onClick={() =>
+                        setSlot(slotIndex, {
+                          variants: slot.variants.filter((_, j) => j !== i)
+                        })
+                      }
+                    >
+                      <Trash2 />
+                    </Button>
+                  )}
+                </div>
+                <Input
+                  placeholder="Destination URL (https://…)"
+                  value={variant.url}
+                  onChange={e =>
+                    setVariant(slotIndex, i, { url: e.target.value })
+                  }
+                />
+                <Input
+                  placeholder="Inline text (for SDK serving)"
+                  value={variant.text}
+                  onChange={e =>
+                    setVariant(slotIndex, i, { text: e.target.value })
+                  }
+                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="Image URL (email tests)"
+                    value={variant.image}
+                    onChange={e =>
+                      setVariant(slotIndex, i, { image: e.target.value })
+                    }
+                  />
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp,image/avif"
+                    className="hidden"
+                    id={`slot-${slotIndex}-variant-${i}-upload`}
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        void uploadImage(slotIndex, i, file);
+                      }
+                      e.target.value = "";
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={variant.uploading}
+                    onClick={() =>
+                      document
+                        .getElementById(`slot-${slotIndex}-variant-${i}-upload`)
+                        ?.click()
+                    }
+                  >
+                    {variant.uploading ? "Uploading…" : "Upload"}
+                  </Button>
+                </div>
+                {variant.uploadError && (
+                  <p className="text-xs text-red-600">{variant.uploadError}</p>
+                )}
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setSlot(slotIndex, {
+                  variants: [
+                    ...slot.variants,
+                    freshVariant(slot.variants.length)
+                  ]
+                })
+              }
+            >
+              <Plus /> Add variant
+            </Button>
+          </CardContent>
+        </Card>
+      ))}
+
+      <div className="space-y-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            setSlots(current => [
+              ...(current.length === 1 && current[0].key === "main"
+                ? [{ ...current[0], key: "hero" }]
+                : current),
+              {
+                key: `element-${current.length + 1}`,
+                variants: [freshVariant(0), freshVariant(1)]
+              }
+            ])
+          }
+        >
+          <Plus /> Test another element at the same time
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          With several elements (say a hero image AND a call-to-action) the test
+          optimizes the combination: one model learns how the elements interact,
+          which two separate tests cannot see.
+          {multiSlot && ` Currently ${combinations} combinations.`}
+        </p>
+        {combinations > MAX_CELLS && (
+          <p className="text-xs text-destructive">
+            {combinations} combinations exceeds the {MAX_CELLS} limit; use fewer
+            variants per element.
+          </p>
+        )}
+      </div>
 
       <Card>
         <CardHeader>
@@ -313,28 +423,9 @@ export function Builder() {
               onChange={e => setCtxKeys(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Optional. With context, the bandit can learn a different winner
-              per segment. Values are hashed in the visitor's browser.
+              Optional. With context, the model can learn a different winner per
+              segment. Values are hashed in the visitor's browser.
             </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="alg">Algorithm</Label>
-            <NativeSelect
-              id="alg"
-              value={alg}
-              onChange={e => setAlg(e.target.value as typeof alg)}
-            >
-              <option value="auto">Auto ({recommendation.alg})</option>
-              <option value="ts">Thompson sampling</option>
-              <option value="bucketed">Bucketed Thompson</option>
-              <option value="linear">Linear Thompson (contextual)</option>
-            </NativeSelect>
-            {alg === "auto" && (
-              <p className="flex items-start gap-1 text-xs text-muted-foreground">
-                <Wand2 className="mt-0.5 size-3 shrink-0" />
-                {recommendation.reasoning}
-              </p>
-            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="redirect">Click redirect URL (optional)</Label>
