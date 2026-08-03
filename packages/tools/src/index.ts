@@ -5,7 +5,6 @@ export {
   generatePriors,
   getStats,
   inspectTest,
-  recommendAlgorithmTool,
   uploadImage,
   variantBrief,
   type ToolName

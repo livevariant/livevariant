@@ -2,16 +2,19 @@ import { z } from "zod";
 import {
   analyzeOutcomes,
   buildTestUrls,
-  capArmPriors,
+  cellCount,
   encodeConfig,
   generateStatsSecret,
   hashStatsSecret,
-  recommendAlgorithm,
+  slotEntries,
+  slotSizes,
   testConfigSchema,
+  variantName,
   AUTO_SIGNALS,
   CONFIG_SOFT_LIMIT,
-  SIGNAL_CARDINALITY,
-  type TestConfigInput
+  TEST_REGIONS,
+  type TestConfigInput,
+  type Variant
 } from "@livevariant/core";
 import { resolveTest, resolveVariantIndex } from "./resolve.js";
 import { defineTool, ToolInputError, type ToolContext } from "./types.js";
@@ -24,7 +27,9 @@ import { defineTool, ToolInputError, type ToolContext } from "./types.js";
  * The shape of the product decides the shape of these tools. A test is its
  * config, so "create a test" returns a URL rather than writing a row, and
  * every tool that reads a test takes one as an argument. Nothing here has
- * a session, an account or an id to remember.
+ * a session, an account or an id to remember. And there is no algorithm
+ * anywhere in this surface: every test runs the same joint model, sized
+ * from the config, so the tools ask what to test and never how.
  */
 
 const signalEnum = z.enum(AUTO_SIGNALS);
@@ -87,15 +92,26 @@ const variantInput = z.object({
     .describe("Where a click on this variant lands, if it differs per variant.")
 });
 
-/** The formats block, dropping the keys the caller left out. */
-function formatsOf(v: z.infer<typeof variantInput>) {
+const SLOT_KEY_INPUT = /^[a-z][a-z0-9_-]{0,31}$/;
+
+/** The v2 variant object, dropping the keys the caller left out. */
+function toVariant(v: z.infer<typeof variantInput>, index: number) {
   return {
+    name: v.name?.trim() || `v${index + 1}`,
     ...(v.url ? { url: v.url } : {}),
     ...(v.image ? { image: v.image } : {}),
     ...(v.html ? { html: v.html } : {}),
     ...(v.markdown ? { md: v.markdown } : {}),
-    ...(v.text ? { text: v.text } : {})
+    ...(v.text ? { text: v.text } : {}),
+    ...(v.redirectUrl ? { redirectUrl: v.redirectUrl } : {})
   };
+}
+
+/** Format names a stored variant carries, for inspection output. */
+function formatsOf(variant: Variant): string[] {
+  return (["url", "image", "html", "md", "text"] as const).filter(
+    key => variant[key] !== undefined
+  );
 }
 
 /** Where the dashboard and every credentialed call live. */
@@ -117,10 +133,15 @@ export const buildTest = defineTool({
   name: "build_test",
   title: "Build a test",
   summary:
-    "Turn variants into a ready-to-use test: URLs, stats secret, algorithm",
+    "Turn variants (one element or several) into a ready-to-use test with URLs",
   description:
-    "Creates a LiveVariant A/B test from a set of variants and returns every " +
-    "URL needed to run it, plus a freshly generated stats secret.\n\n" +
+    "Creates a LiveVariant test and returns every URL needed to run it, plus " +
+    "a freshly generated stats secret.\n\n" +
+    "Pass `variants` to test one element, or `slots` to test several at once " +
+    "(hero image AND call-to-action, say). With slots the test optimizes the " +
+    "COMBINATION: one model learns how the elements interact, which two " +
+    "separate tests structurally cannot see. There is no algorithm to pick " +
+    "either way; every test runs the same joint model, sized from its shape.\n\n" +
     "Nothing is registered anywhere: the config IS the test, encoded into the " +
     "URLs, and the test's identity is a hash of it. That means editing a " +
     "variant later produces a DIFFERENT test with its own empty history, " +
@@ -128,63 +149,91 @@ export const buildTest = defineTool({
     "to whoever you are building this for.\n\n" +
     "The stats secret is returned once and never again. Only its hash goes " +
     "into the config, so nobody, including this service, can recover it. Give " +
-    "it to the person who will read the results.\n\n" +
-    "Leave `algorithm` unset to have one chosen from the context and traffic " +
-    "you describe.",
+    "it to the person who will read the results.",
   readOnly: true,
   reachesNetwork: false,
-  input: z.object({
-    variants: z
-      .array(variantInput)
-      .min(2)
-      .max(50)
-      .describe("Two or more. The first is the control."),
-    name: z
-      .string()
-      .min(1)
-      .optional()
-      .describe("A label for your own reference."),
-    algorithm: z
-      .enum(["ts", "bucketed", "linear"])
-      .optional()
-      .describe("Omit to have one recommended from the context and traffic."),
-    context: z
-      .array(contextDim)
-      .max(8)
-      .optional()
-      .describe("Dimensions to learn a separate winner for."),
-    expectedTraffic: z
-      .number()
-      .positive()
-      .optional()
-      .describe(
-        "Rough visitors over the test's life. Only used to pick an algorithm."
-      ),
-    redirectUrl: z
-      .string()
-      .url()
-      .optional()
-      .describe("Where clicks land when a variant does not say."),
-    variantParam: z
-      .string()
-      .min(1)
-      .max(32)
-      .optional()
-      .describe(
-        "Stamp the served variant into this parameter on redirect, e.g. " +
-          '"utm_content", so the test shows up in the customer\'s own analytics.'
-      ),
-    serverUrl: z
-      .string()
-      .url()
-      .optional()
-      .describe("Self-hosted deployments only.")
-  }),
+  input: z
+    .object({
+      variants: z
+        .array(variantInput)
+        .min(2)
+        .max(64)
+        .optional()
+        .describe(
+          "Single-element test: two or more variants. The first is the control."
+        ),
+      slots: z
+        .record(
+          z.string().regex(SLOT_KEY_INPUT),
+          z.array(variantInput).min(1).max(64)
+        )
+        .optional()
+        .describe(
+          "Multi-element test: variants per element, keyed by a short name " +
+            'like "hero" or "cta". The test serves and learns combinations.'
+        ),
+      name: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("A label for your own reference."),
+      context: z
+        .array(contextDim)
+        .max(8)
+        .optional()
+        .describe("Dimensions to learn a separate winner for."),
+      redirectUrl: z
+        .string()
+        .url()
+        .optional()
+        .describe("Where clicks land when a variant does not say."),
+      variantParam: z
+        .string()
+        .min(1)
+        .max(32)
+        .optional()
+        .describe(
+          "Stamp the served combination into this parameter on redirect, e.g. " +
+            '"utm_content", so the test shows up in the customer\'s own analytics.'
+        ),
+      region: z
+        .enum(TEST_REGIONS)
+        .optional()
+        .describe(
+          "Where the test's state lives. A placement hint (wnam, enam, sam, " +
+            'weur, eeur, apac, oc, afr, me) or "eu" for the EU jurisdiction ' +
+            "(state guaranteed created and kept inside the EU). Defaults to " +
+            "the creator's own region when the host can tell; without any, " +
+            "state is born wherever the FIRST request comes from, which in " +
+            "email is routinely a mail provider's US datacenter."
+        ),
+      serverUrl: z
+        .string()
+        .url()
+        .optional()
+        .describe("Self-hosted deployments only.")
+    })
+    .refine(input => Boolean(input.variants) !== Boolean(input.slots), {
+      message: "pass exactly one of `variants` (one element) or `slots`"
+    }),
   output: z.object({
     testId: z.string(),
     config: z.string().describe("The encoded config: this is the test."),
     statsSecret: z.string().describe("Shown once. Store it now."),
-    algorithm: z.object({ chosen: z.string(), reasoning: z.string() }),
+    slots: z
+      .array(z.object({ slot: z.string(), variants: z.array(z.string()) }))
+      .describe(
+        "Canonical slot order with variant names, as stats reports them."
+      ),
+    combinations: z
+      .number()
+      .describe("How many distinct combinations the test chooses between."),
+    region: z
+      .string()
+      .nullable()
+      .describe(
+        "Where the test's state will live; null means first-request placement."
+      ),
     urls: z.object({
       serve: z.string(),
       click: z.string(),
@@ -194,43 +243,44 @@ export const buildTest = defineTool({
       clickNoAutoContext: z.string()
     }),
     emailTemplate: z
-      .object({ imageSrc: z.string(), linkHref: z.string() })
+      .record(
+        z.string(),
+        z.object({ imageSrc: z.string(), linkHref: z.string() })
+      )
       .describe(
-        "Query-parameter spelling for an ESP template: wire it once, then " +
-          "campaign managers fill only the variant fields."
+        "Query-parameter spelling per slot for an ESP template: wire it " +
+          "once, then campaign managers fill only the variant fields. " +
+          "Multi-slot links carry &slot= to say which element each serves."
       ),
     warnings: z.array(z.string())
   }),
   async handler(input, context) {
     const statsSecret = generateStatsSecret();
-    const recommendation = recommendAlgorithm({
-      ctxDims: input.context ?? [],
-      expectedTraffic: input.expectedTraffic
-    });
-    const algorithm = input.algorithm ?? recommendation.alg;
-    const reasoning = input.algorithm
-      ? `You chose ${input.algorithm}. (Unprompted, the recommendation would ` +
-        `have been ${recommendation.alg}: ${recommendation.reasoning})`
-      : recommendation.reasoning;
+    const slotsInput = input.slots ?? { main: input.variants! };
 
     const configInput: TestConfigInput = {
-      v: 1,
-      arms: input.variants.map((variant, i) => ({
-        name: variant.name?.trim() || `v${i + 1}`,
-        formats: formatsOf(variant),
-        ...(variant.redirectUrl ? { redirectUrl: variant.redirectUrl } : {})
-      })),
-      alg: algorithm,
+      v: 2,
+      slots: Object.fromEntries(
+        Object.entries(slotsInput).map(([key, variants]) => [
+          key,
+          variants.map(toVariant)
+        ])
+      ),
       ...(input.name ? { name: input.name } : {}),
       ...(input.context?.length ? { ctx: { dims: input.context } } : {}),
       ...(input.redirectUrl ? { redirectUrl: input.redirectUrl } : {}),
       ...(input.variantParam ? { variantParam: input.variantParam } : {}),
+      ...((input.region ?? context.region)
+        ? { region: input.region ?? context.region }
+        : {}),
       statsKeyHash: await hashStatsSecret(statsSecret)
     };
 
+    let parsed: ReturnType<typeof testConfigSchema.parse>;
     let encoded: Awaited<ReturnType<typeof encodeConfig>>;
     try {
-      encoded = await encodeConfig(configInput);
+      parsed = testConfigSchema.parse(configInput);
+      encoded = await encodeConfig(parsed);
     } catch (err) {
       throw new ToolInputError(
         err instanceof Error ? err.message : "that test will not encode"
@@ -245,31 +295,73 @@ export const buildTest = defineTool({
       statsSecret,
       manageOrigin
     );
+
+    const entries = slotEntries(parsed);
+    const multiSlot = entries.length > 1;
     const warnings = [...encoded.warnings];
-    const inlineOnly = input.variants.filter(v => !v.url && !v.image);
-    if (inlineOnly.length > 0 && inlineOnly.length < input.variants.length) {
-      warnings.push(
-        "Some variants have no url/image, so this test cannot be served by " +
-          "redirect (email) at all: those URLs will 400. Give every variant a " +
-          "url or image, or use it through the SDK only."
-      );
-    }
-    for (const dim of input.context ?? []) {
-      const size = dim.from ? SIGNAL_CARDINALITY[dim.from] : undefined;
-      if (size !== undefined && size > 1000 && algorithm === "bucketed") {
+    for (const [key, variants] of entries) {
+      const inlineOnly = variants.filter(v => !v.url && !v.image);
+      if (inlineOnly.length > 0) {
         warnings.push(
-          `Context "${dim.key}" comes from ${dim.from}, which has on the order ` +
-            `of ${size} distinct values. Bucketed learning will starve at that ` +
-            `width; linear generalizes across contexts instead.`
+          `Slot "${key}" has ${inlineOnly.length} variant(s) with no url/image, ` +
+            "so that slot cannot be served by redirect (email); its serve " +
+            "link will 400. Give every variant a url or image, or serve the " +
+            "slot through the SDK only."
         );
       }
     }
+    const cells = cellCount(slotSizes(parsed));
+    if (multiSlot && cells > 32) {
+      warnings.push(
+        `${cells} combinations. The model shares what it learns across them ` +
+          "(variant effects and pairwise interactions), so this is workable, " +
+          "but calling an exact winning combination still needs traffic in " +
+          "rough proportion to that count."
+      );
+    }
+
+    // ESP-template spelling. Every link carries the whole test (all
+    // slots), and in a multi-slot test each link adds &slot= to say which
+    // element it renders.
+    const templateBase = entries
+      .map(
+        ([key, variants]) =>
+          (multiSlot ? `s=${key}&` : "") +
+          variants
+            .map(
+              (_, i) =>
+                `v={{${multiSlot ? `${key}_` : ""}variant_${i + 1}_url}}`
+            )
+            .join("&")
+      )
+      .join("&");
+    const templateTail = `&auto=0&id={{recipient_id}}&kh=${configInput.statsKeyHash}`;
+    const emailTemplate = Object.fromEntries(
+      entries.map(([key]) => [
+        key,
+        {
+          imageSrc:
+            `${serveOrigin}/s?${templateBase}` +
+            (multiSlot ? `&slot=${key}` : "") +
+            templateTail,
+          linkHref:
+            `${serveOrigin}/c?${templateBase}` +
+            (multiSlot ? `&slot=${key}` : "") +
+            `&r={{landing_url}}${templateTail}`
+        }
+      ])
+    );
 
     return {
       testId: encoded.testId,
       config: encoded.encoded,
       statsSecret,
-      algorithm: { chosen: algorithm, reasoning },
+      slots: entries.map(([slot, variants]) => ({
+        slot,
+        variants: variants.map((v, i) => variantName(v, i))
+      })),
+      combinations: cells,
+      region: parsed.region ?? null,
       urls: {
         serve: urls.serve,
         click: urls.click,
@@ -278,14 +370,7 @@ export const buildTest = defineTool({
         serveNoAutoContext: urls.noAuto.serve,
         clickNoAutoContext: urls.noAuto.click
       },
-      emailTemplate: {
-        imageSrc:
-          `${serveOrigin}/s?${input.variants.map((_, i) => `v={{variant_${i + 1}_url}}`).join("&")}` +
-          `&auto=0&id={{recipient_id}}&kh=${configInput.statsKeyHash}`,
-        linkHref:
-          `${serveOrigin}/c?${input.variants.map((_, i) => `v={{variant_${i + 1}_url}}`).join("&")}` +
-          `&r={{landing_url}}&auto=0&id={{recipient_id}}&kh=${configInput.statsKeyHash}`
-      },
+      emailTemplate,
       warnings
     };
   }
@@ -299,11 +384,10 @@ export const inspectTest = defineTool({
   summary:
     "Decode any test URL and report what it will actually do, with warnings",
   description:
-    "Decodes a test and describes it: variants, algorithm, context, and " +
-    "whether it can be served by redirect. Also lints it for the mistakes " +
-    "that only show up once a campaign is out, such as an email test whose " +
-    "context comes from geo (which a mail proxy answers about itself) or a " +
-    "bucketed test with far more buckets than traffic.\n\n" +
+    "Decodes a test and describes it: slots, variants, context, and whether " +
+    "it can be served by redirect. Also lints it for the mistakes that only " +
+    "show up once a campaign is out, such as an email test whose context " +
+    "comes from geo (which a mail proxy answers about itself).\n\n" +
     "Use this before sending anything, and to answer 'what is this link?'.",
   readOnly: true,
   reachesNetwork: false,
@@ -311,14 +395,20 @@ export const inspectTest = defineTool({
   output: z.object({
     testId: z.string(),
     name: z.string().optional(),
-    algorithm: z.string(),
-    variants: z.array(
+    slots: z.array(
       z.object({
-        name: z.string(),
-        formats: z.array(z.string()),
-        servesByRedirect: z.boolean()
+        slot: z.string(),
+        variants: z.array(
+          z.object({
+            name: z.string(),
+            formats: z.array(z.string()),
+            servesByRedirect: z.boolean()
+          })
+        )
       })
     ),
+    combinations: z.number(),
+    region: z.string().nullable(),
     context: z.array(
       z.object({
         key: z.string(),
@@ -343,19 +433,36 @@ export const inspectTest = defineTool({
       message: string;
     }> = [];
 
-    const variants = config.arms.map(arm => ({
-      name: arm.name,
-      formats: Object.keys(arm.formats),
-      servesByRedirect: Boolean(arm.formats.url ?? arm.formats.image)
+    const entries = slotEntries(config);
+    const slots = entries.map(([slot, variants]) => ({
+      slot,
+      variants: variants.map((variant, i) => ({
+        name: variantName(variant, i),
+        formats: formatsOf(variant),
+        servesByRedirect: Boolean(variant.url ?? variant.image)
+      }))
     }));
-    if (variants.some(v => !v.servesByRedirect)) {
+    for (const slot of slots) {
+      if (slot.variants.some(v => !v.servesByRedirect)) {
+        findings.push({
+          level: "error",
+          message:
+            `Slot "${slot.slot}" has a variant with no url or image, so its ` +
+            "serve link will return 400 for everyone, not just for that " +
+            "variant. Redirect serving checks every variant of the served " +
+            "slot up front so a visitor can never be stuck on one that " +
+            "cannot be shown."
+        });
+      }
+    }
+    if (entries.length > 1) {
       findings.push({
-        level: "error",
+        level: "note",
         message:
-          "At least one variant has no url or image, so the serve URL will " +
-          "return 400 for everyone, not just for that variant. Redirect " +
-          "serving checks every variant up front so a visitor can never be " +
-          "stuck on one that cannot be shown."
+          "Multi-slot test: each redirect link must say which element it " +
+          `serves with ?slot= (one of: ${entries.map(([key]) => key).join(", ")}). ` +
+          "All links share one sticky whole-combination assignment per " +
+          "recipient."
       });
     }
     if (!config.statsKeyHash) {
@@ -369,22 +476,6 @@ export const inspectTest = defineTool({
     }
 
     const dims = config.ctx?.dims ?? [];
-    const buckets = dims.reduce(
-      (product, dim) =>
-        product *
-        (dim.values?.length ?? (dim.from ? SIGNAL_CARDINALITY[dim.from] : 8)),
-      1
-    );
-    if (config.alg === "bucketed" && buckets > 50) {
-      findings.push({
-        level: "warning",
-        message:
-          `Roughly ${buckets} context combinations on a bucketed test. Each ` +
-          "bucket learns alone and falls back to the global model until it " +
-          "has its own traffic, so this will mostly serve the global winner. " +
-          "linear shares what it learns across contexts."
-      });
-    }
     const networkDims = dims.filter(d => d.from && !d.from.startsWith("utm_"));
     if (networkDims.length > 0) {
       findings.push({
@@ -397,18 +488,13 @@ export const inspectTest = defineTool({
           "the link and survive intact."
       });
     }
-    if (config.alg !== "ts" && dims.length === 0) {
-      findings.push({
-        level: "error",
-        message: `Algorithm ${config.alg} needs context dimensions and has none.`
-      });
-    }
 
     return {
       testId,
       ...(config.name ? { name: config.name } : {}),
-      algorithm: config.alg,
-      variants,
+      slots,
+      combinations: cellCount(slotSizes(config)),
+      region: config.region ?? null,
       context: dims.map(d => ({
         key: d.key,
         ...(d.from ? { from: d.from } : {}),
@@ -422,63 +508,15 @@ export const inspectTest = defineTool({
 
 // ---------------------------------------------------------------------------
 
-export const recommendAlgorithmTool = defineTool({
-  name: "recommend_algorithm",
-  title: "Recommend an algorithm",
-  summary:
-    "Pick ts / bucketed / linear from the context and traffic, with reasoning",
-  description:
-    "Chooses between plain Thompson sampling, per-bucket Thompson sampling " +
-    "and a linear contextual bandit for a test you are planning, and explains " +
-    "why. The trade-off is always the same one: per-bucket learning is " +
-    "assumption-free but needs enough traffic in every bucket, and linear " +
-    "generalizes across contexts at the cost of assuming they combine " +
-    "additively.\n\n" +
-    "Algorithm is outside a test's identity hash, so this is never a " +
-    "permanent decision: changing it later keeps the test's id and its whole " +
-    "event history, and a recompute rebuilds the model.",
-  readOnly: true,
-  reachesNetwork: false,
-  input: z.object({
-    context: z.array(contextDim).max(8).optional(),
-    expectedTraffic: z.number().positive().optional()
-  }),
-  output: z.object({
-    algorithm: z.enum(["ts", "bucketed", "linear"]),
-    reasoning: z.string(),
-    estimatedBuckets: z.number()
-  }),
-  async handler(input) {
-    const dims = input.context ?? [];
-    const result = recommendAlgorithm({
-      ctxDims: dims,
-      expectedTraffic: input.expectedTraffic
-    });
-    const estimatedBuckets = dims.reduce(
-      (product, dim) =>
-        product *
-        (dim.values?.length ?? (dim.from ? SIGNAL_CARDINALITY[dim.from] : 8)),
-      1
-    );
-    return {
-      algorithm: result.alg,
-      reasoning: result.reasoning,
-      estimatedBuckets
-    };
-  }
-});
-
-// ---------------------------------------------------------------------------
-
 const CONFIDENCE_STRENGTH = { low: 5, medium: 15, high: 30 } as const;
 
 export const generatePriors = defineTool({
   name: "generate_priors",
   title: "Add warm-start priors",
-  summary: "Turn your predictions into capped pseudo-counts and embed them",
+  summary: "Turn your predictions into capped priors and embed them",
   description:
     "Takes YOUR estimate of how each variant will perform and converts it " +
-    "into the prior the bandit starts from, so a test does not spend its " +
+    "into the prior the model starts from, so a test does not spend its " +
     "first visitors rediscovering what you already suspect.\n\n" +
     "You supply the guess; this does the arithmetic and the capping. That " +
     "capping is the point: a prior is expressed as pseudo-observations, and " +
@@ -495,9 +533,15 @@ export const generatePriors = defineTool({
     beliefs: z
       .array(
         z.object({
+          slot: z
+            .string()
+            .optional()
+            .describe(
+              "Which slot the variant belongs to. Optional for single-slot tests."
+            ),
           variant: z
             .union([z.string(), z.number().int()])
-            .describe("Variant name or index."),
+            .describe("Variant name or index within its slot."),
           rate: z
             .number()
             .min(0)
@@ -520,7 +564,12 @@ export const generatePriors = defineTool({
     config: z.string(),
     manageUrl: z.string(),
     priors: z.array(
-      z.object({ variant: z.string(), alpha: z.number(), beta: z.number() })
+      z.object({
+        slot: z.string(),
+        variant: z.string(),
+        mean: z.number(),
+        strength: z.number()
+      })
     ),
     washesOutAfter: z
       .number()
@@ -531,17 +580,46 @@ export const generatePriors = defineTool({
   }),
   async handler(input, context) {
     const { config, testId } = await resolveTest(input.test);
-    const names = config.arms.map(arm => arm.name);
+    const entries = slotEntries(config);
     const strength =
       typeof input.confidence === "number"
         ? input.confidence
         : CONFIDENCE_STRENGTH[input.confidence];
+    const capped = Math.min(strength, config.priorStrengthCap);
 
-    // Start from the uniform prior and only move the variants named, so a
-    // partial belief ("B will beat A") does not silently reset the rest.
-    const arms = config.arms.map(() => ({ alpha: 1, beta: 1 }));
+    // Start from no prior and only move the variants named, so a partial
+    // belief ("B will beat A") does not silently claim the rest.
+    const priors: Record<
+      string,
+      Array<{ mean: number; strength: number }>
+    > = Object.fromEntries(
+      entries.map(([key, variants]) => [
+        key,
+        variants.map(() => ({ mean: 0.5, strength: 0 }))
+      ])
+    );
     const notes: string[] = [];
+
     for (const belief of input.beliefs) {
+      const slotKey =
+        belief.slot ??
+        (entries.length === 1
+          ? entries[0][0]
+          : (() => {
+              throw new ToolInputError(
+                `multi-slot test: say which slot each belief is about ` +
+                  `(one of: ${entries.map(([key]) => key).join(", ")})`
+              );
+            })());
+      const entry = entries.find(([key]) => key === slotKey);
+      if (!entry) {
+        throw new ToolInputError(
+          `no slot called "${slotKey}"; this test has ${entries
+            .map(([key]) => key)
+            .join(", ")}`
+        );
+      }
+      const names = entry[1].map((v, i) => variantName(v, i));
       const index = resolveVariantIndex(names, belief.variant);
       // Clamped: a stated 0 or 1 is a claim of certainty that no amount of
       // contrary evidence could ever be, which is never what is meant.
@@ -552,33 +630,31 @@ export const generatePriors = defineTool({
             `${belief.rate} asserts certainty and would resist any evidence.`
         );
       }
-      arms[index] = { alpha: rate * strength, beta: (1 - rate) * strength };
+      priors[slotKey][index] = { mean: rate, strength };
     }
-    const unnamed = names.filter(
-      (_, i) =>
-        !input.beliefs.some(b => resolveVariantIndex(names, b.variant) === i)
+
+    const unnamed = entries.flatMap(([key, variants]) =>
+      variants
+        .map((v, i) => ({ key, name: variantName(v, i), index: i }))
+        .filter(({ index }) => priors[key][index].strength === 0)
+        .map(({ name }) => name)
     );
     if (unnamed.length > 0) {
       notes.push(
-        `No belief given for ${unnamed.join(", ")}, so they keep the uniform ` +
+        `No belief given for ${unnamed.join(", ")}, so they start without a ` +
           "prior. That makes them look neither good nor bad, which is the " +
           "honest default, but it does mean the ones you did rate start ahead."
       );
     }
-
-    const capped = capArmPriors(arms, config.priorStrengthCap);
-    if (capped.some((p, i) => p.alpha !== arms[i].alpha)) {
+    if (capped < strength) {
       notes.push(
-        `Priors were scaled down to this test's cap of ${config.priorStrengthCap} ` +
+        `Priors were capped to this test's limit of ${config.priorStrengthCap} ` +
           "pseudo-observations per variant, which is the safeguard against a " +
           "confident guess outvoting real traffic."
       );
     }
 
-    const next = testConfigSchema.parse({
-      ...config,
-      priors: { ...config.priors, arms: capped }
-    });
+    const next = testConfigSchema.parse({ ...config, priors });
     const encoded = await encodeConfig(next);
     if (encoded.testId !== testId) {
       // Cannot happen: priors are identity-excluded. Loud if it ever does,
@@ -592,12 +668,17 @@ export const generatePriors = defineTool({
       testId: encoded.testId,
       config: encoded.encoded,
       manageUrl: `${origin}/manage/${encoded.encoded}`,
-      priors: capped.map((p, i) => ({
-        variant: names[i],
-        alpha: p.alpha,
-        beta: p.beta
-      })),
-      washesOutAfter: Math.round(Math.min(strength, config.priorStrengthCap)),
+      priors: entries.flatMap(([key, variants]) =>
+        priors[key]
+          .map((prior, i) => ({
+            slot: key,
+            variant: variantName(variants[i], i),
+            mean: prior.mean,
+            strength: Math.min(prior.strength, config.priorStrengthCap)
+          }))
+          .filter(prior => prior.strength > 0)
+      ),
+      washesOutAfter: Math.round(capped),
       notes
     };
   }
@@ -611,12 +692,14 @@ export const getStats = defineTool({
   summary: "Live results plus win probabilities and a stop/continue call",
   description:
     "Fetches a test's results and works out what they mean.\n\n" +
-    "Alongside the raw counts it returns the probability that each variant " +
-    "is genuinely best and the expected cost of stopping now and keeping the " +
-    "leader. Use those rather than comparing conversion rates by eye: a " +
-    "variant ahead 2/10 to 1/10 looks twice as good and is very close to a " +
-    "coin flip, and that mistake is the single most common way an A/B test " +
-    "gets called wrong.\n\n" +
+    "Alongside the raw counts it returns the probability that each " +
+    "combination is genuinely best and the expected cost of stopping now " +
+    "and keeping the leader. Use those rather than comparing conversion " +
+    "rates by eye: a variant ahead 2/10 to 1/10 looks twice as good and is " +
+    "very close to a coin flip, and that mistake is the single most common " +
+    "way an A/B test gets called wrong.\n\n" +
+    "Multi-slot tests also report per-slot marginals: how each variant did " +
+    "across every combination it appeared in.\n\n" +
     "Needs the stats secret. If you have the manage URL, its #fragment IS the " +
     "secret and it will be used automatically.",
   readOnly: true,
@@ -632,16 +715,26 @@ export const getStats = defineTool({
   }),
   output: z.object({
     testId: z.string(),
-    algorithm: z.string(),
     totalAssignments: z.number(),
-    variants: z.array(
+    combinations: z.array(
       z.object({
-        name: z.string(),
+        choice: z.array(z.string()),
         pulls: z.number(),
         conversions: z.number(),
         conversionRate: z.number().nullable(),
         probabilityBest: z.number()
       })
+    ),
+    slots: z.record(
+      z.string(),
+      z.array(
+        z.object({
+          name: z.string(),
+          pulls: z.number(),
+          conversions: z.number(),
+          conversionRate: z.number().nullable()
+        })
+      )
     ),
     decision: z.object({
       leader: z.string(),
@@ -658,9 +751,6 @@ export const getStats = defineTool({
         z.object({ pulls: z.number(), conversions: z.number() })
       )
     ),
-    algorithmSuggestion: z
-      .object({ alg: z.string(), reasoning: z.string() })
-      .nullable(),
     excluded: z.object({
       total: z.number(),
       bySource: z.number(),
@@ -715,44 +805,52 @@ export const getStats = defineTool({
     }
     const stats = (await response.json()) as {
       testId: string;
-      alg: string;
       totalAssignments: number;
-      arms: Array<{
-        name?: string;
+      combinations: Array<{
+        cell: number;
+        choice: string[];
         pulls: number;
         conversions: number;
         conversionRate: number | null;
       }>;
+      slots: Record<
+        string,
+        Array<{
+          name: string;
+          pulls: number;
+          conversions: number;
+          conversionRate: number | null;
+        }>
+      >;
       buckets: Record<string, unknown>;
       bySignal: Record<
         string,
         Record<string, { pulls: number; conversions: number }>
       >;
-      suggestion: { alg: string; reasoning: string } | null;
       excluded: { total: number; bySource: number; byWindow: number };
     };
 
     const analysis = analyzeOutcomes(
-      stats.arms.map(arm => ({
-        pulls: arm.pulls,
-        conversions: arm.conversions
+      stats.combinations.map(combo => ({
+        pulls: combo.pulls,
+        conversions: combo.conversions
       }))
     );
-    const names = stats.arms.map((arm, i) => arm.name ?? `v${i + 1}`);
+    const names = stats.combinations.map(combo => combo.choice.join(" + "));
     const leader = names[analysis.leader] ?? "none";
     const advice = adviceFor(stats.totalAssignments, analysis, leader);
 
     return {
       testId: stats.testId,
-      algorithm: stats.alg,
       totalAssignments: stats.totalAssignments,
-      variants: stats.arms.map((arm, i) => ({
-        name: names[i],
-        pulls: arm.pulls,
-        conversions: arm.conversions,
-        conversionRate: arm.conversionRate,
+      combinations: stats.combinations.map((combo, i) => ({
+        choice: combo.choice,
+        pulls: combo.pulls,
+        conversions: combo.conversions,
+        conversionRate: combo.conversionRate,
         probabilityBest: analysis.probabilities[i] ?? 0
       })),
+      slots: stats.slots,
       decision: {
         leader,
         canStop: analysis.canStop,
@@ -762,7 +860,6 @@ export const getStats = defineTool({
       },
       contextBuckets: Object.keys(stats.buckets).length,
       bySignal: stats.bySignal,
-      algorithmSuggestion: stats.suggestion,
       excluded: stats.excluded
     };
   }
@@ -780,7 +877,7 @@ function adviceFor(
     return (
       `${leader} is the winner: keeping it now risks about ` +
       `${(analysis.expectedLoss * 100).toFixed(2)} conversion-rate points, ` +
-      "which is within the usual 1% threshold. Note the bandit has already " +
+      "which is within the usual 1% threshold. Note the model has already " +
       "been shifting traffic toward it the whole time, so there is no rush " +
       "to act on this."
     );
@@ -791,7 +888,7 @@ function adviceFor(
     "of being best, and stopping now would risk about " +
     `${(analysis.expectedLoss * 100).toFixed(2)} conversion-rate points. ` +
     "Letting it run costs little, because traffic is already being weighted " +
-    "toward whichever variant is ahead."
+    "toward whichever combination is ahead."
   );
 }
 
@@ -806,10 +903,11 @@ export const variantBrief = defineTool({
     "Returns the constraints to write or generate test variants against, for " +
     "email or web, plus the rules that decide whether a test can be read at " +
     "all once it runs.\n\n" +
-    "The one that matters most: change one thing at a time, or accept that " +
-    "the result tells you the bundle won and not which part of it did. Ask " +
-    "for this before drafting variants, then produce them yourself against " +
-    "what it returns.",
+    "The one that matters most: one idea per slot. To vary two elements, " +
+    "give the test two slots and let it learn the combination, rather than " +
+    "bundling both changes into one variant and never learning which half " +
+    "worked. Ask for this before drafting variants, then produce them " +
+    "yourself against what it returns.",
   readOnly: true,
   reachesNetwork: false,
   input: z.object({
@@ -873,18 +971,20 @@ export const variantBrief = defineTool({
         `Produce ${input.count} variants. The first is the control: it should ` +
           "be what you run today, so the test measures a change rather than " +
           "two guesses against each other.",
-        "Change one thing at a time. If you vary headline and image together, " +
-          "a win tells you the pair beat the pair, not which half did it.",
+        "One idea per slot. To vary the headline AND the image, build the " +
+          "test with two slots (build_test's `slots` input): the model " +
+          "learns which combination wins, where a bundled variant only ever " +
+          "tells you the bundle did.",
         "Make them genuinely different. Two paraphrases of one sentence need " +
           "enormous traffic to separate, and usually just cost you the time.",
-        "Do not write a variant you would be unwilling to ship: a bandit sends " +
-          "real traffic to all of them while it learns.",
+        "Do not write a variant you would be unwilling to ship: the model " +
+          "sends real traffic to all of them while it learns.",
         ...(input.audience ? [`Write for: ${input.audience}.`] : [])
       ],
       hosting:
         input.format === "image" || input.format === "url"
-          ? "Host the assets yourself and pass the public URLs as variants. " +
-            "Nothing is uploaded here: the config only ever holds URLs."
+          ? "Host the assets yourself and pass the public URLs as variants, " +
+            "or use upload_image on a deployment with asset hosting."
           : "Inline content travels inside the config, so keep it short. " +
             "Anything substantial should be a hosted URL instead.",
       nextStep:
@@ -1016,7 +1116,6 @@ export const uploadImage = defineTool({
 export const TOOLS = [
   buildTest,
   inspectTest,
-  recommendAlgorithmTool,
   generatePriors,
   getStats,
   uploadImage,

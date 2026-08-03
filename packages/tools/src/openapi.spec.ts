@@ -28,8 +28,10 @@ describe("buildOpenApiDocument", () => {
     const build = paths["/api/v1/build-test"].post;
     const schema = build.requestBody.content["application/json"].schema;
     expect(schema.type).toBe("object");
-    expect(schema.required).toContain("variants");
+    // Neither spelling is individually required (exactly one of the two).
+    expect(schema.required ?? []).not.toContain("variants");
     expect(schema.properties.variants.type).toBe("array");
+    expect(schema.properties.slots.type).toBe("object");
     // Field descriptions have to survive: they are how a caller learns
     // what a variant may contain without reading our source.
     expect(schema.properties.variants.items.properties.url.description).toMatch(

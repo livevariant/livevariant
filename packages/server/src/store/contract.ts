@@ -3,7 +3,7 @@ import type { AssignmentRecord } from "@livevariant/core";
 import {
   counterKey,
   GLOBAL_SCOPE,
-  linearKey,
+  modelKey,
   type StateStore
 } from "./types.js";
 
@@ -49,18 +49,17 @@ export function storeContract(
   }
 
   function rec(
-    armIndex: number,
+    cell: number,
     extra?: Partial<AssignmentRecord>
   ): AssignmentRecord {
     return {
-      armIndex,
-      ctxKey: null,
+      cell,
+      slotSizes: [3],
+      dim: 16,
       featIdx: [0],
+      ctxKey: null,
       rewardTotal: 0,
       firstSeen: 1700000000000,
-      alg: "ts",
-      armCount: 3,
-      dim: 16,
       ...extra
     };
   }
@@ -73,8 +72,8 @@ export function storeContract(
       expect(first.created).toBe(true);
       const second = await store.putAssignmentIfAbsent(testId, "id1", rec(1));
       expect(second.created).toBe(false);
-      expect(second.rec.armIndex).toBe(0);
-      expect((await store.getAssignment(testId, "id1"))?.armIndex).toBe(0);
+      expect(second.rec.cell).toBe(0);
+      expect((await store.getAssignment(testId, "id1"))?.cell).toBe(0);
     });
 
     it("resolves same-id races to exactly one winner", async () => {
@@ -89,9 +88,9 @@ export function storeContract(
         )
       );
       expect(results.filter(r => r.created)).toHaveLength(1);
-      const winner = results.find(r => r.created)?.rec.armIndex;
+      const winner = results.find(r => r.created)?.rec.cell;
       for (const r of results) {
-        expect(r.rec.armIndex).toBe(winner);
+        expect(r.rec.cell).toBe(winner);
       }
     });
 
@@ -109,7 +108,7 @@ export function storeContract(
       expect(a?.first).toBe(true);
       expect(b?.first).toBe(false);
       expect(b?.rec.rewardTotal).toBeCloseTo(3.5);
-      expect(b?.rec.armIndex).toBe(2);
+      expect(b?.rec.cell).toBe(2);
     });
 
     it("loses no rewards under concurrency, and firsts exactly one", async () => {
@@ -138,7 +137,7 @@ export function storeContract(
       }
       const seen: number[] = [];
       for await (const r of store.scanAssignments(testId)) {
-        seen.push(r.armIndex);
+        seen.push(r.cell);
       }
       expect(seen).toHaveLength(25);
     });
@@ -154,10 +153,10 @@ export function storeContract(
       await store.putAssignmentIfAbsent(b, "id1", rec(1));
       const seen: number[] = [];
       for await (const r of store.scanAssignments(a)) {
-        seen.push(r.armIndex);
+        seen.push(r.cell);
       }
       expect(seen).toEqual([0]);
-      expect((await store.getAssignment(b, "id1"))?.armIndex).toBe(1);
+      expect((await store.getAssignment(b, "id1"))?.cell).toBe(1);
     });
 
     it("increments counters atomically under concurrency", async () => {
@@ -181,7 +180,7 @@ export function storeContract(
 
     it("enforces compare-and-set on blobs", async () => {
       const store = await getStore();
-      const key = linearKey(freshTestId());
+      const key = modelKey(freshTestId());
       expect(await store.getBlob(key)).toBeNull();
       expect(await store.putBlob(key, "v1", 0)).toBe(true);
       expect(await store.putBlob(key, "stale", 0)).toBe(false);
@@ -196,7 +195,7 @@ export function storeContract(
       // two writers can both succeed at the same expectedVersion, one
       // observation silently vanishes into the other's overwrite.
       const store = await getStore();
-      const key = linearKey(freshTestId());
+      const key = modelKey(freshTestId());
       expect(await store.putBlob(key, "base", 0)).toBe(true);
       const version = (await store.getBlob(key))!.version;
       const wins = await Promise.all(
@@ -212,24 +211,24 @@ export function storeContract(
       const testId = freshTestId();
       const first = await store.pinShape(
         testId,
-        { armCount: 2, alg: "ts", dim: 16 },
+        { slotSizes: [2], dim: 16 },
         false
       );
-      expect(first.armCount).toBe(2);
+      expect(first.slotSizes).toEqual([2]);
       // A non-authoritative caller claiming a different shape sees the pin.
       const claimed = await store.pinShape(
         testId,
-        { armCount: 50, alg: "linear", dim: 64 },
+        { slotSizes: [5, 5], dim: 64 },
         false
       );
-      expect(claimed).toEqual({ armCount: 2, alg: "ts", dim: 16 });
+      expect(claimed).toEqual({ slotSizes: [2], dim: 16 });
       // The decoded config always wins.
       const authoritative = await store.pinShape(
         testId,
-        { armCount: 3, alg: "bucketed", dim: 16 },
+        { slotSizes: [3], dim: 16 },
         true
       );
-      expect(authoritative.armCount).toBe(3);
+      expect(authoritative.slotSizes).toEqual([3]);
     });
 
     it("agrees on one shape when first sight is contested", async () => {
@@ -240,12 +239,12 @@ export function storeContract(
       const testId = freshTestId();
       const pins = await Promise.all(
         Array.from({ length: 10 }, (_, i) =>
-          store.pinShape(testId, { armCount: 2 + i, alg: "ts", dim: 16 }, false)
+          store.pinShape(testId, { slotSizes: [2 + i], dim: 16 }, false)
         )
       );
       const settled = await store.pinShape(
         testId,
-        { armCount: 99, alg: "ts", dim: 16 },
+        { slotSizes: [99], dim: 16 },
         false
       );
       for (const pin of pins) {
@@ -276,27 +275,29 @@ export function storeContract(
       await store.incrCounters(counterKey(testId, "stalebucket"), [9, 9]);
       await store.incrCounters(counterKey(testId, GLOBAL_SCOPE), [9, 9, 9, 9]);
       await store.replaceDerived(testId, {
-        alg: "bucketed",
-        global: [
+        slotSizes: [2],
+        dim: 16,
+        cells: [
           { pulls: 3, successes: 1 },
           { pulls: 4, successes: 2 }
         ],
-        buckets: {
-          bucketA: [
-            { pulls: 1, successes: 0 },
-            { pulls: 2, successes: 1 }
-          ]
+        model: {
+          aInv: Array.from({ length: 16 }, (_, i) =>
+            Array.from({ length: 16 }, (_, j) => (i === j ? 1 : 0))
+          ),
+          b: new Array<number>(16).fill(0)
         }
       });
       expect(
         await store.getCounters(counterKey(testId, GLOBAL_SCOPE), 4)
       ).toEqual([3, 1, 4, 2]);
-      expect(await store.getCounters(counterKey(testId, "bucketA"), 4)).toEqual(
-        [1, 0, 2, 1]
-      );
       expect(
         await store.getCounters(counterKey(testId, "stalebucket"), 2)
       ).toEqual([0, 0]);
+      // The snapshot's model blob replaces whatever was stored before.
+      const blob = await store.getBlob(modelKey(testId));
+      expect(blob).not.toBeNull();
+      expect(JSON.parse(blob!.data).dim).toBe(16);
     });
   });
 }

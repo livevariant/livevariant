@@ -1,5 +1,11 @@
 import type { AssignmentRecord } from "@livevariant/core";
-import { mergePolicy } from "@livevariant/server";
+import {
+  mergePolicy,
+  type TestPolicy,
+  type TestShape
+} from "@livevariant/server";
+
+export type { TestPolicy, TestShape };
 
 /**
  * The per-test state logic that runs INSIDE the Durable Object, written
@@ -28,18 +34,6 @@ const SHAPE_KEY = "shape";
 const POLICY_KEY = "policy";
 /** Cloudflare caps a single storage delete() at 128 keys. */
 const DELETE_BATCH = 128;
-
-export interface TestShape {
-  armCount: number;
-  alg: "ts" | "bucketed" | "linear";
-  dim: number;
-}
-
-export interface TestPolicy {
-  shape?: TestShape;
-  excludedSources?: string[];
-  excludedWindows?: Array<{ since: number; until: number }>;
-}
 
 /** data:null means "no blob", but the version keeps advancing so that a
  * racing CAS writer holding an old version still fails. */

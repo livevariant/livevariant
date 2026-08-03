@@ -109,7 +109,10 @@ describe("the tool API", () => {
     // And the dashboard is told the same thing, or the builder would show
     // whitespace as the serving server.
     const config = await blank.request("https://ab.internal/config");
-    expect(await config.json()).toEqual({ serveUrl: "https://ab.internal" });
+    expect(await config.json()).toEqual({
+      serveUrl: "https://ab.internal",
+      region: null
+    });
   });
 
   it("tells the dashboard where its links should point", async () => {
@@ -118,7 +121,10 @@ describe("the tool API", () => {
     // every self-hoster, depending which way it was written.
     const res = await app.request("https://ab.internal/config");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ serveUrl: "https://ab.internal" });
+    expect(await res.json()).toEqual({
+      serveUrl: "https://ab.internal",
+      region: null
+    });
 
     const split = createApp({
       store: new MemoryStore(),
@@ -126,7 +132,10 @@ describe("the tool API", () => {
       serveUrl: "https://livevariant.link"
     });
     const res2 = await split.request("https://livevariant.com/config");
-    expect(await res2.json()).toEqual({ serveUrl: "https://livevariant.link" });
+    expect(await res2.json()).toEqual({
+      serveUrl: "https://livevariant.link",
+      region: null
+    });
   });
 
   it("serves the docs page", async () => {
@@ -167,7 +176,9 @@ describe("the tool API", () => {
     );
     const out = (await res.json()) as Record<string, any>;
     expect(out.urls.serve).toContain("https://livevariant.link/s/");
-    expect(out.emailTemplate.imageSrc).toContain("https://livevariant.link/s?");
+    expect(out.emailTemplate.main.imageSrc).toContain(
+      "https://livevariant.link/s?"
+    );
     expect(out.urls.manage).toContain("https://livevariant.com/manage/");
   });
 

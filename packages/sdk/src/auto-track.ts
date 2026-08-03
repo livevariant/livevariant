@@ -47,7 +47,11 @@ export function autoTrack(options: AutoTrackOptions): AutoTracker {
             body: JSON.stringify({
               testId: handoff.testId,
               idHash: handoff.idHash,
-              amount
+              amount,
+              // Carried by the redirect's handoff so an "eu" test's
+              // reward reaches its jurisdictional home without this
+              // page ever holding the config.
+              ...(handoff.region ? { region: handoff.region } : {})
             })
           }).catch(() => undefined) // never break the host page
       )

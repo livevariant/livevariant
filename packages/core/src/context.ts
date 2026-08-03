@@ -9,9 +9,6 @@ import type { RequestSignals } from "./signals.js";
  * indices), which is what keeps the privacy-by-minimization claim true.
  */
 
-/** Feature-vector dimension for the linear bandit: slot 0 is the bias. */
-export const FEATURE_DIM = 16;
-
 /** Free-form dimension values longer than this are dropped. */
 const MAX_CTX_VALUE_LENGTH = 64;
 
@@ -140,7 +137,7 @@ export async function composeBucketKey(
 export function mergeFeatureIndices(
   callerFeatIdx: number[] | null,
   autoCtx: Record<string, string>,
-  dim: number = FEATURE_DIM
+  dim: number
 ): number[] {
   const merged = new Set<number>(callerFeatIdx ?? [0]);
   for (const index of featureIndices(autoCtx, dim)) {
@@ -164,7 +161,7 @@ export async function bucketKey(
  */
 export function featureIndices(
   ctx: Record<string, string> | null,
-  dim: number = FEATURE_DIM
+  dim: number
 ): number[] {
   const indices = new Set<number>([0]);
   if (ctx) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeOutcomes } from "./decide.js";
+import { analyzeOutcomes, marginalOutcomes } from "./decide.js";
 import { mulberry32 } from "./rng.js";
 
 describe("analyzeOutcomes", () => {
@@ -97,5 +97,33 @@ describe("analyzeOutcomes", () => {
     expect(a.leader).toBe(2);
     expect(a.probabilities.every(p => Number.isFinite(p))).toBe(true);
     expect(a.rates.every(r => r >= 0 && r <= 1)).toBe(true);
+  });
+});
+
+describe("marginalOutcomes", () => {
+  it("rolls cells up to one slot's variants", () => {
+    // 2x2 shape: cells [hero, cta] in row-major order.
+    const cells = [
+      { pulls: 10, conversions: 1 }, // (0,0)
+      { pulls: 20, conversions: 2 }, // (0,1)
+      { pulls: 30, conversions: 6 }, // (1,0)
+      { pulls: 40, conversions: 4 } // (1,1)
+    ];
+    expect(marginalOutcomes(cells, [2, 2], 0)).toEqual([
+      { pulls: 30, conversions: 3 },
+      { pulls: 70, conversions: 10 }
+    ]);
+    expect(marginalOutcomes(cells, [2, 2], 1)).toEqual([
+      { pulls: 40, conversions: 7 },
+      { pulls: 60, conversions: 6 }
+    ]);
+  });
+
+  it("is the identity for a single slot", () => {
+    const cells = [
+      { pulls: 5, conversions: 1 },
+      { pulls: 7, conversions: 2 }
+    ];
+    expect(marginalOutcomes(cells, [2], 0)).toEqual(cells);
   });
 });

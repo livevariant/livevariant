@@ -9,10 +9,16 @@ import { useEffect, useState } from "react";
  * hardcoded default would have been wrong for one of them whichever way
  * it was written.
  */
-export async function fetchServeUrl(
+export interface DeploymentConfig {
+  serveUrl: string;
+  /** The creator's own region, as the deployment saw this request. */
+  region: string | null;
+}
+
+export async function fetchDeploymentConfig(
   fetchImpl: typeof fetch = fetch
-): Promise<string> {
-  const fallback = window.location.origin;
+): Promise<DeploymentConfig> {
+  const fallback = { serveUrl: window.location.origin, region: null };
   try {
     const res = await fetchImpl("/config");
     if (!res.ok) {
@@ -20,9 +26,14 @@ export async function fetchServeUrl(
     }
     const body: unknown = await res.json();
     const serveUrl = (body as { serveUrl?: unknown }).serveUrl;
-    return typeof serveUrl === "string" && serveUrl.length > 0
-      ? serveUrl.replace(/\/+$/, "")
-      : fallback;
+    const region = (body as { region?: unknown }).region;
+    return {
+      serveUrl:
+        typeof serveUrl === "string" && serveUrl.length > 0
+          ? serveUrl.replace(/\/+$/, "")
+          : fallback.serveUrl,
+      region: typeof region === "string" ? region : null
+    };
   } catch {
     // An older deployment, or offline. Serving from where we are loaded is
     // right far more often than any constant would be.
@@ -30,18 +41,31 @@ export async function fetchServeUrl(
   }
 }
 
+export async function fetchServeUrl(
+  fetchImpl: typeof fetch = fetch
+): Promise<string> {
+  return (await fetchDeploymentConfig(fetchImpl)).serveUrl;
+}
+
 export function useServeUrl(): string {
-  const [serveUrl, setServeUrl] = useState(() => window.location.origin);
+  return useDeploymentConfig().serveUrl;
+}
+
+export function useDeploymentConfig(): DeploymentConfig {
+  const [config, setConfig] = useState<DeploymentConfig>(() => ({
+    serveUrl: window.location.origin,
+    region: null
+  }));
   useEffect(() => {
     let live = true;
-    void fetchServeUrl().then(url => {
+    void fetchDeploymentConfig().then(fetched => {
       if (live) {
-        setServeUrl(url);
+        setConfig(fetched);
       }
     });
     return () => {
       live = false;
     };
   }, []);
-  return serveUrl;
+  return config;
 }

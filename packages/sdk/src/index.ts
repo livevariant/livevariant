@@ -5,15 +5,22 @@ import {
   buildTestUrls,
   canonicalJson,
   computeTestId,
-  effectiveBucketPriors,
+  decodeCell,
+  dimForShape,
+  effectivePriors,
   externalIdHash,
   featureIndices,
   normalizeCtx,
+  slotEntries,
+  slotSizes,
   splitAutoDims,
+  testConfigSchema,
   utf8ToBase64Url,
+  validCell,
+  variantName,
   withQuery,
-  FEATURE_DIM,
   type TestConfig,
+  type TestConfigInput,
   type TestUrls
 } from "@livevariant/core";
 import { resolveExternalId } from "./identity.js";
@@ -43,8 +50,20 @@ export {
 /**
  * LiveVariant browser SDK. Privacy contract: the raw external id and raw
  * context values are hashed on this side of the wire; the server receives
- * only the testId, hashes, indices, and tuning numbers, and never any
- * variant content (arms live in the config the page already has).
+ * only the testId, hashes, indices, and shape numbers, and never any
+ * variant content (variants live in the config the page already has).
+ *
+ * Configs are written to be READ. `createTest` takes the same input the
+ * schema does, so the whole test can sit legibly in page source:
+ *
+ *   createTest({ variants: ["Ship faster", "Ship safer"] }, { serverUrl })
+ *
+ * or, testing two elements at once (the model optimizes the combination):
+ *
+ *   createTest(
+ *     { slots: { headline: ["A", "B"], cta: ["Buy", "Try"] } },
+ *     { serverUrl }
+ *   )
  */
 
 export interface CreateTestOptions {
@@ -59,9 +78,9 @@ export interface CreateTestOptions {
   /** Defaults to window.localStorage; pass null to disable caching. */
   storage?: Storage | null;
   /**
-   * How long to wait for the assignment before rendering the first arm.
-   * An A/B tool must never hold up a page, so a slow or unreachable
-   * server degrades to the control variant rather than blocking.
+   * How long to wait for the assignment before rendering the control
+   * combination. An A/B tool must never hold up a page, so a slow or
+   * unreachable server degrades to the first variants rather than block.
    */
   timeoutMs?: number;
   /** Injectable for tests. */
@@ -70,6 +89,7 @@ export interface CreateTestOptions {
 }
 
 export interface Variant {
+  /** Index within its slot. */
   index: number;
   name: string;
   url?: string;
@@ -81,11 +101,20 @@ export interface Variant {
 
 export interface LiveTest {
   testId: string;
+  /** The served combination, encoded (an index over all slots). */
+  cell: number;
+  /** The chosen variant per slot, e.g. test.slots.headline.text. */
+  slots: Record<string, Variant>;
+  /**
+   * The chosen variant of the first slot: the whole answer for the
+   * common single-slot test, sugar for `slots.main`.
+   */
   variant: Variant;
   /**
    * True when the server could not be reached (or answered with
-   * something unusable) and the first arm was rendered as a fallback.
-   * Nothing was recorded, so these views are not in the test's numbers.
+   * something unusable) and the control combination was rendered as a
+   * fallback. Nothing was recorded, so these views are not in the
+   * test's numbers.
    */
   fallback: boolean;
   /** Reports a conversion for this visitor (server accumulates amounts). */
@@ -100,9 +129,9 @@ export interface LiveTest {
 const DEFAULT_TIMEOUT_MS = 2_000;
 
 interface CachedAssignment {
-  armIndex: number;
+  cell: number;
   idHash: string;
-  /** Signatures for the arm's hosted assets, and when they die. */
+  /** Signatures for the combination's hosted assets, and when they die. */
   assetSignatures?: Record<string, string>;
   assetsExpireAt?: number;
 }
@@ -111,7 +140,7 @@ interface CachedAssignment {
 const ASSET_REFRESH_MARGIN_MS = 60_000;
 
 export async function createTest(
-  config: TestConfig | string,
+  config: TestConfig | TestConfigInput | string,
   options: CreateTestOptions
 ): Promise<LiveTest> {
   const win = options.window ?? window;
@@ -119,20 +148,39 @@ export async function createTest(
   const storage =
     options.storage === undefined ? win.localStorage : options.storage;
 
-  const resolved: TestConfig =
-    typeof config === "string"
-      ? (JSON.parse(base64UrlToUtf8(config)) as TestConfig)
-      : config;
+  // Parsing rather than trusting normalizes the readable shorthands
+  // (bare-string variants, `variants` for a single slot) into the
+  // canonical form every hash below depends on.
+  const input = (
+    typeof config === "string" ? JSON.parse(base64UrlToUtf8(config)) : config
+  ) as Record<string, unknown>;
+  // Keyless inline configs get scoped to the page's hostname: two sites
+  // inlining the same trivial test ("Book" vs "Book now") must not hash
+  // to the SAME test and pollute each other. Configs with a stats key
+  // are already unique (the key hash is random and identity-included),
+  // and pre-encoded strings must keep the identity their URLs were
+  // printed with, so neither is touched.
+  const scoped =
+    typeof config !== "string" &&
+    input.scope === undefined &&
+    input.statsKeyHash === undefined
+      ? { ...input, scope: win.location.hostname }
+      : input;
+  const resolved: TestConfig = testConfigSchema.parse(scoped) as TestConfig;
   const testId = await computeTestId(resolved);
+
+  const entries = slotEntries(resolved);
+  const sizes = slotSizes(resolved);
+  const dim = dimForShape(sizes, resolved.ctx?.dims.length ?? 0);
 
   // Redirect handoff first: if this visitor arrived through /s or /c,
   // the server-side assignment (and its idHash) is authoritative. A
-  // tampered armIndex beyond this config's arms is treated as no handoff
-  // rather than silently rendering the wrong variant.
+  // tampered cell beyond this config's combinations is treated as no
+  // handoff rather than silently rendering the wrong variants.
   captureHandoff(win, storage);
   const storedHandoff = getHandoff(storage, testId);
   const handoff =
-    storedHandoff && storedHandoff.armIndex < resolved.arms.length
+    storedHandoff && validCell(sizes, storedHandoff.cell)
       ? storedHandoff
       : null;
 
@@ -163,52 +211,53 @@ export async function createTest(
       .filter((entry): entry is readonly [string, string] => !!entry[1])
   );
   const ctxKey = callerCtx ? await bucketKey(testId, callerCtx) : null;
-  const featIdx = featureIndices(callerCtx);
-  // Bucket priors must be resolved to bucket keys the same way the
-  // redirect path does, or a bucketed test would silently lose its
-  // warm-start priors when served through the SDK.
-  const bucketPriors = resolved.priors?.buckets
-    ? await effectiveBucketPriors(resolved, testId)
-    : undefined;
+  const featIdx = featureIndices(callerCtx, dim);
+  const priors = effectivePriors(resolved);
 
   // Hosted assets need the server: their canonical URLs 403 on their own,
-  // and only /choose can mint working signatures for the winning arm. The
-  // hashes are content-free, so sending them keeps the privacy claim.
-  const armAssets: Record<string, string[]> = {};
-  resolved.arms.forEach((arm, i) => {
-    const hashes = [arm.formats.url, arm.formats.image]
-      .map(u => (u ? assetIdFromUrl(u) : null))
-      .filter((h): h is string => h !== null);
-    if (hashes.length > 0) {
-      armAssets[String(i)] = hashes;
-    }
+  // and only /choose can mint working signatures for the winning
+  // combination. The hashes are content-free, so sending them keeps the
+  // privacy claim. Keys are "slot:variant".
+  const slotAssets: Record<string, string[]> = {};
+  entries.forEach(([, variants], slot) => {
+    variants.forEach((variant, i) => {
+      const hashes = [variant.url, variant.image]
+        .map(u => (u ? assetIdFromUrl(u) : null))
+        .filter((h): h is string => h !== null);
+      if (hashes.length > 0) {
+        slotAssets[`${slot}:${i}`] = hashes;
+      }
+    });
   });
 
-  const {
-    armIndex,
-    fallback,
-    assetSignatures = {}
-  } = await resolveAssignment();
-  const arm = resolved.arms[armIndex] ?? resolved.arms[0];
+  /** True when the combination uses hosted assets (needs signatures). */
+  function usesHostedAssets(cell: number): boolean {
+    return decodeCell(sizes, cell).some(
+      (variant, slot) => slotAssets[`${slot}:${variant}`] !== undefined
+    );
+  }
 
-  /** Splice a minted signature into a hosted-asset format URL. */
-  function signed(format: string | undefined): string | undefined {
-    if (!format) {
-      return format;
+  const { cell, fallback, assetSignatures = {} } = await resolveAssignment();
+  const choice = decodeCell(sizes, cell);
+
+  /** Splice a minted signature into a hosted-asset URL. */
+  function signed(url: string | undefined): string | undefined {
+    if (!url) {
+      return url;
     }
-    const hash = assetIdFromUrl(format);
+    const hash = assetIdFromUrl(url);
     const sig = hash ? assetSignatures[hash] : undefined;
-    return sig ? withQuery(format, sig) : format;
+    return sig ? withQuery(url, sig) : url;
   }
 
   async function resolveAssignment(): Promise<{
-    armIndex: number;
+    cell: number;
     fallback: boolean;
     assetSignatures?: Record<string, string>;
   }> {
     if (handoff) {
       // The server already assigned this visitor during the redirect.
-      return { armIndex: handoff.armIndex, fallback: false };
+      return { cell: handoff.cell, fallback: false };
     }
     const cacheKey = `lv:a:${testId}`;
     if (storage) {
@@ -218,27 +267,27 @@ export async function createTest(
           const cached = JSON.parse(raw) as CachedAssignment;
           // The cache is per-id: a login that changes the external id must
           // fall through to the server, which owns the sticky record.
-          if (cached.idHash === idHash) {
+          if (cached.idHash === idHash && validCell(sizes, cached.cell)) {
             const needsFreshSignatures =
-              armAssets[String(cached.armIndex)] !== undefined &&
+              usesHostedAssets(cached.cell) &&
               (cached.assetsExpireAt ?? 0) - ASSET_REFRESH_MARGIN_MS <
                 Date.now();
             if (!needsFreshSignatures) {
               return {
-                armIndex: cached.armIndex,
+                cell: cached.cell,
                 fallback: false,
                 assetSignatures: cached.assetSignatures
               };
             }
             // Stale signatures: re-ask the server. /choose is sticky, so
-            // this returns the same arm with fresh signatures; if it is
-            // unreachable, the cached arm still renders (its hosted
-            // images may 403 until the next successful refresh, which
-            // beats flipping the visitor to a different variant).
+            // this returns the same combination with fresh signatures; if
+            // it is unreachable, the cached combination still renders
+            // (its hosted images may 403 until the next successful
+            // refresh, which beats flipping the visitor's variants).
             try {
               return await chooseFromServer(cacheKey);
             } catch {
-              return { armIndex: cached.armIndex, fallback: false };
+              return { cell: cached.cell, fallback: false };
             }
           }
         } catch {
@@ -249,16 +298,16 @@ export async function createTest(
     try {
       return await chooseFromServer(cacheKey);
     } catch {
-      // Unreachable, too slow, or an unusable answer: render the first
-      // arm. A failed experiment must never become a broken page. The
-      // result is deliberately NOT cached, so a transient outage cannot
-      // pin this visitor to the control variant for good.
-      return { armIndex: 0, fallback: true };
+      // Unreachable, too slow, or an unusable answer: render the control
+      // combination. A failed experiment must never become a broken page.
+      // The result is deliberately NOT cached, so a transient outage
+      // cannot pin this visitor to the control for good.
+      return { cell: 0, fallback: true };
     }
   }
 
   async function chooseFromServer(cacheKey: string): Promise<{
-    armIndex: number;
+    cell: number;
     fallback: boolean;
     assetSignatures?: Record<string, string>;
   }> {
@@ -268,53 +317,46 @@ export async function createTest(
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       body: JSON.stringify({
         testId,
-        armCount: resolved.arms.length,
-        alg: resolved.alg ?? "ts",
-        dim: FEATURE_DIM,
-        minBucketPulls: resolved.minBucketPulls,
+        slotSizes: sizes,
+        dim,
+        region: resolved.region,
         priorStrengthCap: resolved.priorStrengthCap,
-        armPriors: resolved.priors?.arms,
-        bucketPriors,
-        linearPriors: resolved.priors?.linear,
+        priors: priors.length > 0 ? priors : undefined,
         idHash,
         ctxKey: ctxKey ?? undefined,
         featIdx,
         autoDims,
         autoCtx: Object.keys(autoCtx).length > 0 ? autoCtx : undefined,
-        assets: Object.keys(armAssets).length > 0 ? armAssets : undefined
+        assets: Object.keys(slotAssets).length > 0 ? slotAssets : undefined
       })
     });
     if (!response.ok) {
-      return { armIndex: 0, fallback: true };
+      return { cell: 0, fallback: true };
     }
     const {
-      armIndex: chosen,
+      cell: chosen,
       assetSignatures: sigs,
       assetsExpireAt
     } = (await response.json()) as {
-      armIndex: number;
+      cell: number;
       assetSignatures?: Record<string, string>;
       assetsExpireAt?: number;
     };
-    // A nonsense index (a proxy rewriting the body, a future server
-    // version) must not index past the arms and render nothing.
-    if (
-      !Number.isInteger(chosen) ||
-      chosen < 0 ||
-      chosen >= resolved.arms.length
-    ) {
-      return { armIndex: 0, fallback: true };
+    // A nonsense cell (a proxy rewriting the body, a future server
+    // version) must not index past the combinations and render nothing.
+    if (!validCell(sizes, chosen)) {
+      return { cell: 0, fallback: true };
     }
     storage?.setItem(
       cacheKey,
       JSON.stringify({
-        armIndex: chosen,
+        cell: chosen,
         idHash,
         assetSignatures: sigs,
         assetsExpireAt
       } satisfies CachedAssignment)
     );
-    return { armIndex: chosen, fallback: false, assetSignatures: sigs };
+    return { cell: chosen, fallback: false, assetSignatures: sigs };
   }
 
   /**
@@ -329,10 +371,15 @@ export async function createTest(
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
-        body: JSON.stringify({ testId, idHash, amount })
+        body: JSON.stringify({
+          testId,
+          idHash,
+          amount,
+          ...(resolved.region ? { region: resolved.region } : {})
+        })
       });
     } catch {
-      // Dropped: the bandit tolerates missing rewards, pages don't
+      // Dropped: the model tolerates missing rewards, pages don't
       // tolerate exceptions.
     }
   }
@@ -351,22 +398,29 @@ export async function createTest(
     });
   }
 
+  const chosenSlots: Record<string, Variant> = {};
+  entries.forEach(([key, variants], slot) => {
+    const variant = variants[choice[slot]] ?? variants[0];
+    chosenSlots[key] = {
+      index: choice[slot],
+      name: variantName(variant, choice[slot]),
+      url: signed(variant.url),
+      image: signed(variant.image),
+      html: variant.html,
+      md: variant.md,
+      text: variant.text
+    };
+  });
+
   return {
     testId,
+    cell,
+    slots: chosenSlots,
+    variant: chosenSlots[entries[0][0]],
     fallback,
-    variant: {
-      index: armIndex,
-      name: arm.name,
-      url: signed(arm.formats.url),
-      image: signed(arm.formats.image),
-      html: arm.formats.html,
-      md: arm.formats.md,
-      text: arm.formats.text
-    },
     trackConversion,
     // A string input IS the encoded config; objects go through the same
-    // canonical serialization the encoder uses (validation happened when
-    // the config was built).
+    // canonical serialization the encoder uses.
     urls: buildTestUrls(
       options.serverUrl,
       typeof config === "string"

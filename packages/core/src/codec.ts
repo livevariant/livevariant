@@ -19,10 +19,10 @@ import {
  * also what makes URL tampering self-isolating.
  */
 const IDENTITY_EXCLUDED = [
-  "alg",
+  // Tuning, not identity: the model rebuilds from the event log, so these
+  // can change mid-test without resetting history.
   "priors",
   "priorStrengthCap",
-  "minBucketPulls",
   "decorateRedirects",
   // Delivery details, not the test: turning the variant stamp on or
   // switching param forwarding off mid-campaign must not reset history.

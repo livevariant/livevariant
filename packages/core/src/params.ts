@@ -22,19 +22,19 @@ import { computeTestId, type DecodedConfig } from "./codec.js";
 
 /** Parameters that configure the test itself. */
 export const CONFIG_PARAMS = [
-  "v", // variant target URL, repeated, in order (the first is the control)
+  "v", // variant target URL, repeated, in order (first = control)
   "vn", // variant name, repeated, positional
+  "s", // starts a new slot: s=hero&v=..&v=..&s=cta&v=.. (multi-slot)
   "n", // test name
   "kh", // statsKeyHash: the HASH of the stats secret, never the secret
-  "alg", // ts | bucketed | linear
   "ctx", // comma-separated dims: "country:country,persona"
   "r", // fallback redirect target for clicks
-  "stamp", // write the served variant into this param on redirect
+  "stamp", // write the served combination into this param on redirect
   "fw" // fw=0 turns off forwarding unrecognized params
 ] as const;
 
 /** Parameters the serving layer consumes; never config, never forwarded. */
-export const RUNTIME_PARAMS = ["id", "auto", "to"] as const;
+export const RUNTIME_PARAMS = ["id", "auto", "to", "slot"] as const;
 
 const RESERVED = new Set<string>([...CONFIG_PARAMS, ...RUNTIME_PARAMS]);
 
@@ -89,28 +89,45 @@ function parseCtx(spec: string | null): TestConfigInput["ctx"] {
 export async function configFromParams(
   query: URLSearchParams
 ): Promise<DecodedConfig> {
-  const targets = query.getAll("v").filter(value => value.trim().length > 0);
+  // Slots are declared in order: `s=hero` opens a slot, the `v=`/`vn=`
+  // pairs that follow belong to it, the next `s=` opens the next slot. A
+  // template with no `s=` at all is the single-slot common case.
+  const slots: Record<string, Array<{ name?: string; url: string }>> = {};
+  let current = "main";
+  let variantOrdinal = 0;
+  // Names are positional against the v order across the whole query, so
+  // `v=..&v=..&vn=hero&vn=lifestyle` works no matter where the vn sit.
   const names = query.getAll("vn");
-  if (targets.length < 2) {
+  for (const [key, value] of query.entries()) {
+    if (key === "s") {
+      const slotKey = value.trim();
+      if (slotKey.length > 0) {
+        current = slotKey;
+      }
+      continue;
+    }
+    if (key === "v" && value.trim().length > 0) {
+      const list = (slots[current] ??= []);
+      const name = names[variantOrdinal]?.trim();
+      list.push({ ...(name ? { name } : {}), url: value });
+      variantOrdinal++;
+    }
+  }
+  if (Object.keys(slots).length === 0) {
     throw new Error("a query-parameter test needs at least two `v` variants");
   }
+
+  const ctx = parseCtx(query.get("ctx"));
   const input: TestConfigInput = {
-    v: 1,
-    arms: targets.map((target, i) => ({
-      // Names show up in stats and in the `vp` stamp, so they default to
-      // something short and legible in a report rather than leaving the
-      // reader to match CDN URLs by eye. v1 is the control.
-      name: names[i]?.trim() || `v${i + 1}`,
-      formats: { url: target }
-    })),
+    v: 2,
+    slots,
     ...(query.get("n") ? { name: query.get("n") as string } : {}),
     // `kh` is the sha256 of the stats secret, which is why it is safe in
     // a link that reaches a million inboxes. A pasted secret is not
     // 64 hex characters, so the schema rejects it rather than quietly
     // running a different test than the sender meant.
     ...(query.get("kh") ? { statsKeyHash: query.get("kh") as string } : {}),
-    ...(query.get("alg") ? { alg: query.get("alg") as TestConfig["alg"] } : {}),
-    ...(parseCtx(query.get("ctx")) ? { ctx: parseCtx(query.get("ctx")) } : {}),
+    ...(ctx ? { ctx } : {}),
     ...(query.get("r") ? { redirectUrl: query.get("r") as string } : {}),
     ...(query.get("stamp")
       ? { variantParam: query.get("stamp") as string }
@@ -119,6 +136,80 @@ export async function configFromParams(
   };
   const config = testConfigSchema.parse(input);
   return { config, testId: await computeTestId(config) };
+}
+
+/**
+ * The inverse of configFromParams: spells a config out as readable query
+ * parameters, or returns null when the config uses features the parameter
+ * form cannot express. Powers the manage page's "show as plain URL"
+ * toggle, so a creator can SEE how their test would be written by hand.
+ *
+ * Only identity-relevant fields matter for fidelity: identity-excluded
+ * tuning (priors, decorateRedirects, ...) is defaulted by the parameter
+ * form without changing the testId. Not expressible: non-URL variant
+ * content, per-variant redirects, ctx value allowlists, reward events,
+ * and partially-named variants (vn is positional, so it is all or none).
+ */
+export function configToParams(config: TestConfig): URLSearchParams | null {
+  const entries = Object.entries(config.slots);
+  const variants = entries.flatMap(([, list]) => list);
+  const expressible =
+    variants.every(
+      v =>
+        v.url !== undefined &&
+        v.image === undefined &&
+        v.html === undefined &&
+        v.md === undefined &&
+        v.text === undefined &&
+        v.redirectUrl === undefined
+    ) &&
+    (config.ctx?.dims ?? []).every(dim => dim.values === undefined) &&
+    config.rewardEvents === undefined;
+  if (!expressible) {
+    return null;
+  }
+  const named = variants.filter(v => v.name !== undefined).length;
+  if (named !== 0 && named !== variants.length) {
+    return null;
+  }
+
+  const query = new URLSearchParams();
+  if (config.name) {
+    query.set("n", config.name);
+  }
+  const singleMain = entries.length === 1 && entries[0][0] === "main";
+  for (const [slotKey, list] of entries) {
+    if (!singleMain) {
+      query.append("s", slotKey);
+    }
+    for (const variant of list) {
+      query.append("v", variant.url as string);
+      if (variant.name !== undefined) {
+        query.append("vn", variant.name);
+      }
+    }
+  }
+  if (config.ctx) {
+    query.set(
+      "ctx",
+      config.ctx.dims
+        .map(dim => (dim.from ? `${dim.key}:${dim.from}` : dim.key))
+        .join(",")
+    );
+  }
+  if (config.redirectUrl) {
+    query.set("r", config.redirectUrl);
+  }
+  if (config.variantParam) {
+    query.set("stamp", config.variantParam);
+  }
+  if (!config.forwardParams) {
+    query.set("fw", "0");
+  }
+  if (config.statsKeyHash) {
+    query.set("kh", config.statsKeyHash);
+  }
+  return query;
 }
 
 /**

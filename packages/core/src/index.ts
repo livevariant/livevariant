@@ -8,15 +8,38 @@ export {
   utf8ToBase64Url
 } from "./canonical.js";
 export {
+  cellNames,
   ctxDimSchema,
+  slotEntries,
+  slotSizes,
   testConfigSchema,
-  type Arm,
-  type ArmPrior,
+  variantName,
   type CtxDim,
-  type Priors,
   type TestConfig,
-  type TestConfigInput
+  type TestConfigInput,
+  type Variant,
+  type VariantPriorInput
 } from "./schema.js";
+export {
+  MAX_CELLS,
+  cellCount,
+  decodeCell,
+  encodeCell,
+  validCell
+} from "./cells.js";
+export {
+  MODEL_NOISE,
+  cellFeatures,
+  chooseCell,
+  cholesky,
+  dimForShape,
+  newModel,
+  observe,
+  reward,
+  variantFeature,
+  type JointModel,
+  type VariantPrior
+} from "./model.js";
 export {
   CONFIG_HARD_LIMIT,
   CONFIG_SOFT_LIMIT,
@@ -42,19 +65,22 @@ export {
 export {
   AUTO_SIGNALS,
   NETWORK_SIGNALS,
+  REGION_HINTS,
   SIGNAL_CARDINALITY,
+  TEST_REGIONS,
   URL_SIGNALS,
   urlSignals,
   deviceClass,
   isAssetFetch,
   primaryLanguage,
+  regionHint,
   requestSignals,
   type AutoSignal,
   type CloudflareGeo,
-  type RequestSignals
+  type RequestSignals,
+  type TestRegion
 } from "./signals.js";
 export {
-  FEATURE_DIM,
   bucketKey,
   composeBucketKey,
   deriveAutoCtx,
@@ -64,34 +90,16 @@ export {
   normalizeCtx,
   splitAutoDims
 } from "./context.js";
-export {
-  capArmPriors,
-  effectiveArmPriors,
-  effectiveBucketPriors,
-  effectiveLinearPriors,
-  type LinearPrior
-} from "./priors.js";
-export {
-  LINEAR_NOISE,
-  chooseBucketed,
-  chooseLinear,
-  chooseThompson,
-  emptyCounts,
-  initLinearArm,
-  linearObserve,
-  linearReward,
-  type ArmCounts,
-  type LinearArmState
-} from "./bandits.js";
+export { effectivePriors } from "./priors.js";
 export {
   applyAssignment,
   applyFirstReward,
-  chooseArm,
+  choose,
+  emptyCounts,
   newDerivedState,
   recomputeState,
   type AssignmentRecord,
-  type ChooseInput,
-  type ChooseOptions,
+  type CellCounts,
   type DerivedState,
   type StateInit
 } from "./state.js";
@@ -99,6 +107,7 @@ export {
   CONFIG_PARAMS,
   RUNTIME_PARAMS,
   configFromParams,
+  configToParams,
   decorateDestination,
   fallbackTarget,
   isReservedParam,
@@ -127,15 +136,11 @@ export {
 export {
   MIN_PULLS_TO_CALL,
   analyzeOutcomes,
+  marginalOutcomes,
   type ArmOutcome,
   type DecisionAnalysis,
   type DecisionOptions
 } from "./decide.js";
-export {
-  recommendAlgorithm,
-  recommendFromObserved,
-  type AlgorithmRecommendation
-} from "./recommend.js";
 export {
   HANDOFF_PARAMS,
   decorateUrl,

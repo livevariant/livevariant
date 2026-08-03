@@ -113,3 +113,19 @@ describe("isAssetFetch", () => {
     expect(isAssetFetch({})).toBe(true);
   });
 });
+
+describe("regionHint", () => {
+  it("maps continents to placement hints, with the known splits", async () => {
+    const { regionHint } = await import("./signals.js");
+    expect(regionHint({ continent: "EU", country: "NL" })).toBe("weur");
+    expect(regionHint({ continent: "EU", country: "PL" })).toBe("eeur");
+    expect(regionHint({ continent: "NA", country: "US" })).toBe("enam");
+    expect(regionHint({ continent: "AS", country: "JP" })).toBe("apac");
+    expect(regionHint({ continent: "AS", country: "AE" })).toBe("me");
+    expect(regionHint({ continent: "SA" })).toBe("sam");
+    expect(regionHint({ continent: "OC" })).toBe("oc");
+    expect(regionHint({ continent: "AF" })).toBe("afr");
+    expect(regionHint(null)).toBeNull();
+    expect(regionHint({})).toBeNull();
+  });
+});

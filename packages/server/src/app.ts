@@ -3,8 +3,9 @@ import { cors } from "hono/cors";
 import {
   assetIdFromUrl,
   autoContextDisabled,
-  capArmPriors,
+  cellNames,
   configFromParams,
+  decodeCell,
   decorateDestination,
   fallbackTarget,
   passthroughParams,
@@ -17,12 +18,14 @@ import {
   mergeFeatureIndices,
   requestSignals,
   mulberry32,
+  slotEntries,
   sourceHash,
   randomSeed,
   verifyStatsSecret,
   type CloudflareGeo,
   type DecodedConfig,
-  type Rng
+  type Rng,
+  type Variant
 } from "@livevariant/core";
 import {
   chooseRequestSchema,
@@ -40,6 +43,7 @@ import {
 } from "./assets/routes.js";
 import { renderManagePage } from "./manage-page.js";
 import {
+  labelsFromConfig,
   paramsFromConfig,
   resolveIdentity,
   TestService,
@@ -280,9 +284,11 @@ export function createApp(options: AppOptions): Hono {
     } catch {
       return false;
     }
-    const candidates = [config.redirectUrl];
-    for (const arm of config.arms) {
-      candidates.push(arm.formats.url, arm.formats.image, arm.redirectUrl);
+    const candidates: Array<string | undefined> = [config.redirectUrl];
+    for (const variants of Object.values(config.slots)) {
+      for (const variant of variants) {
+        candidates.push(variant.url, variant.image, variant.redirectUrl);
+      }
     }
     return candidates.some(url => {
       try {
@@ -306,7 +312,7 @@ export function createApp(options: AppOptions): Hono {
     | { error: Response }
     | {
         decoded: DecodedConfig;
-        params: Awaited<ReturnType<typeof paramsFromConfig>>;
+        params: ServingParams;
         identity: Awaited<ReturnType<typeof resolveIdentity>>;
         query: URLSearchParams;
       }
@@ -323,13 +329,14 @@ export function createApp(options: AppOptions): Hono {
       return result;
     }
     const { decoded } = result;
-    const params = await paramsFromConfig(decoded);
+    const params = paramsFromConfig(decoded);
     // The config is authoritative: it defines the test's real shape, so
     // it overwrites anything a JS-mode caller pinned earlier.
     await service.checkShape(params, true);
     const externalId = c.req.query("id") ?? null;
     const identity = await resolveIdentity(
       decoded,
+      params.dim,
       externalId ? await externalIdHash(decoded.testId, externalId) : null,
       ctxFromQuery(c.req.query()),
       await sourceHash(decoded.testId, clientIp(c), Date.now()),
@@ -351,7 +358,8 @@ export function createApp(options: AppOptions): Hono {
   function maybeDecorate(
     decoded: DecodedConfig,
     identity: { idHash: string | null },
-    armIndex: number,
+    cell: number,
+    choice: number[],
     target: string,
     query?: URLSearchParams
   ): string {
@@ -361,14 +369,20 @@ export function createApp(options: AppOptions): Hono {
         ? decorateUrl(target, {
             testId: decoded.testId,
             idHash: identity.idHash,
-            armIndex
+            cell,
+            // Rides along so config-free reward paths (GTM one-tag mode)
+            // can still route to the test's real home.
+            ...(config.region ? { region: config.region } : {})
           })
         : target;
+    // The stamp is the served combination: one name for a single slot,
+    // "heroB+ctaA" for several, so it stays legible in analytics tools.
+    const names = Object.values(cellNames(config, choice));
     return decorateDestination(withHandoff, {
       passthrough:
         config.forwardParams && query ? passthroughParams(query) : [],
       variantParam: config.variantParam,
-      variantValue: config.arms[armIndex]?.name
+      variantValue: names.join("+")
     });
   }
 
@@ -438,43 +452,82 @@ export function createApp(options: AppOptions): Hono {
     })
   );
 
-  // Redirect-mode serve: 302 to the assigned arm's url/image. Registered
-  // twice: /s/:cfg carries a base64 config, bare /s spells the same test
-  // out in query parameters (the ESP-template form).
+  /**
+   * Which slot a redirect request is serving. A single-slot test needs
+   * no parameter; a multi-slot test must say ?slot=, because a redirect
+   * can only carry one slot's content and guessing would silently serve
+   * the wrong element.
+   */
+  function resolveSlot(
+    decoded: DecodedConfig,
+    requested: string | undefined
+  ): { key: string; index: number; variants: Variant[] } | { error: Response } {
+    const entries = slotEntries(decoded.config);
+    if (requested === undefined && entries.length === 1) {
+      return { key: entries[0][0], index: 0, variants: entries[0][1] };
+    }
+    const index = entries.findIndex(([key]) => key === requested);
+    if (index === -1) {
+      return {
+        error: Response.json(
+          {
+            error:
+              entries.length === 1
+                ? `unknown slot "${requested}"`
+                : `multi-slot test: pass ?slot= (one of: ${entries
+                    .map(([key]) => key)
+                    .join(", ")})`
+          },
+          { status: 400 }
+        )
+      };
+    }
+    return { key: entries[index][0], index, variants: entries[index][1] };
+  }
+
+  // Redirect-mode serve: 302 to the assigned combination's content for
+  // one slot. Registered twice: /s/:cfg carries a base64 config, bare /s
+  // spells the same test out in query parameters (the ESP-template form).
   const serveHandler = async (c: Context): Promise<Response> => {
     const ctx = await serveContext(c);
     if ("error" in ctx) {
       return ctx.error;
     }
     const { decoded, params, identity, query } = ctx;
-    // EVERY arm must be servable and allowed before we record anything.
-    // Checking only the chosen arm afterwards would sticky-assign a
-    // visitor to an arm they can never be served, so every later visit
-    // returns the same assignment and the same error.
-    const unservable = decoded.config.arms.find(
-      arm => !(arm.formats.url ?? arm.formats.image)
-    );
+    // A redirect serves ONE slot's content per request; a multi-slot
+    // email carries one /s link per slot (?slot=hero, ?slot=cta), all of
+    // which share one sticky whole-combination assignment.
+    const slot = resolveSlot(decoded, c.req.query("slot"));
+    if ("error" in slot) {
+      return slot.error;
+    }
+    // EVERY variant of the served slot must be servable and allowed
+    // before we record anything. Checking only the chosen variant
+    // afterwards would sticky-assign a visitor to a combination they can
+    // never be served, so every later visit returns the same assignment
+    // and the same error.
+    const unservable = slot.variants.find(v => !(v.url ?? v.image));
     if (unservable) {
       return c.json(
         {
-          error: `arm "${unservable.name}" has no url/image format for redirect serving`
+          error: `slot "${slot.key}" has a variant with no url/image for redirect serving`
         },
         400
       );
     }
-    const disallowed = decoded.config.arms.find(
-      arm =>
-        !destinationAllowed((arm.formats.url ?? arm.formats.image)!, c.req.url)
+    const disallowed = slot.variants.find(
+      v => !destinationAllowed((v.url ?? v.image)!, c.req.url)
     );
     if (disallowed) {
       return c.json({ error: "destination not allowed by this server" }, 403);
     }
-    const { armIndex } = await service.assign(params, identity);
-    const arm = decoded.config.arms[armIndex];
-    const target = (arm.formats.url ?? arm.formats.image) as string;
+    const { cell } = await service.assign(params, identity);
+    const choice = decodeCell(params.slotSizes, cell);
+    const variant = slot.variants[choice[slot.index]];
+    const target = (variant.url ?? variant.image) as string;
     // Handoff decoration applies to pages, not image assets.
-    const decorated = arm.formats.url
-      ? maybeDecorate(decoded, identity, armIndex, target, query)
+    const decorated = variant.url
+      ? maybeDecorate(decoded, identity, cell, choice, target, query)
       : target;
     c.header("cache-control", NO_STORE);
     return c.redirect(await maybeSignAsset(decorated, c.req.url), 302);
@@ -490,6 +543,10 @@ export function createApp(options: AppOptions): Hono {
       return ctx.error;
     }
     const { decoded, params, identity, query } = ctx;
+    const slot = resolveSlot(decoded, c.req.query("slot"));
+    if ("error" in slot) {
+      return slot.error;
+    }
     const to = c.req.query("to");
     // Validate every destination BEFORE recording anything: an error that
     // has already counted a conversion would skew the test, and an error
@@ -503,9 +560,7 @@ export function createApp(options: AppOptions): Hono {
     const candidates =
       to !== undefined
         ? [to]
-        : decoded.config.arms.map(
-            arm => arm.redirectUrl ?? decoded.config.redirectUrl
-          );
+        : slot.variants.map(v => v.redirectUrl ?? decoded.config.redirectUrl);
     if (candidates.some(target => target === undefined)) {
       return c.json(
         { error: "no redirect target: pass ?to= or set a redirectUrl" },
@@ -520,18 +575,24 @@ export function createApp(options: AppOptions): Hono {
       return c.json({ error: "destination not allowed by this server" }, 403);
     }
     // A click implies a serve, so assign (sticky or fresh) before rewarding.
-    const { armIndex } = await service.assign(params, identity);
-    const arm = decoded.config.arms[armIndex];
+    const { cell } = await service.assign(params, identity);
+    const choice = decodeCell(params.slotSizes, cell);
+    const variant = slot.variants[choice[slot.index]];
     const target = (to ??
-      arm.redirectUrl ??
+      variant.redirectUrl ??
       decoded.config.redirectUrl) as string;
     if (identity.idHash) {
-      await service.reward(decoded.testId, identity.idHash, 1);
+      await service.reward(
+        decoded.testId,
+        identity.idHash,
+        1,
+        decoded.config.region
+      );
     }
     c.header("cache-control", NO_STORE);
     return c.redirect(
       await maybeSignAsset(
-        maybeDecorate(decoded, identity, armIndex, target, query),
+        maybeDecorate(decoded, identity, cell, choice, target, query),
         c.req.url
       ),
       302
@@ -559,7 +620,8 @@ export function createApp(options: AppOptions): Hono {
         await service.reward(
           decoded.testId,
           await externalIdHash(decoded.testId, externalId),
-          amount
+          amount,
+          decoded.config.region
         );
       }
     }
@@ -584,33 +646,23 @@ export function createApp(options: AppOptions): Hono {
     const r = body.data;
     // The caller supplies both the priors and their cap, so the cap can't
     // be trusted to bound them: clamp to the server's own ceiling, which
-    // is what keeps a hostile prior from pinning an arm (linear priors are
-    // baked into persisted state on first write).
+    // is what keeps a hostile prior from pinning a variant (priors are
+    // baked into persisted model state on first write).
     const cap = Math.min(r.priorStrengthCap ?? 50, MAX_PRIOR_STRENGTH);
     const params: ServingParams = {
       testId: r.testId,
-      armCount: r.armCount,
-      alg: r.alg,
-      dim: r.dim ?? 16,
-      minBucketPulls: r.minBucketPulls ?? 100,
-      armPriors: r.armPriors ? capArmPriors(r.armPriors, cap) : undefined,
-      bucketPriors: r.bucketPriors
-        ? Object.fromEntries(
-            Object.entries(r.bucketPriors).map(([k, p]) => [
-              k,
-              capArmPriors(p, cap)
-            ])
-          )
-        : undefined,
-      linearPriors: r.linearPriors?.map(p => ({
-        mean: p.mean,
+      slotSizes: r.slotSizes,
+      dim: r.dim,
+      priors: r.priors?.map(p => ({
+        ...p,
         strength: Math.min(p.strength, cap)
       })),
-      noise: r.noise
+      noise: r.noise,
+      region: r.region
     };
     if (!(await service.checkShape(params, false))) {
       return c.json(
-        { error: "armCount/alg/dim disagree with this test's serving shape" },
+        { error: "slotSizes/dim disagree with this test's serving shape" },
         409
       );
     }
@@ -623,21 +675,25 @@ export function createApp(options: AppOptions): Hono {
     // they do not run scripts.
     const signals = requestSignals(requestContext(c));
     const autoCtx = deriveAutoCtx(r.autoDims, signals, r.autoCtx ?? null);
-    const { armIndex } = await service.assign(params, {
+    const { cell } = await service.assign(params, {
       idHash: r.idHash ?? null,
       ctxKey: await composeBucketKey(r.testId, r.ctxKey ?? null, autoCtx),
-      featIdx: mergeFeatureIndices(r.featIdx ?? [0], autoCtx, r.dim ?? 16),
+      featIdx: mergeFeatureIndices(r.featIdx ?? [0], autoCtx, r.dim),
       srcHash: await sourceHash(r.testId, clientIp(c), Date.now()),
       signals
     });
-    // Signatures for the WINNING arm's hosted assets only. The SDK holds
-    // canonical asset URLs in its config that 403 on their own; this is
-    // the JS-mode counterpart of the redirect path signing its Location.
-    // Minting is deliberately scoped to the chosen arm: the caller told
-    // us every arm's hashes, but only one arm gets working URLs.
-    const wanted = options.assets ? (r.assets?.[String(armIndex)] ?? []) : [];
+    const choice = decodeCell(r.slotSizes, cell);
+    // Signatures for the WINNING combination's hosted assets only. The
+    // SDK holds canonical asset URLs in its config that 403 on their own;
+    // this is the JS-mode counterpart of the redirect path signing its
+    // Location. Minting is deliberately scoped to the chosen variant of
+    // each slot: the caller told us every variant's hashes, but only the
+    // served combination gets working URLs.
+    const wanted = options.assets
+      ? choice.flatMap((v, slot) => r.assets?.[`${slot}:${v}`] ?? [])
+      : [];
     if (wanted.length === 0) {
-      return c.json({ armIndex });
+      return c.json({ cell, choice });
     }
     const ttlSeconds =
       options.assets?.urlTtlSeconds ?? DEFAULT_ASSET_TTL_SECONDS;
@@ -650,7 +706,7 @@ export function createApp(options: AppOptions): Hono {
         expiresAt
       );
     }
-    return c.json({ armIndex, assetSignatures, assetsExpireAt: expiresAt });
+    return c.json({ cell, choice, assetSignatures, assetsExpireAt: expiresAt });
   });
 
   app.post("/reward", async c => {
@@ -664,7 +720,7 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const r = body.data;
-    const result = await service.reward(r.testId, r.idHash, r.amount);
+    const result = await service.reward(r.testId, r.idHash, r.amount, r.region);
     return c.json({ rewarded: result !== null, first: result?.first ?? false });
   });
 
@@ -678,12 +734,8 @@ export function createApp(options: AppOptions): Hono {
     if (!(await authorized(c, decoded))) {
       return c.json({ error: "stats secret required" }, 401);
     }
-    const params = await paramsFromConfig(decoded);
     return c.json(
-      await service.stats(
-        params,
-        decoded.config.arms.map(a => a.name)
-      )
+      await service.stats(paramsFromConfig(decoded), labelsFromConfig(decoded))
     );
   });
 
@@ -696,8 +748,7 @@ export function createApp(options: AppOptions): Hono {
     if (!(await authorized(c, decoded))) {
       return c.json({ error: "stats secret required" }, 401);
     }
-    const params = await paramsFromConfig(decoded);
-    const events = await service.recompute(params);
+    const events = await service.recompute(paramsFromConfig(decoded));
     return c.json({ ok: true, events });
   });
 
@@ -724,12 +775,15 @@ export function createApp(options: AppOptions): Hono {
         400
       );
     }
-    const policy = await service.updatePolicy(decoded.testId, {
-      excludedSources: body.data.sources,
-      excludedWindows: body.data.windows
-    });
-    const params = await paramsFromConfig(decoded);
-    const events = await service.recompute(params);
+    const policy = await service.updatePolicy(
+      decoded.testId,
+      {
+        excludedSources: body.data.sources,
+        excludedWindows: body.data.windows
+      },
+      decoded.config.region
+    );
+    const events = await service.recompute(paramsFromConfig(decoded));
     return c.json({ ok: true, events, policy });
   });
 
