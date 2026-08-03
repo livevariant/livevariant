@@ -3,7 +3,28 @@ import type { AssignmentRecord, DerivedState } from "@livevariant/core";
 /**
  * Storage contract for a LiveVariant backend. Assignment records are the
  * event-sourced source of truth; counters and blobs are the derived cache
- * the hot path reads. Every adapter must satisfy store.contract.spec.ts.
+ * the hot path reads.
+ *
+ * Every adapter must pass the conformance suite, importable from
+ * `@livevariant/server/testing`:
+ *
+ *   import { storeContract } from "@livevariant/server/testing";
+ *   storeContract("MyStore", () => new MyStore(client));
+ *
+ * THE CONCURRENCY CONTRACT, which is where adapters actually go wrong: a
+ * store built as read-modify-write over a plain key-value API satisfies
+ * every signature here, passes every sequential test, and corrupts data
+ * under real traffic. The Durable Object deployment gets serialization
+ * for free; nothing else does. What each method requires is written on
+ * the method, but the map is:
+ *
+ * - Event log (`putAssignmentIfAbsent`, `addReward`): must be atomic at
+ *   the storage layer. Failures here are PERMANENT, because the log is
+ *   the source of truth; nothing downstream can reconstruct a lost
+ *   reward or un-split a doubly-assigned visitor.
+ * - Derived cache (`incrCounters`, `putBlob`, `replaceDerived`): must be
+ *   atomic too, but failures here are REPAIRABLE, since `recompute`
+ *   rebuilds the cache from the log. Wrong until healed, not forever.
  */
 /**
  * The serving shape a test was first seen with. JS-mode callers supply
@@ -79,6 +100,12 @@ export interface StateStore {
    * Writes the record unless one exists; returns the record that is now
    * authoritative (the existing one when racing). Concurrent callers for
    * the same idHash must all observe the same winner.
+   *
+   * MUST be a single atomic operation in the storage layer: SQL
+   * `INSERT ... ON CONFLICT DO NOTHING` + read back, a conditional put,
+   * a transaction. Never `get` then `put`: two first-touch requests in
+   * that window each create their own record, one visitor is shown two
+   * variants, and the event log is permanently wrong.
    */
   putAssignmentIfAbsent(
     testId: string,
@@ -91,6 +118,13 @@ export interface StateStore {
    * assignment exists (reward without a recorded serve is dropped);
    * `first` is true exactly once per assignment, which is what gates the
    * single derived-state success update.
+   *
+   * MUST be atomic per record: SQL `UPDATE ... SET total = total + ?`
+   * with the previous total read in the same statement, or a serialized
+   * queue per key. Read-modify-write loses concurrent conversions (two
+   * reads of the same total collapse two purchases into one), and can
+   * report `first` twice, double-counting a success in the derived
+   * model. Rewards are part of the event log: losses are permanent.
    */
   addReward(
     testId: string,
@@ -103,7 +137,12 @@ export interface StateStore {
 
   // ----------------------------------------------------- derived cache
 
-  /** Atomically adds deltas to a counter array (missing = zeros). */
+  /**
+   * Adds deltas to a counter array (missing = zeros). MUST be an atomic
+   * increment (SQL `SET n = n + ?`, Redis INCRBY, a serialized writer);
+   * read-modify-write silently drops concurrent pulls. Derived cache, so
+   * a recompute heals the damage, which excuses nothing about causing it.
+   */
   incrCounters(key: string, deltas: number[]): Promise<void>;
 
   /** Reads a counter array, zero-filled to `length`. */
@@ -112,7 +151,13 @@ export interface StateStore {
   /** Versioned blob for linear-model state. */
   getBlob(key: string): Promise<{ data: string; version: number } | null>;
 
-  /** Compare-and-set; false means the caller must reload and retry. */
+  /**
+   * Compare-and-set: succeed only if the stored version still equals
+   * `expectedVersion`, and at most one concurrent writer per version may
+   * win. False means the caller reloads and retries. An adapter that
+   * lets two writers succeed at one version silently discards one arm
+   * of the linear model's update.
+   */
   putBlob(key: string, data: string, expectedVersion: number): Promise<boolean>;
 
   /**
