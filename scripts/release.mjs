@@ -31,6 +31,10 @@ const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const verbose = args.includes("--verbose");
 const specifier = args.find(a => !a.startsWith("--"));
+// npm accounts with 2FA on writes need a fresh one-time password at the
+// publish step: `npm run release patch -- --otp=123456`. Without it npm
+// answers EOTP and the retry is `npx nx release publish --otp=...`.
+const otp = args.find(a => a.startsWith("--otp="))?.slice("--otp=".length);
 
 const run = cmd => execSync(cmd, { stdio: "inherit" });
 const out = cmd => execSync(cmd, { encoding: "utf8" }).trim();
@@ -77,7 +81,7 @@ run("git add SKILL.md plugins .claude-plugin .agents");
 run(`git commit -m "release: v${workspaceVersion}"`);
 run(`git tag v${workspaceVersion}`);
 
-const results = await releasePublish({ dryRun, verbose, firstRelease });
+const results = await releasePublish({ dryRun, verbose, firstRelease, otp });
 const failed = Object.values(results).filter(r => r.code !== 0).length;
 if (failed > 0) {
   console.error(
