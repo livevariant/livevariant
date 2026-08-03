@@ -8,6 +8,7 @@ import {
   createApp,
   counterKey,
   derivedToArtifacts,
+  ModelCache,
   TestService,
   type RequestIdentity,
   type ServingParams,
@@ -33,6 +34,14 @@ import { TestStorage } from "./test-storage.js";
  */
 
 export class TestStateDO extends DurableObject {
+  /**
+   * Decoded-model cache for this object's lifetime. The DO is exactly
+   * the place such a cache belongs: single-threaded, long-lived, and
+   * every request for its test lands here, so the blob decode happens
+   * once per model version instead of once per request.
+   */
+  private modelCache = new ModelCache();
+
   private store = new TestStorage({
     get: key => this.ctx.storage.get(key),
     put: (key, value) => this.ctx.storage.put(key, value),
@@ -87,7 +96,11 @@ export class TestStateDO extends DurableObject {
   }
 
   private service(testId: string): TestService {
-    return new TestService(this.localStore(testId), mulberry32(randomSeed()));
+    return new TestService(
+      this.localStore(testId),
+      mulberry32(randomSeed()),
+      this.modelCache
+    );
   }
 
   // ---- whole operations: one RPC per serving request ----

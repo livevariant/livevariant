@@ -20,6 +20,7 @@ export {
   type RewardRequest
 } from "./api-schemas.js";
 export { MemoryStore } from "./store/memory.js";
+export { ModelCache } from "./store/model-cache.js";
 export {
   MemoryAssetStore,
   type AssetStore,

@@ -38,8 +38,10 @@ import {
   blobToModel,
   modelToBlob,
   pullDelta,
-  successDelta
+  successDelta,
+  type ModelBlob
 } from "./store/snapshot.js";
+import { ModelCache } from "./store/model-cache.js";
 import {
   counterKey,
   GLOBAL_SCOPE,
@@ -189,9 +191,16 @@ export interface TestBackend {
 }
 
 export class TestService implements TestBackend {
+  /**
+   * The cache is per-service by default, which is exactly right for the
+   * Node server (one service for the process lifetime). The Durable
+   * Object constructs a service per RPC and therefore passes its own
+   * long-lived cache in.
+   */
   constructor(
     private store: StateStore,
-    private rng: Rng
+    private rng: Rng,
+    private modelCache: ModelCache = new ModelCache()
   ) {}
 
   /** Stats from the event log, with the cap policy applied. */
@@ -355,22 +364,42 @@ export class TestService implements TestBackend {
     params: ServingParams
   ): Promise<{ model: JointModel; version: number }> {
     const blob = await this.store.getBlob(modelKey(params.testId));
-    if (blob) {
-      const stored = blobToModel(blob.data);
-      // A blob written under another shape indexes different features;
-      // shape pinning makes this unreachable in normal operation, so a
-      // mismatch means corruption and a fresh model is the safe answer
-      // (a recompute rebuilds the real one from the log).
-      if (
-        stored.dim === params.dim &&
-        stored.slotSizes.length === params.slotSizes.length &&
-        stored.slotSizes.every((n, i) => n === params.slotSizes[i])
-      ) {
-        return { model: stored.model, version: blob.version };
-      }
-      return { model: this.freshModel(params), version: blob.version };
+    if (!blob) {
+      return { model: this.freshModel(params), version: 0 };
     }
-    return { model: this.freshModel(params), version: 0 };
+    // The cache skips the decode, the biggest CPU term at large dims.
+    // Keyed by version, so it can never serve a stale model; missing is
+    // always safe, just slower.
+    const stored =
+      this.modelCache.get(params.testId, blob.version) ??
+      this.decodeAndCache(params.testId, blob);
+    // A blob written under another shape indexes different features;
+    // shape pinning makes this unreachable in normal operation, so a
+    // mismatch (or an undecodable blob) means corruption and a fresh
+    // model is the safe answer (a recompute rebuilds the real one from
+    // the log).
+    if (
+      stored &&
+      stored.dim === params.dim &&
+      stored.slotSizes.length === params.slotSizes.length &&
+      stored.slotSizes.every((n, i) => n === params.slotSizes[i])
+    ) {
+      return { model: stored.model, version: blob.version };
+    }
+    return { model: this.freshModel(params), version: blob.version };
+  }
+
+  private decodeAndCache(
+    testId: string,
+    blob: { data: string; version: number }
+  ): ModelBlob | null {
+    try {
+      const decoded = blobToModel(blob.data);
+      this.modelCache.set(testId, blob.version, decoded);
+      return decoded;
+    } catch {
+      return null;
+    }
   }
 
   private freshModel(params: ServingParams): JointModel {
@@ -439,6 +468,15 @@ export class TestService implements TestBackend {
         version
       );
       if (ok) {
+        // Write-through: both stores bump the version by one on success,
+        // so the next request decodes nothing. If an exotic adapter
+        // versions differently the entry simply never matches, which is
+        // a miss, not a wrong answer.
+        this.modelCache.set(params.testId, version + 1, {
+          slotSizes: params.slotSizes,
+          dim: params.dim,
+          model
+        });
         return;
       }
     }

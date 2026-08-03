@@ -22,11 +22,16 @@ export function canonicalJson(value: unknown): string {
 }
 
 export function bytesToBase64Url(bytes: Uint8Array): string {
-  let bin = "";
-  for (const b of bytes) {
-    bin += String.fromCharCode(b);
+  // Chunked: one fromCharCode call per 32KB rather than per byte, which
+  // matters now that model blobs (hundreds of KB) ride through here.
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    chunks.push(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));
   }
-  return btoa(bin).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+  return btoa(chunks.join(""))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
 }
 
 export function base64UrlToBytes(encoded: string): Uint8Array {
