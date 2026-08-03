@@ -8,9 +8,12 @@ import {
   CardTitle,
   CardDescription
 } from "@/components/ui/card";
-import { DEFAULT_SERVER_URL } from "@/lib/tests-store";
+import { useServeUrl } from "@/lib/serve-url";
 
 export function Landing() {
+  // The snippet has to name the deployment the reader is actually looking
+  // at, not a constant that is wrong for every self-hoster.
+  const serveUrl = useServeUrl();
   return (
     <div className="space-y-16">
       <section className="space-y-6 pt-8 text-center">
@@ -93,7 +96,7 @@ export function Landing() {
               <code>{`import { createTest } from "@livevariant/sdk";
 
 const test = await createTest("<encoded-config>", {
-  serverUrl: "${DEFAULT_SERVER_URL}"
+  serverUrl: "${serveUrl}"
 });
 headline.textContent = test.variant.text;
 // conversions auto-tracked from your existing GA events`}</code>

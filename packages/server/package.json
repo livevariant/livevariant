@@ -35,7 +35,9 @@
   "dependencies": {
     "@hono/node-server": "^2.0.12",
     "@livevariant/core": "0.0.1",
+    "@livevariant/mcp": "0.0.1",
     "@livevariant/tools": "0.0.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "hono": "^4.12.33",
     "zod": "^4.4.3"
   },

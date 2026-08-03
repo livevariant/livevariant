@@ -180,11 +180,12 @@ interface Env {
   /** Comma-separated destination hosts; unset means allow-all. */
   LV_ALLOWED_DESTINATIONS?: string;
   /**
-   * Public origin of the tool API and its docs. Unset leaves them
-   * unmounted, which is the right shape for livevariant.link: that domain
-   * carries bulk email traffic and has no business hosting a docs page.
+   * Origin to put in the links visitors follow. Unset means every URL is
+   * built from the origin the request arrived on, which is all a
+   * single-domain deployment needs. Set it when serving has its own
+   * domain, to keep bulk email traffic off the dashboard's reputation.
    */
-  LV_API_URL?: string;
+  LV_SERVE_URL?: string;
 }
 
 /** Counter keys arrive as c:{testId}:{scope}; the DO stores scopes. */
@@ -247,7 +248,7 @@ export default {
               .map(h => h.trim())
               .filter(Boolean)
           : undefined,
-        apiUrl: env.LV_API_URL
+        serveUrl: env.LV_SERVE_URL
       });
       apps.set(env, app);
     }

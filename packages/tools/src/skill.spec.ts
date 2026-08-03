@@ -58,7 +58,9 @@ describe("the generated SKILL", () => {
     }
   });
 
-  it("wires each bundle to the same stdio MCP server", () => {
+  it("wires each bundle to the hosted MCP endpoint", () => {
+    // Hosted rather than a local process: an installed plugin has to work
+    // without the user first publishing or installing anything.
     for (const platform of ["claude", "chatgpt"]) {
       const config = JSON.parse(
         fs.readFileSync(
@@ -66,10 +68,8 @@ describe("the generated SKILL", () => {
           "utf8"
         )
       );
-      expect(config.mcpServers.livevariant.command).toBe("npx");
-      expect(config.mcpServers.livevariant.args.join(" ")).toContain(
-        "@livevariant/mcp"
-      );
+      expect(config.mcpServers.livevariant.type).toBe("http");
+      expect(config.mcpServers.livevariant.url).toMatch(/^https:\/\/.+\/mcp$/);
     }
   });
 });

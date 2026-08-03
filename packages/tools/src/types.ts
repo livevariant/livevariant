@@ -14,8 +14,18 @@ import type { z } from "zod";
 
 /** Everything a handler is allowed to reach outside itself. */
 export interface ToolContext {
-  /** Origin serving the test URLs these tools build and read. */
+  /**
+   * This deployment's own origin: where the dashboard lives, and the only
+   * place a stats secret is ever sent.
+   */
   serverUrl: string;
+  /**
+   * Origin to put in the links visitors follow. Defaults to serverUrl, so
+   * a self-hoster needs one domain and no configuration; set it only when
+   * serving has its own domain to keep bulk email traffic away from the
+   * dashboard's reputation.
+   */
+  serveUrl?: string;
   /** Injected so tests need no network and hosts can supply their own. */
   fetch: typeof globalThis.fetch;
 }

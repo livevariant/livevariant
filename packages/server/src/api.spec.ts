@@ -16,15 +16,11 @@ const B = "https://example.com/b";
 let app: Hono;
 
 beforeEach(() => {
-  app = createApp({
-    store: new MemoryStore(),
-    rng: mulberry32(42),
-    apiUrl: "https://livevariant.com"
-  });
+  app = createApp({ store: new MemoryStore(), rng: mulberry32(42) });
 });
 
 async function post(path: string, body: unknown) {
-  return app.request(path, {
+  return app.request(`https://livevariant.com${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body)
@@ -84,7 +80,7 @@ describe("the tool API", () => {
   });
 
   it("publishes a spec describing exactly what is mounted", async () => {
-    const res = await app.request("/openapi.json");
+    const res = await app.request("https://livevariant.com/openapi.json");
     expect(res.status).toBe(200);
     const doc = (await res.json()) as Record<string, any>;
     expect(Object.keys(doc.paths).sort()).toEqual(
@@ -93,23 +89,80 @@ describe("the tool API", () => {
     expect(doc.servers[0].url).toBe("https://livevariant.com");
   });
 
+  it("tells the dashboard where its links should point", async () => {
+    // The builder is a static build and cannot know this at compile time,
+    // so a hardcoded default would be wrong for the hosted service or for
+    // every self-hoster, depending which way it was written.
+    const res = await app.request("https://ab.internal/config");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ serveUrl: "https://ab.internal" });
+
+    const split = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(1),
+      serveUrl: "https://livevariant.link"
+    });
+    const res2 = await split.request("https://livevariant.com/config");
+    expect(await res2.json()).toEqual({ serveUrl: "https://livevariant.link" });
+  });
+
   it("serves the docs page", async () => {
-    const res = await app.request("/docs");
+    const res = await app.request("https://livevariant.com/docs");
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("swagger-ui");
   });
 
-  it("stays unmounted when the deployment only serves variants", async () => {
-    // livevariant.link carries email traffic; it has no business hosting
-    // docs, and an unmounted API is one less surface on that domain.
-    const serveOnly = createApp({
-      store: new MemoryStore(),
-      rng: mulberry32(1)
+  it("builds every URL from the origin the caller reached", async () => {
+    // One domain doing everything is the default and needs no
+    // configuration: deploy anywhere and the links are right, because they
+    // are made from the request itself.
+    const res = await app.request("https://ab.internal/api/v1/build-test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ variants: [{ url: A }, { url: B }] })
     });
-    expect((await serveOnly.request("/openapi.json")).status).toBe(404);
-    expect(
-      (await serveOnly.request(toolPath("build_test"), { method: "POST" }))
-        .status
-    ).toBe(404);
+    const out = (await res.json()) as Record<string, any>;
+    expect(out.urls.serve).toBe(`https://ab.internal/s/${out.config}`);
+    expect(out.urls.manage).toContain("https://ab.internal/manage/");
+  });
+
+  it("puts visitor links on the serving domain when there is one", async () => {
+    // The only thing a separate serving domain changes is where visitors
+    // are sent; the creator still manages the test where they found it.
+    const split = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(1),
+      serveUrl: "https://livevariant.link"
+    });
+    const res = await split.request(
+      "https://livevariant.com/api/v1/build-test",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ variants: [{ url: A }, { url: B }] })
+      }
+    );
+    const out = (await res.json()) as Record<string, any>;
+    expect(out.urls.serve).toContain("https://livevariant.link/s/");
+    expect(out.emailTemplate.imageSrc).toContain("https://livevariant.link/s?");
+    expect(out.urls.manage).toContain("https://livevariant.com/manage/");
+  });
+
+  it("reads its own stats without leaving the process", async () => {
+    // The bug this pins: get_stats fetches /stats, and a Worker cannot
+    // fetch its own hostname, so the injected fetch has to route back into
+    // this same app. In production this surfaced as a 500.
+    const built = (await (
+      await post(toolPath("build_test"), { variants: [{ url: A }, { url: B }] })
+    ).json()) as Record<string, any>;
+    await app.request(`https://livevariant.com/s/${built.config}?id=r1`, {
+      headers: { accept: "text/html" }
+    });
+    const res = await post(toolPath("get_stats"), {
+      test: built.config,
+      statsSecret: built.statsSecret
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as any).totalAssignments).toBe(1);
   });
 });
