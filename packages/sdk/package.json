@@ -35,5 +35,8 @@
   "files": [
     "dist",
     "!**/*.tsbuildinfo"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

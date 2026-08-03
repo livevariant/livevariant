@@ -435,6 +435,22 @@ npm run lint
 The repo is an [nx](https://nx.dev) workspace; `npx nx graph` shows the
 project layout.
 
+## Releasing
+
+```bash
+npm run release        # prompts for the bump; or: npm run release patch
+npm run release:dry    # walk the whole flow, write nothing
+```
+
+All five npm packages (`core`, `tools`, `server`, `mcp`, `sdk`) release in
+lockstep: one version, every package published on every release, changed
+or not. They pin each other exactly, so a partial publish would put
+combinations on npm that never existed in git. The script versions
+everything, regenerates the agent manifests (they embed the version),
+makes one commit and one `v{version}` tag, and publishes. Cut from `main`,
+with `npm login` done; a failed publish leaves the commit and tag in
+place, and `npx nx release publish` retries without re-versioning.
+
 ## License
 
 [AGPL-3.0](LICENSE). Self-hosting for your own use is unrestricted; if you
