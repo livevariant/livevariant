@@ -7,7 +7,13 @@
       "path": "./packages/core"
     },
     {
+      "path": "./packages/tools"
+    },
+    {
       "path": "./packages/server"
+    },
+    {
+      "path": "./packages/mcp"
     },
     {
       "path": "./packages/workers"

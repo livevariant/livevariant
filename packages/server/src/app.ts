@@ -29,6 +29,7 @@ import {
   rewardRequestSchema,
   MAX_REWARD_AMOUNT
 } from "./api-schemas.js";
+import { createApi } from "./api.js";
 import { renderManagePage } from "./manage-page.js";
 import {
   paramsFromConfig,
@@ -55,6 +56,12 @@ export interface AppOptions {
    * config's own origins are not a trust boundary).
    */
   allowedDestinations?: string[];
+  /**
+   * Public origin for the tool API's generated URLs and OpenAPI document.
+   * Unset leaves the API unmounted, which is right for a deployment that
+   * only serves variants.
+   */
+  apiUrl?: string;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -339,6 +346,12 @@ export function createApp(options: AppOptions): Hono {
   }
 
   app.get("/health", c => c.json({ ok: true }));
+
+  // The tool API, OpenAPI document and Swagger page, all generated from
+  // the shared registry the MCP server also registers.
+  if (options.apiUrl) {
+    app.route("/", createApi({ serverUrl: options.apiUrl }));
+  }
 
   // Redirect-mode serve: 302 to the assigned arm's url/image. Registered
   // twice: /s/:cfg carries a base64 config, bare /s spells the same test

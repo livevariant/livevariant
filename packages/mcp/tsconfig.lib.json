@@ -7,14 +7,11 @@
     "emitDeclarationOnly": false,
     "declaration": true,
     "forceConsistentCasingInFileNames": true,
-    "lib": ["es2022", "dom", "dom.asynciterable"],
+    "lib": ["es2022", "dom"],
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "references": [
-    {
-      "path": "../core/tsconfig.lib.json"
-    },
     {
       "path": "../tools/tsconfig.lib.json"
     }

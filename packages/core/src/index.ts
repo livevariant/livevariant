@@ -123,6 +123,13 @@ export {
   type ExclusionResult
 } from "./exclusions.js";
 export {
+  MIN_PULLS_TO_CALL,
+  analyzeOutcomes,
+  type ArmOutcome,
+  type DecisionAnalysis,
+  type DecisionOptions
+} from "./decide.js";
+export {
   recommendAlgorithm,
   recommendFromObserved,
   type AlgorithmRecommendation

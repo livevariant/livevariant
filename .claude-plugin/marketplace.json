@@ -1,0 +1,19 @@
+{
+  "name": "livevariant",
+  "owner": {
+    "name": "LiveVariant",
+    "url": "https://livevariant.com"
+  },
+  "plugins": [
+    {
+      "name": "livevariant",
+      "source": "./plugins/claude",
+      "description": "Run A/B tests that pick their own winner. Build tests from a set of variants, get URLs for email or web, and read results with real win probabilities instead of eyeballed conversion rates.",
+      "version": "0.0.1",
+      "author": {
+        "name": "LiveVariant"
+      },
+      "homepage": "https://livevariant.com"
+    }
+  ]
+}

@@ -24,16 +24,15 @@ registration, no dashboard required.
 
 ## Packages
 
-| Package                | Purpose                                                      |
-| ---------------------- | ------------------------------------------------------------ |
-| `@livevariant/core`    | Config codec, hash identity, bandit math, priors, state      |
-| `@livevariant/server`  | Hono serving app behind a pluggable StateStore + TestBackend |
-| `@livevariant/workers` | Cloudflare deployment: one SQLite Durable Object per test    |
-| `@livevariant/sdk`     | Browser SDK: sticky variants, GA-driven conversion tracking  |
-| `apps/web`             | livevariant.com: product site and account-free test builder  |
-
-An MCP server (LLM-drafted variants and warm-start priors) is next; see
-the repository roadmap.
+| Package                | Purpose                                                        |
+| ---------------------- | -------------------------------------------------------------- |
+| `@livevariant/core`    | Config codec, hash identity, bandit math, priors, state        |
+| `@livevariant/server`  | Hono serving app behind a pluggable StateStore + TestBackend   |
+| `@livevariant/workers` | Cloudflare deployment: one SQLite Durable Object per test      |
+| `@livevariant/sdk`     | Browser SDK: sticky variants, GA-driven conversion tracking    |
+| `apps/web`             | livevariant.com: product site and account-free test builder    |
+| `@livevariant/tools`   | One registry of every agent operation: MCP, REST and the SKILL |
+| `@livevariant/mcp`     | MCP server (stdio) over that registry                          |
 
 ### HTTP surface
 
@@ -54,6 +53,55 @@ Serve and click redirects append `_lvt`/`_lvid`/`_lvvar` so the SDK on the
 destination site can adopt the assignment (`decorateRedirects: false` opts
 out).
 
+### Using it from an AI assistant
+
+Everything an assistant can do lives in one registry (`@livevariant/tools`),
+and every surface is generated from it: the MCP server registers those
+tools, the REST API mounts them, the OpenAPI document describes them, and
+the agent SKILL documents them. Nothing about a tool is written down
+twice, and CI regenerates and fails on any diff.
+
+| Tool                  | What it does                                           |
+| --------------------- | ------------------------------------------------------ |
+| `build_test`          | Variants in, URLs and a stats secret out               |
+| `inspect_test`        | Decode any test URL and lint it                        |
+| `recommend_algorithm` | ts / bucketed / linear, with reasoning                 |
+| `generate_priors`     | Turn a prediction into capped warm-start pseudo-counts |
+| `get_stats`           | Results, win probabilities and a stop/continue call    |
+| `variant_brief`       | Channel-specific constraints for drafting the variants |
+
+Install the plugin (this repository is the marketplace):
+
+```bash
+claude
+/plugin marketplace add livevariant/livevariant
+/plugin install livevariant@livevariant
+```
+
+Or run the MCP server directly:
+
+```bash
+npx -y @livevariant/mcp
+```
+
+There is no authentication and none is missing: a test is its config, and
+reading results needs the stats secret that the server checks against the
+hash inside that config, so authority travels in the arguments. Set
+`LIVEVARIANT_SERVER_URL` to point the tools at a self-hosted deployment.
+
+**No MCP? Use the HTTP API.** An agent handed the SKILL cannot always
+install an MCP server, so every tool is also `POST /api/v1/<tool-name>`
+with the same input and output, documented at `/docs` (Swagger) and
+`/openapi.json`. Both call the same handler, so they cannot disagree. Set
+`LV_API_URL` to mount it; leaving it unset keeps the serving domain to
+serving, which is what livevariant.link wants.
+
+`get_stats` is the one worth knowing about. It returns the probability
+each variant is genuinely best and the expected cost of stopping now,
+because comparing conversion rates by eye is how tests get called wrong: a
+variant ahead 2/10 to 1/10 looks twice as good and is close to a coin
+flip. It also refuses to call a test that has barely run.
+
 ### The SDK never breaks a page
 
 `createTest` resolves even when LiveVariant is unreachable, slow, or
@@ -69,6 +117,10 @@ because a customer may await it inside their own checkout.
 Configs are unauthenticated by design: the URL is the test. That has two
 consequences worth stating plainly.
 
+- **The tool API is unauthenticated too**, and mounts only when `LV_API_URL`
+  is set. It builds and inspects configs and proxies stats reads, all of
+  which a caller could do offline with the same inputs, so it grants no
+  authority the config and its secret did not already carry.
 - **Serving endpoints are redirectors.** Anyone can author a config
   pointing anywhere, so set `LV_ALLOWED_DESTINATIONS` (comma-separated
   hosts) on a public deployment to keep your domain out of phishing

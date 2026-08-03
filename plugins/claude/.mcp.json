@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "livevariant": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@livevariant/mcp@0.0.1"
+      ]
+    }
+  }
+}

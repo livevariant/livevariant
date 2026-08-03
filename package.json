@@ -13,13 +13,15 @@
     "lint": "nx run-many -t lint",
     "typecheck": "nx run-many -t typecheck",
     "graph": "nx graph",
-    "prepare": "husky"
+    "prepare": "husky",
+    "generate": "node scripts/generate-agent-assets.mjs"
   },
   "lint-staged": {
     "*": "prettier --ignore-unknown --write"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@nx/eslint": "23.1.1",
     "@nx/eslint-plugin": "23.1.1",
     "@nx/js": "23.1.1",
