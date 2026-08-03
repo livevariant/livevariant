@@ -10,6 +10,7 @@
   "scripts": {
     "build": "nx run-many -t build",
     "test": "nx run-many -t test",
+    "test:no-browser": "nx run-many -t test --exclude @livevariant/sdk",
     "lint": "nx run-many -t lint",
     "typecheck": "nx run-many -t typecheck",
     "graph": "nx graph",

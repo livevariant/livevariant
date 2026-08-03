@@ -35,6 +35,10 @@ export function Builder() {
   const detectedServerUrl = useServeUrl();
   const [serverOverride, setServerOverride] = useState<string | null>(null);
   const serverUrl = serverOverride ?? detectedServerUrl;
+  // Guarded at use, not in the change handler: an empty field has to stay
+  // empty while someone clears it to type a new one, but an empty serving
+  // origin would build relative URLs that serve nothing.
+  const effectiveServerUrl = serverUrl.trim() || detectedServerUrl;
   const [arms, setArms] = useState<ArmDraft[]>([
     { name: "control", url: "", text: "" },
     { name: "variant-b", url: "", text: "" }
@@ -106,7 +110,7 @@ export function Builder() {
         encoded,
         testId,
         statsSecret,
-        serverUrl: serverUrl.replace(/\/+$/, ""),
+        serverUrl: effectiveServerUrl.replace(/\/+$/, ""),
         createdAt: Date.now()
       });
       if (warnings.length > 0) {
