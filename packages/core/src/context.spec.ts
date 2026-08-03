@@ -10,16 +10,9 @@ import {
 } from "./context.js";
 import { testConfigSchema } from "./schema.js";
 
-const ARMS = [
-  { name: "a", formats: { text: "A" } },
-  { name: "b", formats: { text: "B" } }
-];
-
 function configWithDims(dims: unknown[]) {
   return testConfigSchema.parse({
-    v: 1,
-    arms: ARMS,
-    alg: "bucketed",
+    variants: ["A", "B"],
     ctx: { dims },
     statsKeyHash: "0".repeat(64)
   });
@@ -141,15 +134,15 @@ describe("mergeFeatureIndices", () => {
     // Each key=value pair hashes to its own slot, so a set union of the
     // two halves is the same vector the linear model would have seen if
     // the caller had sent the whole context itself.
-    const caller = featureIndices({ persona: "power" });
-    expect(mergeFeatureIndices(caller, { country: "nl" })).toEqual(
-      featureIndices({ persona: "power", country: "nl" })
+    const caller = featureIndices({ persona: "power" }, 16);
+    expect(mergeFeatureIndices(caller, { country: "nl" }, 16)).toEqual(
+      featureIndices({ persona: "power", country: "nl" }, 16)
     );
   });
 
   it("keeps the bias slot when there is nothing to merge", () => {
-    expect(mergeFeatureIndices(null, {})).toEqual([0]);
-    expect(mergeFeatureIndices(featureIndices(null), {})).toEqual([0]);
+    expect(mergeFeatureIndices(null, {}, 16)).toEqual([0]);
+    expect(mergeFeatureIndices(featureIndices(null, 16), {}, 16)).toEqual([0]);
   });
 });
 

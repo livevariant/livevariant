@@ -1,10 +1,22 @@
 import { z } from "zod";
+import { cellCount, MAX_CELLS } from "./cells.js";
 import { AUTO_SIGNALS } from "./signals.js";
 
 /**
- * The test config IS the test: it travels base64url-encoded in serve URLs
- * and its canonical hash (minus tuning fields, see codec.ts) is the test's
- * identity. Keep this schema lean; every byte rides along on every request.
+ * The test config, version 2: slots-native. A test is one or more SLOTS
+ * (page or email elements), each with variants; the test optimizes the
+ * combination. A classic A/B test is simply one slot.
+ *
+ * There is deliberately no algorithm field, no bucket tuning, nothing to
+ * choose: every test runs the same joint linear Thompson sampling model
+ * (model.ts), sized and configured from this shape. Users describe what
+ * to test; the mathematics is our job.
+ *
+ * Configs are written to be READ. The canonical wire form is still the
+ * encoded URL, but authoring happens as the plain object below, with
+ * shorthands where they help: a variant can be a bare string (a URL
+ * becomes its destination, anything else its text), and a single-slot
+ * test can say `variants` instead of `slots`.
  */
 
 /**
@@ -15,26 +27,43 @@ import { AUTO_SIGNALS } from "./signals.js";
  */
 const httpUrl = z.url({ protocol: /^https?$/ });
 
-const armFormatsSchema = z
+const variantObject = z
   .object({
-    /** Destination page for redirect-mode serving (landing page tests). */
+    /** Shown in stats and utm stamps. Defaults to v1, v2, ... per slot. */
+    name: z.string().min(1).max(64).optional(),
+    /** Destination page for redirect-mode serving. */
     url: httpUrl.optional(),
-    /** Image asset URL, for email hero images etc. */
+    /** Image asset URL, for email variants (hosted assets land here). */
     image: httpUrl.optional(),
+    /** Inline content, served by the SDK. */
     html: z.string().optional(),
     md: z.string().optional(),
-    text: z.string().optional()
+    text: z.string().optional(),
+    /** Where a click on this variant lands, when it differs per variant. */
+    redirectUrl: httpUrl.optional()
   })
-  .refine(f => Object.values(f).some(v => v !== undefined), {
-    message: "arm must define at least one format"
-  });
+  .refine(
+    v =>
+      v.url !== undefined ||
+      v.image !== undefined ||
+      v.html !== undefined ||
+      v.md !== undefined ||
+      v.text !== undefined,
+    { message: "variant must define url, image, html, md or text" }
+  );
 
-const armSchema = z.object({
-  name: z.string().min(1),
-  formats: armFormatsSchema,
-  /** Overrides the test-level redirectUrl for click redirects. */
-  redirectUrl: httpUrl.optional()
-});
+/**
+ * A bare string is the most readable spelling of the common cases:
+ * "https://..." is a destination, anything else is text content.
+ */
+const variantSchema = z.preprocess(value => {
+  if (typeof value === "string") {
+    return /^https?:\/\//i.test(value) ? { url: value } : { text: value };
+  }
+  return value;
+}, variantObject);
+
+const SLOT_KEY = /^[a-z][a-z0-9_-]{0,31}$/;
 
 export const ctxDimSchema = z.object({
   key: z.string().min(1),
@@ -42,94 +71,67 @@ export const ctxDimSchema = z.object({
   values: z.array(z.string().min(1)).min(2).optional(),
   /**
    * Fill this dimension from a signal the server derives, so the caller
-   * never has to pass it. This is what lets an email redirect be
-   * contextual: there is no JavaScript in an inbox, and the sender may
-   * not know the reader's country either. A caller-supplied `c_<key>`
-   * still wins, since you know your own users better than an IP
+   * never has to pass it (country, device, utm_source, ...). A supplied
+   * `c_<key>` still wins: you know your own users better than an IP
    * database does.
    */
   from: z.enum(AUTO_SIGNALS).optional()
 });
 
 /**
- * Pseudo-observations added to the uniform Beta(1,1) prior at sampling
- * time. alpha counts as successes, beta as failures. Capped by
- * priorStrengthCap so a miscalibrated LLM guess is washed out by real data.
+ * Warm-start prior for one variant, typically an LLM's guess: "this will
+ * convert around `mean`, and I am `strength` observations sure". Capped by
+ * priorStrengthCap so a confident wrong guess costs a little early
+ * traffic, never the test.
  */
-const armPriorSchema = z.object({
-  alpha: z.number().nonnegative(),
-  beta: z.number().nonnegative()
+const variantPriorSchema = z.object({
+  mean: z.number().min(0).max(1),
+  strength: z.number().nonnegative()
 });
 
-const priorsSchema = z.object({
-  /** Global per-arm pseudo-counts (same order as arms). */
-  arms: z.array(armPriorSchema).optional(),
-  /** Context-specific pseudo-counts, matched by exact ctx values. */
-  buckets: z
-    .array(
-      z.object({
-        ctx: z.record(z.string(), z.string()),
-        arms: z.array(armPriorSchema)
-      })
-    )
-    .optional(),
-  /**
-   * Linear-bandit priors: expected reward rate per arm plus a strength in
-   * pseudo-observations. Baked into the model's initial state (a change
-   * here needs a recompute, unlike arms/buckets priors which apply at
-   * sampling time).
-   */
-  linear: z
-    .array(
-      z.object({
-        mean: z.number().min(0).max(1),
-        strength: z.number().nonnegative()
-      })
-    )
-    .optional()
-});
-
-export const testConfigSchema = z
+const configObject = z
   .object({
-    v: z.literal(1),
+    v: z.literal(2).default(2),
     name: z.string().optional(),
-    arms: z.array(armSchema).min(2),
-    alg: z.enum(["ts", "bucketed", "linear"]).default("ts"),
+    /**
+     * The elements under test, keyed by a stable name ("hero", "cta").
+     * Canonical slot order is the SORTED key order: canonical JSON sorts
+     * keys, and cell indices must survive serialization.
+     */
+    slots: z.record(z.string().regex(SLOT_KEY), z.array(variantSchema).min(1)),
     ctx: z.object({ dims: z.array(ctxDimSchema).min(1) }).optional(),
-    priors: priorsSchema.optional(),
-    /** Max pseudo-observations any prior may contribute per arm. */
+    /**
+     * Per-slot warm-start priors, one entry per variant.
+     * Identity-excluded: adding or changing them keeps the test's id and
+     * its history (a recompute rebuilds the model).
+     */
+    priors: z.record(z.string(), z.array(variantPriorSchema)).optional(),
+    /** Max pseudo-observations any prior may contribute per variant. */
     priorStrengthCap: z.number().positive().default(50),
-    /** Fallback click-redirect target when the arm has none. */
+    /** Fallback click-redirect target when the variant has none. */
     redirectUrl: httpUrl.optional(),
     /** GA4 event names the SDK auto-rewards on (dataLayer interception). */
     rewardEvents: z.array(z.string().min(1)).optional(),
-    /** Bucketed alg: bucket pulls needed before leaving global fallback. */
-    minBucketPulls: z.number().int().positive().default(100),
     /**
      * Append _lvt/_lvid/_lvvar to redirect destinations so an SDK on the
      * destination site can adopt the assignment (identity handoff).
      */
     decorateRedirects: z.boolean().default(true),
     /**
-     * Stamp the served variant's name into this query parameter on
-     * redirect, e.g. "utm_content", so a test shows up in the customer's
-     * own analytics without them installing anything. Off unless set:
-     * writing into someone's attribution scheme uninvited is not a
-     * default anyone should get by accident.
+     * Stamp the served combination into this query parameter on redirect,
+     * e.g. "utm_content", so the test shows up in the customer's own
+     * analytics without them installing anything.
      */
     variantParam: z.string().min(1).max(32).optional(),
     /**
      * Carry query parameters we do not recognize onto the redirect
-     * target. ESPs and ad platforms append their own attribution
-     * (utm_source, gclid), and swallowing it would break the customer's
-     * analytics exactly when the test starts mattering.
+     * target, so utm_source and friends survive the hop.
      */
     forwardParams: z.boolean().default(true),
     /**
-     * sha256 hex of the creator-held stats secret. Optional so a test can
-     * be spelled out in query parameters with nothing but its variants,
-     * but a test without one has no readable stats at all: no secret can
-     * match, so /stats, /recompute and /exclude stay closed forever.
+     * sha256 hex of the creator-held stats secret. Optional so a
+     * variants-only query URL parses, but a test without one has no
+     * readable stats, ever: no secret can match a hash that is not there.
      */
     statsKeyHash: z
       .string()
@@ -137,40 +139,103 @@ export const testConfigSchema = z
       .optional()
   })
   .superRefine((config, issues) => {
-    const armCount = config.arms.length;
-    for (const [field, priorArms] of [
-      ["arms", config.priors?.arms],
-      ["linear", config.priors?.linear]
-    ] as const) {
-      if (priorArms && priorArms.length !== armCount) {
-        issues.addIssue({
-          code: "custom",
-          path: ["priors", field],
-          message: `priors.${field} must have one entry per arm (${armCount})`
-        });
-      }
-    }
-    for (const [i, bucket] of (config.priors?.buckets ?? []).entries()) {
-      if (bucket.arms.length !== armCount) {
-        issues.addIssue({
-          code: "custom",
-          path: ["priors", "buckets", i, "arms"],
-          message: `bucket priors must have one entry per arm (${armCount})`
-        });
-      }
-    }
-    if ((config.alg === "bucketed" || config.alg === "linear") && !config.ctx) {
+    const sizes = Object.entries(config.slots)
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([, variants]) => variants.length);
+    const cells = cellCount(sizes);
+    if (cells < 2) {
       issues.addIssue({
         code: "custom",
-        path: ["ctx"],
-        message: `alg "${config.alg}" requires a ctx definition`
+        path: ["slots"],
+        message: "a test needs at least two combinations to choose between"
       });
+    }
+    if (cells > MAX_CELLS) {
+      issues.addIssue({
+        code: "custom",
+        path: ["slots"],
+        message:
+          `${cells} combinations exceeds the ${MAX_CELLS}-cell limit; use ` +
+          "fewer variants per slot, or split into composed tests"
+      });
+    }
+    for (const [slotKey, priors] of Object.entries(config.priors ?? {})) {
+      const variants = config.slots[slotKey];
+      if (!variants) {
+        issues.addIssue({
+          code: "custom",
+          path: ["priors", slotKey],
+          message:
+            `priors name a slot that does not exist ` +
+            `(have: ${Object.keys(config.slots).join(", ")})`
+        });
+      } else if (priors.length !== variants.length) {
+        issues.addIssue({
+          code: "custom",
+          path: ["priors", slotKey],
+          message:
+            `slot "${slotKey}" has ${variants.length} variants ` +
+            `but ${priors.length} priors`
+        });
+      }
     }
   });
 
-export type TestConfig = z.infer<typeof testConfigSchema>;
-export type TestConfigInput = z.input<typeof testConfigSchema>;
-export type Arm = TestConfig["arms"][number];
+export const testConfigSchema = z.preprocess(value => {
+  // Single-slot sugar: `variants: [...]` reads better than a one-entry
+  // slots record, and most tests are single-slot.
+  if (
+    value !== null &&
+    typeof value === "object" &&
+    "variants" in value &&
+    !("slots" in value)
+  ) {
+    const { variants, ...rest } = value as Record<string, unknown>;
+    return { ...rest, slots: { main: variants } };
+  }
+  return value;
+}, configObject);
+
+export type TestConfig = z.output<typeof configObject>;
+export type TestConfigInput =
+  | z.input<typeof configObject>
+  | (Omit<z.input<typeof configObject>, "slots"> & {
+      slots?: never;
+      variants: z.input<typeof configObject>["slots"][string];
+    });
+export type Variant = TestConfig["slots"][string][number];
 export type CtxDim = z.infer<typeof ctxDimSchema>;
-export type ArmPrior = z.infer<typeof armPriorSchema>;
-export type Priors = z.infer<typeof priorsSchema>;
+export type VariantPriorInput = z.infer<typeof variantPriorSchema>;
+
+/**
+ * The slots in canonical order: sorted by key. Cell indices are defined
+ * against this order, and canonical JSON sorts keys, so the order
+ * survives every serialization round-trip.
+ */
+export function slotEntries(config: TestConfig): Array<[string, Variant[]]> {
+  return Object.entries(config.slots).sort(([a], [b]) => (a < b ? -1 : 1));
+}
+
+/** Variant counts per slot, canonical order. */
+export function slotSizes(config: TestConfig): number[] {
+  return slotEntries(config).map(([, variants]) => variants.length);
+}
+
+/** A variant's display name, defaulting per slot to v1, v2, ... */
+export function variantName(variant: Variant, index: number): string {
+  return variant.name?.trim() || `v${index + 1}`;
+}
+
+/** Per-slot variant names for one choice, e.g. { cta: "v1", hero: "b" }. */
+export function cellNames(
+  config: TestConfig,
+  choice: number[]
+): Record<string, string> {
+  const entries = slotEntries(config);
+  const names: Record<string, string> = {};
+  for (let i = 0; i < entries.length; i++) {
+    const [key, variants] = entries[i];
+    names[key] = variantName(variants[choice[i]], choice[i]);
+  }
+  return names;
+}

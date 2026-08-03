@@ -20,10 +20,12 @@ describe("configFromParams", () => {
     // The point of the param form: a campaign manager fills two template
     // fields and never learns this service exists.
     const { config } = await configFromParams(query(`v=${A}&v=${B}`));
-    expect(config.arms).toHaveLength(2);
-    expect(config.arms[0].formats.url).toBe(A);
-    expect(config.arms.map(arm => arm.name)).toEqual(["v1", "v2"]);
-    expect(config.alg).toBe("ts");
+    expect(config.slots.main).toHaveLength(2);
+    expect(config.slots.main[0].url).toBe(A);
+    expect(config.slots.main.map((v, i) => v.name ?? `v${i + 1}`)).toEqual([
+      "v1",
+      "v2"
+    ]);
     expect(config.forwardParams).toBe(true);
     expect(config.statsKeyHash).toBeUndefined();
   });
@@ -41,14 +43,13 @@ describe("configFromParams", () => {
   it("takes names, algorithm, redirect and context", async () => {
     const { config } = await configFromParams(
       query(
-        `v=${A}&v=${B}&vn=hero&vn=lifestyle&n=August+send&alg=bucketed` +
+        `v=${A}&v=${B}&vn=hero&vn=lifestyle&n=August+send` +
           `&ctx=source:utm_source,persona&r=https://shop.example.com/thanks` +
           `&stamp=utm_content&fw=0`
       )
     );
     expect(config.name).toBe("August send");
-    expect(config.arms.map(arm => arm.name)).toEqual(["hero", "lifestyle"]);
-    expect(config.alg).toBe("bucketed");
+    expect(config.slots.main.map(v => v.name)).toEqual(["hero", "lifestyle"]);
     expect(config.ctx?.dims).toEqual([
       { key: "source", from: "utm_source" },
       { key: "persona" }
@@ -75,6 +76,23 @@ describe("configFromParams", () => {
   });
 });
 
+describe("multi-slot query form", () => {
+  it("groups variants under s= markers", async () => {
+    // `s=` opens a slot; the v=/vn= that follow belong to it. This is the
+    // ESP spelling of a two-element email test.
+    const { config } = await configFromParams(
+      query(
+        `s=hero&v=${A}&v=${B}&s=cta&v=https://example.com/x&v=https://example.com/y` +
+          `&vn=warm&vn=cool&vn=go&vn=wait`
+      )
+    );
+    expect(Object.keys(config.slots).sort()).toEqual(["cta", "hero"]);
+    expect(config.slots.hero.map(v => v.name)).toEqual(["warm", "cool"]);
+    expect(config.slots.cta.map(v => v.name)).toEqual(["go", "wait"]);
+    expect(config.slots.cta[1].url).toBe("https://example.com/y");
+  });
+});
+
 describe("passthroughParams", () => {
   it("keeps attribution and drops everything of ours", async () => {
     const params = passthroughParams(
@@ -90,20 +108,10 @@ describe("passthroughParams", () => {
   });
 
   it("treats every config and runtime name as ours", () => {
-    for (const key of [
-      "v",
-      "vn",
-      "kh",
-      "alg",
-      "ctx",
-      "r",
-      "stamp",
-      "fw",
-      "n"
-    ]) {
+    for (const key of ["v", "vn", "kh", "s", "ctx", "r", "stamp", "fw", "n"]) {
       expect(isReservedParam(key)).toBe(true);
     }
-    for (const key of ["id", "auto", "to", "c_country"]) {
+    for (const key of ["id", "auto", "to", "slot", "c_country"]) {
       expect(isReservedParam(key)).toBe(true);
     }
     for (const key of ["utm_source", "gclid", "mc_cid", "c_"]) {

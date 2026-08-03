@@ -1,9 +1,5 @@
 import { AUTO_SIGNALS, type AutoSignal } from "./signals.js";
-import {
-  testConfigSchema,
-  type TestConfig,
-  type TestConfigInput
-} from "./schema.js";
+import { testConfigSchema, type TestConfigInput } from "./schema.js";
 import { computeTestId, type DecodedConfig } from "./codec.js";
 
 /**
@@ -22,19 +18,19 @@ import { computeTestId, type DecodedConfig } from "./codec.js";
 
 /** Parameters that configure the test itself. */
 export const CONFIG_PARAMS = [
-  "v", // variant target URL, repeated, in order (the first is the control)
+  "v", // variant target URL, repeated, in order (first = control)
   "vn", // variant name, repeated, positional
+  "s", // starts a new slot: s=hero&v=..&v=..&s=cta&v=.. (multi-slot)
   "n", // test name
   "kh", // statsKeyHash: the HASH of the stats secret, never the secret
-  "alg", // ts | bucketed | linear
   "ctx", // comma-separated dims: "country:country,persona"
   "r", // fallback redirect target for clicks
-  "stamp", // write the served variant into this param on redirect
+  "stamp", // write the served combination into this param on redirect
   "fw" // fw=0 turns off forwarding unrecognized params
 ] as const;
 
 /** Parameters the serving layer consumes; never config, never forwarded. */
-export const RUNTIME_PARAMS = ["id", "auto", "to"] as const;
+export const RUNTIME_PARAMS = ["id", "auto", "to", "slot"] as const;
 
 const RESERVED = new Set<string>([...CONFIG_PARAMS, ...RUNTIME_PARAMS]);
 
@@ -89,27 +85,43 @@ function parseCtx(spec: string | null): TestConfigInput["ctx"] {
 export async function configFromParams(
   query: URLSearchParams
 ): Promise<DecodedConfig> {
-  const targets = query.getAll("v").filter(value => value.trim().length > 0);
+  // Slots are declared in order: `s=hero` opens a slot, the `v=`/`vn=`
+  // pairs that follow belong to it, the next `s=` opens the next slot. A
+  // template with no `s=` at all is the single-slot common case.
+  const slots: Record<string, Array<{ name?: string; url: string }>> = {};
+  let current = "main";
+  let variantOrdinal = 0;
+  // Names are positional against the v order across the whole query, so
+  // `v=..&v=..&vn=hero&vn=lifestyle` works no matter where the vn sit.
   const names = query.getAll("vn");
-  if (targets.length < 2) {
+  for (const [key, value] of query.entries()) {
+    if (key === "s") {
+      const slotKey = value.trim();
+      if (slotKey.length > 0) {
+        current = slotKey;
+      }
+      continue;
+    }
+    if (key === "v" && value.trim().length > 0) {
+      const list = (slots[current] ??= []);
+      const name = names[variantOrdinal]?.trim();
+      list.push({ ...(name ? { name } : {}), url: value });
+      variantOrdinal++;
+    }
+  }
+  if (Object.keys(slots).length === 0) {
     throw new Error("a query-parameter test needs at least two `v` variants");
   }
+
   const input: TestConfigInput = {
-    v: 1,
-    arms: targets.map((target, i) => ({
-      // Names show up in stats and in the `vp` stamp, so they default to
-      // something short and legible in a report rather than leaving the
-      // reader to match CDN URLs by eye. v1 is the control.
-      name: names[i]?.trim() || `v${i + 1}`,
-      formats: { url: target }
-    })),
+    v: 2,
+    slots,
     ...(query.get("n") ? { name: query.get("n") as string } : {}),
     // `kh` is the sha256 of the stats secret, which is why it is safe in
     // a link that reaches a million inboxes. A pasted secret is not
     // 64 hex characters, so the schema rejects it rather than quietly
     // running a different test than the sender meant.
     ...(query.get("kh") ? { statsKeyHash: query.get("kh") as string } : {}),
-    ...(query.get("alg") ? { alg: query.get("alg") as TestConfig["alg"] } : {}),
     ...(parseCtx(query.get("ctx")) ? { ctx: parseCtx(query.get("ctx")) } : {}),
     ...(query.get("r") ? { redirectUrl: query.get("r") as string } : {}),
     ...(query.get("stamp")

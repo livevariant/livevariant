@@ -1,111 +1,80 @@
 import { describe, expect, it } from "vitest";
+import { mulberry32 } from "./rng.js";
 import {
   applyAssignment,
   applyFirstReward,
+  choose,
   newDerivedState,
   recomputeState,
-  type AssignmentRecord,
-  type StateInit
+  type AssignmentRecord
 } from "./state.js";
-import { featureIndices } from "./context.js";
-import { mulberry32 } from "./rng.js";
+import { dimForShape } from "./model.js";
 
 /**
- * The event log is the source of truth; the incrementally-maintained
- * derived state must always equal a from-scratch recompute. This is what
- * makes mid-test algorithm changes safe.
+ * The event-sourcing guarantee: incrementally maintained derived state
+ * equals a full replay of the records, and a replay survives anything a
+ * hostile or stale writer could have put in the log.
  */
-
-function randomEvents(count: number, seed: number): AssignmentRecord[] {
-  const rng = mulberry32(seed);
-  const contexts = [null, { device: "mobile" }, { device: "desktop" }];
-  const events: AssignmentRecord[] = [];
-  for (let i = 0; i < count; i++) {
-    const ctx = contexts[Math.floor(rng() * contexts.length)];
-    events.push({
-      armIndex: Math.floor(rng() * 3),
-      ctxKey: ctx ? JSON.stringify(ctx) : null,
-      featIdx: featureIndices(ctx),
-      rewardTotal: rng() < 0.3 ? 1 + Math.floor(rng() * 3) : 0,
-      firstSeen: 1_700_000_000_000 + i,
-      alg: "ts",
-      armCount: 3,
-      dim: 16
-    });
-  }
-  return events;
-}
-
-/**
- * Replays events the way production does: assignment applied at pull time,
- * reward applied later (interleaved), vs recompute's ordered replay.
- */
-function incremental(events: AssignmentRecord[], init: StateInit) {
-  const state = newDerivedState(init);
-  for (const rec of events) {
-    applyAssignment(state, rec);
-  }
-  // Rewards arrive delayed and in a different order than assignments.
-  for (const rec of [...events].reverse()) {
-    if (rec.rewardTotal > 0) {
-      applyFirstReward(state, rec);
-    }
-  }
-  return state;
-}
-
-function expectClose(a: unknown, b: unknown): void {
-  // Counter states compare exactly; linear states within float tolerance.
-  expect(JSON.parse(JSON.stringify(a))).toEqual(
-    roundDeep(JSON.parse(JSON.stringify(b)))
-  );
-
-  function roundDeep(value: unknown): unknown {
-    if (typeof value === "number") {
-      return expect.closeTo(value, 9) as unknown;
-    }
-    if (Array.isArray(value)) {
-      return value.map(roundDeep);
-    }
-    if (value && typeof value === "object") {
-      return Object.fromEntries(
-        Object.entries(value).map(([k, v]) => [k, roundDeep(v)])
-      );
-    }
-    return value;
-  }
+function record(partial: Partial<AssignmentRecord>): AssignmentRecord {
+  return {
+    cell: 0,
+    slotSizes: [2, 2],
+    dim: 32,
+    featIdx: [0],
+    ctxKey: null,
+    rewardTotal: 0,
+    firstSeen: 0,
+    ...partial
+  };
 }
 
 describe("recompute equivalence", () => {
-  const events = randomEvents(500, 5);
-
-  it.each(["ts", "bucketed", "linear"] as const)(
-    "incremental %s state equals recomputed state",
-    alg => {
-      const init: StateInit = { alg, armCount: 3 };
-      expectClose(incremental(events, init), recomputeState(events, init));
+  it("replay equals the incrementally maintained state", () => {
+    const init = { slotSizes: [2, 2], dim: dimForShape([2, 2]) };
+    const incremental = newDerivedState(init);
+    const rng = mulberry32(5);
+    const events: AssignmentRecord[] = [];
+    for (let t = 0; t < 200; t++) {
+      const { cell, featIdx } = choose(incremental, [], rng);
+      const rewarded = rng() < 0.1;
+      const rec = record({
+        cell,
+        featIdx,
+        dim: init.dim,
+        rewardTotal: rewarded ? 1 : 0,
+        firstSeen: t
+      });
+      events.push(rec);
+      applyAssignment(incremental, rec);
+      if (rewarded) {
+        applyFirstReward(incremental, rec);
+      }
     }
-  );
-
-  it("switching algorithm mid-test equals having run it all along", () => {
-    // Start on ts, record events, switch to linear: the recomputed linear
-    // state must match a linear test that saw the same events from day one.
-    const init: StateInit = { alg: "linear", armCount: 3 };
-    const switched = recomputeState(events, init);
-    const allAlong = incremental(events, init);
-    expectClose(switched, allAlong);
+    // Shuffled input replays identically: order comes from firstSeen.
+    const shuffled = [...events].reverse();
+    expect(recomputeState(shuffled, init)).toEqual(incremental);
   });
 
-  it("is insensitive to event iteration order", () => {
-    // Seeded Fisher-Yates: a random comparator is implementation-defined
-    // and an unseeded failure would be unreproducible.
-    const shuffled = [...events];
-    const shuffleRng = mulberry32(99);
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(shuffleRng() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    const init: StateInit = { alg: "ts", armCount: 3 };
-    expectClose(recomputeState(events, init), recomputeState(shuffled, init));
+  it("skips records that do not fit the current shape", () => {
+    // Records are written against a public testId; replay is the repair
+    // path and has to survive anything already in the log.
+    const init = { slotSizes: [2, 2], dim: 32 };
+    const state = recomputeState(
+      [
+        record({ cell: 1, firstSeen: 1 }),
+        record({ cell: 99, firstSeen: 2 }), // out of range
+        record({ cell: 1.5, firstSeen: 3 }), // not an index
+        record({ cell: 1, slotSizes: [3, 3], firstSeen: 4 }), // wrong shape
+        record({ cell: 2, featIdx: [9999, -1], firstSeen: 5 }) // wild features
+      ],
+      init
+    );
+    expect(state.cells[1].pulls).toBe(1);
+    // The wild-feature record still counts, with its features clamped.
+    expect(state.cells[2].pulls).toBe(1);
+    expect(state.cells.reduce((sum, c) => sum + c.pulls, 0)).toBe(2);
+    // And nothing poisoned the model.
+    expect(state.model.b.every(Number.isFinite)).toBe(true);
+    expect(state.model.aInv.flat().every(Number.isFinite)).toBe(true);
   });
 });

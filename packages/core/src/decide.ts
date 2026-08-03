@@ -126,3 +126,29 @@ export function analyzeOutcomes(
 
 /** Below this, "the risk is small" only means "there is no data yet". */
 export const MIN_PULLS_TO_CALL = 100;
+
+/**
+ * Rolls per-cell outcomes up to one slot's variants: pulls and
+ * conversions of every cell that used the variant. What "how is hero B
+ * doing overall" means for a multi-slot test.
+ */
+export function marginalOutcomes(
+  cells: ArmOutcome[],
+  slotSizes: number[],
+  slot: number
+): ArmOutcome[] {
+  const out: ArmOutcome[] = Array.from({ length: slotSizes[slot] }, () => ({
+    pulls: 0,
+    conversions: 0
+  }));
+  let stride = 1;
+  for (let i = slot + 1; i < slotSizes.length; i++) {
+    stride *= slotSizes[i];
+  }
+  for (let cell = 0; cell < cells.length; cell++) {
+    const variant = Math.floor(cell / stride) % slotSizes[slot];
+    out[variant].pulls += cells[cell].pulls;
+    out[variant].conversions += cells[cell].conversions;
+  }
+  return out;
+}
