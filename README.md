@@ -356,13 +356,16 @@ Or deploy it yourself:
 ```bash
 npm install
 npm run build
-npx wrangler deploy --env=""
+npm run deploy
 ```
 
-`--env=""` targets the top-level configuration, which is the one meant for
-your own account: a single origin, no routes, and every URL built from the
-request. (`npm run deploy` is our hosted deployment, `env.production` in
-the same file, which names zones only we own.)
+That deploys the top-level configuration, which is the one meant for any
+account but ours: a single `workers.dev` origin, no routes, and every URL
+built from the request. Nothing to configure.
+
+Our own deployment is `npm run deploy:livevariant`, named after us because
+it carries routes for zones only we own. Anything named for this project is
+ours; plain `deploy` is yours.
 
 `LV_ALLOWED_DESTINATIONS` deserves a moment's thought before you expose a
 deployment publicly. Anyone can author a config pointing anywhere, so an
