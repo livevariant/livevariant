@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { sha256Hex } from "@livevariant/core";
+import { sha256Hex, withQuery } from "@livevariant/core";
 import { signAsset, verifyAssetSignature } from "./sign.js";
 import type { AssetStore } from "./types.js";
 
@@ -33,6 +33,14 @@ export interface AssetOptions {
   urlTtlSeconds?: number;
   /** Upload cap. Default 10 MiB: email images should be far smaller. */
   maxBytes?: number;
+  /**
+   * Optional bearer token required on POST /assets. Unset means open
+   * uploads, which matches the account-free product but hands strangers
+   * a 10 MiB-per-request pipe into the operator's storage; an operator
+   * who wants that door shut sets this and shares it with their own
+   * uploaders. Serving is unaffected either way.
+   */
+  uploadToken?: string;
 }
 
 /**
@@ -56,9 +64,25 @@ export function createAssetRoutes(options: AssetOptions): Hono {
   const maxBytes = options.maxBytes ?? 10 * 1024 * 1024;
 
   // Uploads come from the dashboard (another origin) and from tools.
-  app.use("/assets", cors({ origin: "*", allowMethods: ["POST", "OPTIONS"] }));
+  app.use(
+    "/assets",
+    cors({
+      origin: "*",
+      allowMethods: ["POST", "OPTIONS"],
+      allowHeaders: ["content-type", "authorization"]
+    })
+  );
 
   app.post("/assets", async c => {
+    if (options.uploadToken) {
+      const header = c.req.header("authorization");
+      if (header !== `Bearer ${options.uploadToken}`) {
+        return c.json(
+          { error: "this deployment requires an upload token" },
+          401
+        );
+      }
+    }
     const contentType =
       c.req.header("content-type")?.split(";")[0].trim() ?? "";
     if (!IMAGE_TYPES.has(contentType)) {
@@ -94,11 +118,10 @@ export function createAssetRoutes(options: AssetOptions): Hono {
     const url = `${origin}/a/${assetId}`;
     // A human wants to eyeball what they just uploaded; an hour is plenty
     // and the preview link still dies.
-    const previewUrl = `${url}?${await signAsset(
-      options.signingSecret,
-      assetId,
-      Date.now() + 60 * 60 * 1000
-    )}`;
+    const previewUrl = withQuery(
+      url,
+      await signAsset(options.signingSecret, assetId, Date.now() + 3600_000)
+    );
     return c.json(
       {
         assetId,
@@ -168,5 +191,5 @@ export async function signAssetUrl(
     assetId,
     Date.now() + ttlMs
   );
-  return `${target}${target.includes("?") ? "&" : "?"}${query}`;
+  return withQuery(target, query);
 }

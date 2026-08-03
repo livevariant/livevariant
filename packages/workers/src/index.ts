@@ -196,6 +196,8 @@ interface Env {
    */
   ASSET_STORE?: R2Bucket;
   LV_ASSET_SECRET?: string;
+  /** Optional bearer token gating POST /assets; unset means open uploads. */
+  LV_ASSET_UPLOAD_TOKEN?: string;
 }
 
 /** Counter keys arrive as c:{testId}:{scope}; the DO stores scopes. */
@@ -263,7 +265,8 @@ export default {
           env.ASSET_STORE && env.LV_ASSET_SECRET
             ? {
                 store: new R2AssetStore(env.ASSET_STORE),
-                signingSecret: env.LV_ASSET_SECRET
+                signingSecret: env.LV_ASSET_SECRET,
+                uploadToken: env.LV_ASSET_UPLOAD_TOKEN
               }
             : undefined
       });

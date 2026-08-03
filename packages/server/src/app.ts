@@ -182,13 +182,14 @@ export function createApp(options: AppOptions): Hono {
    * to "not measured", never to a hole in the layout.
    */
   async function paramsOr404(
-    query: URLSearchParams
+    query: URLSearchParams,
+    requestUrl: string
   ): Promise<{ decoded: DecodedConfig } | { error: Response }> {
     try {
       return { decoded: await configFromParams(query) };
     } catch (err) {
       const target = fallbackTarget(query);
-      if (target && destinationAllowed(target)) {
+      if (target && destinationAllowed(target, requestUrl)) {
         return {
           error: new Response(null, {
             status: 302,
@@ -215,11 +216,38 @@ export function createApp(options: AppOptions): Hono {
   const allowedHosts = (options.allowedDestinations ?? []).map(h =>
     h.toLowerCase().replace(/^\./, "")
   );
-  function destinationAllowed(target: string): boolean {
-    // Hosted assets never leave this deployment, so the operator
+  /**
+   * A target is OUR hosted asset only when both the path shape AND the
+   * host say so. The path alone is spoofable: evil.com/a/<64hex> matches
+   * the shape, and treating it as ours would hand out an allowlist
+   * bypass on exactly the control meant to stop hostile redirects.
+   * "Ours" is the host the request arrived on, plus the configured
+   * serving host (a .com dashboard serves configs whose assets live on
+   * the .link serving domain).
+   */
+  function ownAssetId(target: string, requestUrl: string): string | null {
+    const id = assetIdFromUrl(target);
+    if (!id) {
+      return null;
+    }
+    try {
+      const host = new URL(target).host;
+      const own = new Set([new URL(requestUrl).host]);
+      if (options.serveUrl) {
+        own.add(new URL(options.serveUrl).host);
+      }
+      return own.has(host) ? id : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function destinationAllowed(target: string, requestUrl: string): boolean {
+    // OUR hosted assets never leave this deployment, so the operator
     // allowlist (an anti-phishing control on outbound redirects) does
-    // not apply to them.
-    if (assetIdFromUrl(target)) {
+    // not apply to them. Foreign URLs that merely look like asset paths
+    // get no such pass.
+    if (ownAssetId(target, requestUrl)) {
       return true;
     }
     if (allowedHosts.length === 0) {
@@ -290,7 +318,7 @@ export function createApp(options: AppOptions): Hono {
     const encoded = c.req.param("cfg");
     const result = encoded
       ? await decodeOr404(encoded)
-      : await paramsOr404(query);
+      : await paramsOr404(query, c.req.raw.url);
     if ("error" in result) {
       return result;
     }
@@ -382,8 +410,11 @@ export function createApp(options: AppOptions): Hono {
    * has no asset store the URL passes through untouched and fails at
    * fetch time, which is honest about the misconfiguration.
    */
-  async function maybeSignAsset(target: string): Promise<string> {
-    const assetId = assetIdFromUrl(target);
+  async function maybeSignAsset(
+    target: string,
+    requestUrl: string
+  ): Promise<string> {
+    const assetId = ownAssetId(target, requestUrl);
     if (!assetId || !options.assets) {
       return target;
     }
@@ -432,7 +463,8 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const disallowed = decoded.config.arms.find(
-      arm => !destinationAllowed((arm.formats.url ?? arm.formats.image)!)
+      arm =>
+        !destinationAllowed((arm.formats.url ?? arm.formats.image)!, c.req.url)
     );
     if (disallowed) {
       return c.json({ error: "destination not allowed by this server" }, 403);
@@ -445,7 +477,7 @@ export function createApp(options: AppOptions): Hono {
       ? maybeDecorate(decoded, identity, armIndex, target, query)
       : target;
     c.header("cache-control", NO_STORE);
-    return c.redirect(await maybeSignAsset(decorated), 302);
+    return c.redirect(await maybeSignAsset(decorated, c.req.url), 302);
   };
   app.get("/s/:cfg", serveHandler);
   app.get("/s", serveHandler);
@@ -480,7 +512,11 @@ export function createApp(options: AppOptions): Hono {
         400
       );
     }
-    if (!candidates.every(target => destinationAllowed(target as string))) {
+    if (
+      !candidates.every(target =>
+        destinationAllowed(target as string, c.req.url)
+      )
+    ) {
       return c.json({ error: "destination not allowed by this server" }, 403);
     }
     // A click implies a serve, so assign (sticky or fresh) before rewarding.
@@ -495,7 +531,8 @@ export function createApp(options: AppOptions): Hono {
     c.header("cache-control", NO_STORE);
     return c.redirect(
       await maybeSignAsset(
-        maybeDecorate(decoded, identity, armIndex, target, query)
+        maybeDecorate(decoded, identity, armIndex, target, query),
+        c.req.url
       ),
       302
     );

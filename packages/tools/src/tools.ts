@@ -937,7 +937,13 @@ export const uploadImage = defineTool({
       .string()
       .url()
       .optional()
-      .describe("Self-hosted deployments only.")
+      .describe("Self-hosted deployments only."),
+    uploadToken: z
+      .string()
+      .optional()
+      .describe(
+        "Only for deployments that gate uploads with LV_ASSET_UPLOAD_TOKEN."
+      )
   }),
   output: z.object({
     assetId: z.string().describe("sha256 of the bytes; the id inside the URL."),
@@ -966,7 +972,12 @@ export const uploadImage = defineTool({
     const origin = originOf(context, input.serverUrl);
     const response = await context.fetch(`${origin}/assets`, {
       method: "POST",
-      headers: { "content-type": input.contentType },
+      headers: {
+        "content-type": input.contentType,
+        ...(input.uploadToken
+          ? { authorization: `Bearer ${input.uploadToken}` }
+          : {})
+      },
       body: bytes as unknown as BodyInit
     });
     if (response.status === 404) {
@@ -982,7 +993,11 @@ export const uploadImage = defineTool({
       } | null;
       throw new ToolInputError(
         body?.error ?? `upload failed (${response.status})`,
-        response.status === 413 || response.status === 415 ? 400 : 502
+        response.status === 401
+          ? 401
+          : response.status === 413 || response.status === 415
+            ? 400
+            : 502
       );
     }
     return (await response.json()) as {

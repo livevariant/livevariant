@@ -209,6 +209,116 @@ describe("serve-time signing", () => {
   });
 });
 
+describe("asset-path spoofing (the allowlist bypass that was)", () => {
+  const SPOOF = `https://evil.example/a/${"f".repeat(64)}`;
+
+  async function spoofTest() {
+    return encodeConfig({
+      v: 1,
+      arms: [
+        { name: "a", formats: { url: SPOOF } },
+        { name: "b", formats: { url: SPOOF } }
+      ],
+      statsKeyHash: await hashStatsSecret(STATS_SECRET),
+      decorateRedirects: false
+    });
+  }
+
+  it("a foreign URL shaped like an asset does not bypass the allowlist", async () => {
+    // The path alone is spoofable: /a/<64hex> on evil.example matched the
+    // asset shape and sailed through LV_ALLOWED_DESTINATIONS, an open
+    // redirect through the exact control meant to prevent one. Ours means
+    // path AND host now.
+    const { encoded } = await spoofTest();
+    const locked = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      allowedDestinations: ["customer.example"],
+      assets: { store, signingSecret: SECRET }
+    });
+    const res = await locked.request(
+      `https://livevariant.com/s/${encoded}?id=r1`,
+      { headers: { accept: "text/html" } }
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("never signs a foreign URL either", async () => {
+    // Even on an allow-all deployment, our signature belongs only on our
+    // own asset URLs; stamping it onto a foreign host's URL would leak a
+    // valid signature for that hash to whoever controls the host.
+    const { encoded } = await spoofTest();
+    const res = await app.request(
+      `https://livevariant.com/s/${encoded}?id=r1`,
+      { headers: { accept: "text/html" } }
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(SPOOF);
+  });
+
+  it("still recognizes its own asset on the serving domain", async () => {
+    // The serve URL lives on the serving domain while the dashboard
+    // domain answers the request; both hosts are "ours".
+    const withServeUrl = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      serveUrl: "https://livevariant.link",
+      allowedDestinations: ["customer.example"],
+      assets: { store, signingSecret: SECRET }
+    });
+    const up = await withServeUrl.request("https://livevariant.com/assets", {
+      method: "POST",
+      headers: { "content-type": "image/png" },
+      body: PNG
+    });
+    const { url } = (await up.json()) as { url: string };
+    expect(url.startsWith("https://livevariant.link/a/")).toBe(true);
+    const { encoded } = await encodeConfig({
+      v: 1,
+      arms: [
+        { name: "a", formats: { image: url } },
+        { name: "b", formats: { image: url } }
+      ],
+      statsKeyHash: await hashStatsSecret(STATS_SECRET)
+    });
+    const res = await withServeUrl.request(
+      `https://livevariant.com/s/${encoded}?id=r1`,
+      { headers: { accept: "text/html" } }
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("&s=");
+  });
+});
+
+describe("upload token", () => {
+  it("gates uploads when set, and only uploads", async () => {
+    const gated = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      assets: { store, signingSecret: SECRET, uploadToken: "sesame" }
+    });
+    const anonymous = await gated.request("https://livevariant.com/assets", {
+      method: "POST",
+      headers: { "content-type": "image/png" },
+      body: PNG
+    });
+    expect(anonymous.status).toBe(401);
+
+    const authed = await gated.request("https://livevariant.com/assets", {
+      method: "POST",
+      headers: {
+        "content-type": "image/png",
+        authorization: "Bearer sesame"
+      },
+      body: PNG
+    });
+    expect(authed.status).toBe(201);
+    // Serving stays open: signatures, not tokens, protect downloads.
+    const { previewUrl } = (await authed.json()) as { previewUrl: string };
+    expect((await gated.request(previewUrl)).status).toBe(200);
+  });
+});
+
 describe("/choose asset signatures (the SDK contract)", () => {
   async function choose(body: Record<string, unknown>) {
     const res = await app.request("https://livevariant.com/choose", {
