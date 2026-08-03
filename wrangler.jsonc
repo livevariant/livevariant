@@ -71,6 +71,14 @@
       // Repeated, not inherited: wrangler does NOT copy bindings down into
       // a named environment, so leaving this out deploys a Worker with no
       // state store at all.
+      //
+      // `migrations` above is deliberately NOT repeated: it is inheritable.
+      // Two things confirm it. Wrangler warns "<key> exists at the top
+      // level, but not on env.production" for every non-inheritable key it
+      // finds missing, and it says that about durable_objects and nothing
+      // about migrations. And livevariant-production was created from
+      // scratch by `deploy --env production`, so its SQLite storage could
+      // only exist if the migration had been inherited.
       "durable_objects": {
         "bindings": [
           {
