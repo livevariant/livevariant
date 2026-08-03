@@ -151,9 +151,22 @@ export async function createTest(
   // Parsing rather than trusting normalizes the readable shorthands
   // (bare-string variants, `variants` for a single slot) into the
   // canonical form every hash below depends on.
-  const resolved: TestConfig = testConfigSchema.parse(
+  const input = (
     typeof config === "string" ? JSON.parse(base64UrlToUtf8(config)) : config
-  ) as TestConfig;
+  ) as Record<string, unknown>;
+  // Keyless inline configs get scoped to the page's hostname: two sites
+  // inlining the same trivial test ("Book" vs "Book now") must not hash
+  // to the SAME test and pollute each other. Configs with a stats key
+  // are already unique (the key hash is random and identity-included),
+  // and pre-encoded strings must keep the identity their URLs were
+  // printed with, so neither is touched.
+  const scoped =
+    typeof config !== "string" &&
+    input.scope === undefined &&
+    input.statsKeyHash === undefined
+      ? { ...input, scope: win.location.hostname }
+      : input;
+  const resolved: TestConfig = testConfigSchema.parse(scoped) as TestConfig;
   const testId = await computeTestId(resolved);
 
   const entries = slotEntries(resolved);
@@ -306,6 +319,7 @@ export async function createTest(
         testId,
         slotSizes: sizes,
         dim,
+        region: resolved.region,
         priorStrengthCap: resolved.priorStrengthCap,
         priors: priors.length > 0 ? priors : undefined,
         idHash,
@@ -357,7 +371,12 @@ export async function createTest(
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
-        body: JSON.stringify({ testId, idHash, amount })
+        body: JSON.stringify({
+          testId,
+          idHash,
+          amount,
+          ...(resolved.region ? { region: resolved.region } : {})
+        })
       });
     } catch {
       // Dropped: the model tolerates missing rewards, pages don't

@@ -12,6 +12,7 @@ import {
   variantName,
   AUTO_SIGNALS,
   CONFIG_SOFT_LIMIT,
+  TEST_REGIONS,
   type TestConfigInput,
   type Variant
 } from "@livevariant/core";
@@ -195,6 +196,17 @@ export const buildTest = defineTool({
           "Stamp the served combination into this parameter on redirect, e.g. " +
             '"utm_content", so the test shows up in the customer\'s own analytics.'
         ),
+      region: z
+        .enum(TEST_REGIONS)
+        .optional()
+        .describe(
+          "Where the test's state lives. A placement hint (wnam, enam, sam, " +
+            'weur, eeur, apac, oc, afr, me) or "eu" for the EU jurisdiction ' +
+            "(state guaranteed created and kept inside the EU). Defaults to " +
+            "the creator's own region when the host can tell; without any, " +
+            "state is born wherever the FIRST request comes from, which in " +
+            "email is routinely a mail provider's US datacenter."
+        ),
       serverUrl: z
         .string()
         .url()
@@ -216,6 +228,12 @@ export const buildTest = defineTool({
     combinations: z
       .number()
       .describe("How many distinct combinations the test chooses between."),
+    region: z
+      .string()
+      .nullable()
+      .describe(
+        "Where the test's state will live; null means first-request placement."
+      ),
     urls: z.object({
       serve: z.string(),
       click: z.string(),
@@ -252,6 +270,9 @@ export const buildTest = defineTool({
       ...(input.context?.length ? { ctx: { dims: input.context } } : {}),
       ...(input.redirectUrl ? { redirectUrl: input.redirectUrl } : {}),
       ...(input.variantParam ? { variantParam: input.variantParam } : {}),
+      ...((input.region ?? context.region)
+        ? { region: input.region ?? context.region }
+        : {}),
       statsKeyHash: await hashStatsSecret(statsSecret)
     };
 
@@ -340,6 +361,7 @@ export const buildTest = defineTool({
         variants: variants.map((v, i) => variantName(v, i))
       })),
       combinations: cells,
+      region: parsed.region ?? null,
       urls: {
         serve: urls.serve,
         click: urls.click,
@@ -386,6 +408,7 @@ export const inspectTest = defineTool({
       })
     ),
     combinations: z.number(),
+    region: z.string().nullable(),
     context: z.array(
       z.object({
         key: z.string(),
@@ -471,6 +494,7 @@ export const inspectTest = defineTool({
       ...(config.name ? { name: config.name } : {}),
       slots,
       combinations: cellCount(slotSizes(config)),
+      region: config.region ?? null,
       context: dims.map(d => ({
         key: d.key,
         ...(d.from ? { from: d.from } : {}),

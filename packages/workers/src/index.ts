@@ -2,7 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import {
   mulberry32,
   randomSeed,
-  type AssignmentRecord
+  type AssignmentRecord,
+  type TestRegion
 } from "@livevariant/core";
 import {
   createApp,
@@ -231,35 +232,57 @@ function stripScope(testId: string, key: string): string {
 class DurableObjectBackend implements TestBackend {
   constructor(private ns: DurableObjectNamespace<TestStateDO>) {}
 
-  private stub(testId: string) {
-    return this.ns.get(this.ns.idFromName(testId));
+  /**
+   * Region decides which object a test lives in and where.
+   *
+   * - A location HINT steers where the object is CREATED (its id is the
+   *   plain testId either way, so the hint is placement advice that is
+   *   ignored once the object exists). Without one, the object is born
+   *   wherever the first request came from, which for an email test is
+   *   routinely a mail proxy's datacenter rather than the audience.
+   * - "eu" addresses the EU-JURISDICTION namespace: a DIFFERENT object
+   *   for the same name, guaranteed created and kept inside the EU.
+   *   That is why region is part of the test's identity and rides on
+   *   config-free calls (reward): every path must reach the same home.
+   */
+  private stub(testId: string, region?: TestRegion) {
+    if (region === "eu") {
+      const ns = this.ns.jurisdiction("eu");
+      return ns.get(ns.idFromName(testId));
+    }
+    return this.ns.get(this.ns.idFromName(testId), {
+      locationHint: region
+    });
   }
 
   checkShape(params: ServingParams, authoritative: boolean) {
-    return this.stub(params.testId).checkShape(params, authoritative);
+    return this.stub(params.testId, params.region).checkShape(
+      params,
+      authoritative
+    );
   }
 
   assign(params: ServingParams, identity: RequestIdentity) {
-    return this.stub(params.testId).assign(params, identity);
+    return this.stub(params.testId, params.region).assign(params, identity);
   }
 
-  reward(testId: string, idHash: string, amount: number) {
-    return this.stub(testId).rewardAssignment(testId, idHash, amount);
+  reward(testId: string, idHash: string, amount: number, region?: TestRegion) {
+    return this.stub(testId, region).rewardAssignment(testId, idHash, amount);
   }
 
   recompute(params: ServingParams) {
-    return this.stub(params.testId).recompute(params);
+    return this.stub(params.testId, params.region).recompute(params);
   }
 
   stats(
     params: ServingParams,
     labels?: Array<{ key: string; variants: string[] }>
   ) {
-    return this.stub(params.testId).stats(params, labels);
+    return this.stub(params.testId, params.region).stats(params, labels);
   }
 
-  updatePolicy(testId: string, patch: TestPolicy) {
-    return this.stub(testId).updatePolicy(testId, patch);
+  updatePolicy(testId: string, patch: TestPolicy, region?: TestRegion) {
+    return this.stub(testId, region).updatePolicy(testId, patch);
   }
 }
 

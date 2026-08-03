@@ -65,16 +65,20 @@ export {
 export {
   AUTO_SIGNALS,
   NETWORK_SIGNALS,
+  REGION_HINTS,
   SIGNAL_CARDINALITY,
+  TEST_REGIONS,
   URL_SIGNALS,
   urlSignals,
   deviceClass,
   isAssetFetch,
   primaryLanguage,
+  regionHint,
   requestSignals,
   type AutoSignal,
   type CloudflareGeo,
-  type RequestSignals
+  type RequestSignals,
+  type TestRegion
 } from "./signals.js";
 export {
   bucketKey,

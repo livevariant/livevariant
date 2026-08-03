@@ -735,6 +735,62 @@ describe("source visibility and creator quarantine", () => {
   });
 });
 
+describe("region and scope", () => {
+  it("accepts region on choose and reward, and /config suggests one", async () => {
+    const { testId } = await makeTest({ region: "weur" } as any);
+    const res = await app.request("/choose", {
+      method: "POST",
+      body: JSON.stringify({
+        testId,
+        slotSizes: [2],
+        dim: 16,
+        region: "weur",
+        idHash: hex("regional")
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(res.status).toBe(200);
+    const reward = await app.request("/reward", {
+      method: "POST",
+      body: JSON.stringify({
+        testId,
+        idHash: hex("regional"),
+        region: "weur"
+      }),
+      headers: { "content-type": "application/json" }
+    });
+    expect((await reward.json()).rewarded).toBe(true);
+    // A nonsense region is rejected at the schema, not routed anywhere.
+    const bad = await app.request("/choose", {
+      method: "POST",
+      body: JSON.stringify({ testId, slotSizes: [2], dim: 16, region: "moon" }),
+      headers: { "content-type": "application/json" }
+    });
+    expect(bad.status).toBe(400);
+
+    // /config tells the dashboard the creator's own region.
+    const cfgReq = new Request("http://localhost/config");
+    Object.defineProperty(cfgReq, "cf", {
+      value: { continent: "EU", country: "NL" }
+    });
+    const cfg = await app.request(cfgReq);
+    expect((await cfg.json()).region).toBe("weur");
+  });
+
+  it("stamps the region into the redirect handoff", async () => {
+    const { encoded } = await makeTest({ region: "eu" } as any);
+    const serve = await app.request(`/s/${encoded}?id=r1`);
+    const location = new URL(serve.headers.get("location")!);
+    expect(location.searchParams.get("_lvr")).toBe("eu");
+    // Tests without a region add no parameter.
+    const plain = await makeTest();
+    const plainServe = await app.request(`/s/${plain.encoded}?id=r1`);
+    expect(
+      new URL(plainServe.headers.get("location")!).searchParams.has("_lvr")
+    ).toBe(false);
+  });
+});
+
 describe("mid-test prior change", () => {
   it("keeps the testId and recomputes state from events", async () => {
     const base = await makeTest();

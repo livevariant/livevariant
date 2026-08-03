@@ -134,6 +134,88 @@ export function primaryLanguage(
   return /^[a-z]{2,3}$/.test(base) ? base : undefined;
 }
 
+/**
+ * Cloudflare Durable Object location hints, plus "eu": the EU
+ * JURISDICTION, which is stronger than a hint. A hint says where to
+ * create the test's state; the jurisdiction guarantees it is created
+ * and kept inside the EU.
+ */
+export const REGION_HINTS = [
+  "wnam",
+  "enam",
+  "sam",
+  "weur",
+  "eeur",
+  "apac",
+  "oc",
+  "afr",
+  "me"
+] as const;
+export const TEST_REGIONS = [...REGION_HINTS, "eu"] as const;
+export type TestRegion = (typeof TEST_REGIONS)[number];
+
+const EEUR_COUNTRIES = new Set([
+  "PL",
+  "CZ",
+  "SK",
+  "HU",
+  "RO",
+  "BG",
+  "GR",
+  "FI",
+  "EE",
+  "LV",
+  "LT",
+  "UA",
+  "MD",
+  "RS",
+  "HR",
+  "SI"
+]);
+const ME_COUNTRIES = new Set([
+  "AE",
+  "SA",
+  "IL",
+  "TR",
+  "QA",
+  "KW",
+  "BH",
+  "OM",
+  "JO",
+  "LB",
+  "IQ",
+  "IR"
+]);
+
+/**
+ * The placement hint a request's own geography suggests, used to default
+ * a new test's region to its CREATOR's location. Without it a test's
+ * state is created wherever the first serve came from, and in email that
+ * is routinely a mail provider's US datacenter fetching images for a
+ * European audience.
+ */
+export function regionHint(
+  geo: CloudflareGeo | null | undefined
+): TestRegion | null {
+  const country = geo?.country?.toUpperCase();
+  switch (geo?.continent?.toUpperCase()) {
+    case "EU":
+      return country && EEUR_COUNTRIES.has(country) ? "eeur" : "weur";
+    case "NA":
+      return "enam";
+    case "SA":
+      return "sam";
+    case "OC":
+      return "oc";
+    case "AF":
+      return "afr";
+    case "AS":
+      return country && ME_COUNTRIES.has(country) ? "me" : "apac";
+    default:
+      return null;
+  }
+}
+
 export interface CloudflareGeo {
   country?: string;
   continent?: string;

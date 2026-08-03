@@ -31,6 +31,7 @@ import {
   type JointModel,
   type RequestSignals,
   type Rng,
+  type TestRegion,
   type VariantPrior
 } from "@livevariant/core";
 import {
@@ -66,6 +67,14 @@ export interface ServingParams {
   dim: number;
   priors?: VariantPrior[];
   noise?: number;
+  /**
+   * Where the test's state lives (config.region). The Cloudflare
+   * backend routes on it: a location hint places the Durable Object,
+   * and "eu" addresses the EU-jurisdiction object, which is a different
+   * object than the plain testId would reach. In-process backends
+   * ignore it.
+   */
+  region?: TestRegion;
 }
 
 export function paramsFromConfig(decoded: DecodedConfig): ServingParams {
@@ -75,7 +84,8 @@ export function paramsFromConfig(decoded: DecodedConfig): ServingParams {
     testId,
     slotSizes: sizes,
     dim: dimForShape(sizes, config.ctx?.dims.length ?? 0),
-    priors: effectivePriors(config)
+    priors: effectivePriors(config),
+    region: config.region
   };
 }
 
@@ -176,18 +186,27 @@ export interface TestBackend {
     params: ServingParams,
     identity: RequestIdentity
   ): Promise<{ cell: number; created: boolean }>;
+  /**
+   * Region rides along because reward is deliberately config-free: the
+   * SDK, the pixel and the handoff know it, and without it an "eu"
+   * test's rewards would route to the wrong object.
+   */
   reward(
     testId: string,
     idHash: string,
-    amount: number
+    amount: number,
+    region?: TestRegion
   ): Promise<{ cell: number; first: boolean } | null>;
   recompute(params: ServingParams): Promise<number>;
+  updatePolicy(
+    testId: string,
+    patch: TestPolicy,
+    region?: TestRegion
+  ): Promise<TestPolicy>;
   stats(
     params: ServingParams,
     labels?: Array<{ key: string; variants: string[] }>
   ): Promise<TestStats>;
-  /** Creator-authorized quarantine; returns the merged policy. */
-  updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy>;
 }
 
 export class TestService implements TestBackend {
@@ -212,7 +231,11 @@ export class TestService implements TestBackend {
   }
 
   /** Creator-authorized quarantine; the caller checks the stats secret. */
-  updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy> {
+  updatePolicy(
+    testId: string,
+    patch: TestPolicy,
+    _region?: TestRegion
+  ): Promise<TestPolicy> {
     return this.store.updatePolicy(testId, patch);
   }
 
@@ -303,7 +326,8 @@ export class TestService implements TestBackend {
   async reward(
     testId: string,
     idHash: string,
-    amount: number
+    amount: number,
+    _region?: TestRegion
   ): Promise<{ cell: number; first: boolean } | null> {
     const result = await this.store.addReward(testId, idHash, amount);
     if (!result) {

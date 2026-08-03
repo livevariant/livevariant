@@ -5,7 +5,7 @@ import {
   encodeConfig,
   CONFIG_HARD_LIMIT
 } from "./codec.js";
-import type { TestConfigInput } from "./schema.js";
+import { testConfigSchema, type TestConfigInput } from "./schema.js";
 
 const KH = "0".repeat(64);
 
@@ -104,3 +104,31 @@ async function parse(input: TestConfigInput) {
   const { config } = await decodeConfig((await encodeConfig(input)).encoded);
   return config;
 }
+
+describe("identity of placement and namespace", () => {
+  it("region is part of the identity: moving a test is a new test", async () => {
+    // "eu" physically addresses a different object; a tampered region on
+    // a public URL must self-isolate as a different test rather than
+    // split one test's records across two homes.
+    const base = { variants: ["https://a.example/x", "https://a.example/y"] };
+    const plain = await computeTestId(testConfigSchema.parse(base));
+    const eu = await computeTestId(
+      testConfigSchema.parse({ ...base, region: "eu" })
+    );
+    const weur = await computeTestId(
+      testConfigSchema.parse({ ...base, region: "weur" })
+    );
+    expect(new Set([plain, eu, weur]).size).toBe(3);
+  });
+
+  it("scope is part of the identity: two sites' identical inline tests differ", async () => {
+    const inline = { variants: ["Book now", "Book"] };
+    const siteA = await computeTestId(
+      testConfigSchema.parse({ ...inline, scope: "a.example" })
+    );
+    const siteB = await computeTestId(
+      testConfigSchema.parse({ ...inline, scope: "b.example" })
+    );
+    expect(siteA).not.toBe(siteB);
+  });
+});

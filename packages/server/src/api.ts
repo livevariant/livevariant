@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "@livevariant/mcp";
+import { regionHint, type CloudflareGeo } from "@livevariant/core";
 import {
   TOOLS,
   ToolInputError,
@@ -58,11 +59,16 @@ export function createApi(options: ApiOptions): Hono {
   // Passed through, it built origin-less URLs like "/s/<config>", which in
   // an email resolve against the mail client and serve nothing.
   const serveUrl = options.serveUrl?.trim() || undefined;
-  const contextFor = (url: string): ToolContext => {
+  const contextFor = (url: string, raw?: Request): ToolContext => {
     const origin = new URL(url).origin;
+    // The caller's own geography, so build_test can default a new
+    // test's region to its CREATOR's location rather than to wherever
+    // the first serve later comes from (in email: a mail proxy).
+    const cf = (raw as (Request & { cf?: CloudflareGeo }) | undefined)?.cf;
     return {
       serverUrl: origin,
       serveUrl: serveUrl ?? origin,
+      region: regionHint(cf) ?? undefined,
       fetch: options.fetch
     };
   };
@@ -90,7 +96,9 @@ export function createApi(options: ApiOptions): Hono {
         );
       }
       try {
-        return c.json(await tool.handler(parsed.data, contextFor(c.req.url)));
+        return c.json(
+          await tool.handler(parsed.data, contextFor(c.req.url, c.req.raw))
+        );
       } catch (err) {
         if (err instanceof ToolInputError) {
           return c.json({ error: err.message }, err.status);
@@ -105,7 +113,13 @@ export function createApi(options: ApiOptions): Hono {
   // makes the builder default to livevariant.link on the hosted service
   // and to a self-hoster's own origin on theirs, with nothing baked in.
   app.get("/config", c =>
-    c.json({ serveUrl: serveUrl ?? new URL(c.req.url).origin })
+    c.json({
+      serveUrl: serveUrl ?? new URL(c.req.url).origin,
+      // The dashboard defaults a new test's region to its creator's.
+      region: regionHint(
+        (c.req.raw as Request & { cf?: CloudflareGeo }).cf ?? null
+      )
+    })
   );
 
   app.get("/openapi.json", c =>

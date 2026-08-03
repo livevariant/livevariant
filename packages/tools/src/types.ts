@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { TestRegion } from "@livevariant/core";
 
 /**
  * One definition per operation, and every surface is generated from it:
@@ -26,6 +27,13 @@ export interface ToolContext {
    * dashboard's reputation.
    */
   serveUrl?: string;
+  /**
+   * The calling creator's region, when the host can tell (the hosted
+   * API derives it from the request's geography). build_test uses it to
+   * default a new test's region, so state is born near the creator
+   * instead of near whichever mail proxy fetches first.
+   */
+  region?: TestRegion;
   /** Injected so tests need no network and hosts can supply their own. */
   fetch: typeof globalThis.fetch;
 }

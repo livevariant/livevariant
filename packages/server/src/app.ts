@@ -369,7 +369,10 @@ export function createApp(options: AppOptions): Hono {
         ? decorateUrl(target, {
             testId: decoded.testId,
             idHash: identity.idHash,
-            cell
+            cell,
+            // Rides along so config-free reward paths (GTM one-tag mode)
+            // can still route to the test's real home.
+            ...(config.region ? { region: config.region } : {})
           })
         : target;
     // The stamp is the served combination: one name for a single slot,
@@ -579,7 +582,12 @@ export function createApp(options: AppOptions): Hono {
       variant.redirectUrl ??
       decoded.config.redirectUrl) as string;
     if (identity.idHash) {
-      await service.reward(decoded.testId, identity.idHash, 1);
+      await service.reward(
+        decoded.testId,
+        identity.idHash,
+        1,
+        decoded.config.region
+      );
     }
     c.header("cache-control", NO_STORE);
     return c.redirect(
@@ -612,7 +620,8 @@ export function createApp(options: AppOptions): Hono {
         await service.reward(
           decoded.testId,
           await externalIdHash(decoded.testId, externalId),
-          amount
+          amount,
+          decoded.config.region
         );
       }
     }
@@ -648,7 +657,8 @@ export function createApp(options: AppOptions): Hono {
         ...p,
         strength: Math.min(p.strength, cap)
       })),
-      noise: r.noise
+      noise: r.noise,
+      region: r.region
     };
     if (!(await service.checkShape(params, false))) {
       return c.json(
@@ -710,7 +720,7 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const r = body.data;
-    const result = await service.reward(r.testId, r.idHash, r.amount);
+    const result = await service.reward(r.testId, r.idHash, r.amount, r.region);
     return c.json({ rewarded: result !== null, first: result?.first ?? false });
   });
 
@@ -765,10 +775,14 @@ export function createApp(options: AppOptions): Hono {
         400
       );
     }
-    const policy = await service.updatePolicy(decoded.testId, {
-      excludedSources: body.data.sources,
-      excludedWindows: body.data.windows
-    });
+    const policy = await service.updatePolicy(
+      decoded.testId,
+      {
+        excludedSources: body.data.sources,
+        excludedWindows: body.data.windows
+      },
+      decoded.config.region
+    );
     const events = await service.recompute(paramsFromConfig(decoded));
     return c.json({ ok: true, events, policy });
   });

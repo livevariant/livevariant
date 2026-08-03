@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { cellCount, MAX_CELLS } from "./cells.js";
-import { AUTO_SIGNALS } from "./signals.js";
+import { AUTO_SIGNALS, TEST_REGIONS } from "./signals.js";
 
 /**
  * The test config, version 2: slots-native. A test is one or more SLOTS
@@ -108,6 +108,32 @@ const configObject = z
     priors: z.record(z.string(), z.array(variantPriorSchema)).optional(),
     /** Max pseudo-observations any prior may contribute per variant. */
     priorStrengthCap: z.number().positive().default(50),
+    /**
+     * Where the test's state lives. A location hint (wnam, enam, sam,
+     * weur, eeur, apac, oc, afr, me) places the test's storage near its
+     * audience; "eu" is the EU JURISDICTION, guaranteeing the state is
+     * created and kept inside the EU. Without it, state is created
+     * wherever the FIRST request came from, and in email that is
+     * routinely a mail provider's US datacenter fetching images for a
+     * European audience.
+     *
+     * Deliberately part of the test's identity: moving state is
+     * physically a different object, and a tampered region on a public
+     * URL must self-isolate as a different test rather than split one
+     * test's records across two homes.
+     */
+    region: z.enum(TEST_REGIONS).optional(),
+    /**
+     * Identity namespace. Two sites inlining the same trivial config
+     * ("Book" vs "Book now") would otherwise hash to the SAME test and
+     * pollute each other's results: the config is the identity, and
+     * identical configs are identical tests. Tests built with a stats
+     * key are already unique (the key hash is random and inside the
+     * identity), so scope matters for keyless inline configs, and the
+     * SDK defaults it to the page's hostname for exactly those. Set it
+     * explicitly to share one test across domains.
+     */
+    scope: z.string().min(1).max(120).optional(),
     /** Fallback click-redirect target when the variant has none. */
     redirectUrl: httpUrl.optional(),
     /** GA4 event names the SDK auto-rewards on (dataLayer interception). */

@@ -1,3 +1,5 @@
+import { TEST_REGIONS, type TestRegion } from "./signals.js";
+
 /**
  * Redirect -> SDK identity handoff. When /s or /c redirects an identified
  * visitor, the destination URL is decorated with these parameters (the
@@ -9,7 +11,8 @@
 export const HANDOFF_PARAMS = {
   testId: "_lvt",
   idHash: "_lvid",
-  cell: "_lvvar"
+  cell: "_lvvar",
+  region: "_lvr"
 } as const;
 
 export interface Handoff {
@@ -17,6 +20,13 @@ export interface Handoff {
   idHash: string;
   /** The served combination, encoded (cells.ts). */
   cell: number;
+  /**
+   * The test's region, carried so config-less reward paths (the GTM
+   * one-tag mode) can route to the right home. Only meaningful when the
+   * test pinned one; "eu" tests NEED it, because their state lives in a
+   * different object than the plain testId would reach.
+   */
+  region?: TestRegion;
 }
 
 /** Appends handoff params to a destination URL, preserving its own query. */
@@ -30,6 +40,9 @@ export function decorateUrl(target: string, handoff: Handoff): string {
   url.searchParams.set(HANDOFF_PARAMS.testId, handoff.testId);
   url.searchParams.set(HANDOFF_PARAMS.idHash, handoff.idHash);
   url.searchParams.set(HANDOFF_PARAMS.cell, String(handoff.cell));
+  if (handoff.region) {
+    url.searchParams.set(HANDOFF_PARAMS.region, handoff.region);
+  }
   return url.toString();
 }
 
@@ -51,7 +64,19 @@ export function parseHandoff(search: string): Handoff | null {
   ) {
     return null;
   }
-  return { testId, idHash, cell };
+  // Unknown region values are dropped, not fatal: the handoff's core
+  // fields still attribute correctly on non-jurisdiction tests.
+  const region = params.get(HANDOFF_PARAMS.region);
+  const validRegion =
+    region && (TEST_REGIONS as readonly string[]).includes(region)
+      ? (region as TestRegion)
+      : undefined;
+  return {
+    testId,
+    idHash,
+    cell,
+    ...(validRegion ? { region: validRegion } : {})
+  };
 }
 
 /** The query string with handoff params removed (for history.replaceState). */

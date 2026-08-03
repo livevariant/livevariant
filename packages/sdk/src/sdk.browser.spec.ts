@@ -306,6 +306,57 @@ describe("assignment", () => {
     test.dispose();
   });
 
+  it("scopes keyless inline configs to the page's hostname", async () => {
+    // Two sites inlining the same trivial test must not share state. The
+    // hostname becomes the identity namespace, deterministically, so the
+    // same page always reaches the same test.
+    const server = fakeServer();
+    const inline = { variants: ["Book now", "Book"] };
+    const test = await createTest(
+      inline,
+      options(server, { externalId: "s1" })
+    );
+    expect(test.testId).toBe(
+      await computeTestId(
+        testConfigSchema.parse({ ...inline, scope: location.hostname })
+      )
+    );
+    // An explicit scope wins, and a stats key means no injection at all:
+    // those configs carry a random hash that already makes them unique,
+    // and their URLs were printed with that identity.
+    const explicit = await createTest(
+      { ...inline, scope: "campaign-7" },
+      options(server, { externalId: "s2" })
+    );
+    expect(explicit.testId).toBe(
+      await computeTestId(
+        testConfigSchema.parse({ ...inline, scope: "campaign-7" })
+      )
+    );
+    const keyed = await createTest(
+      CONFIG,
+      options(server, { externalId: "s3" })
+    );
+    expect(keyed.testId).toBe(
+      await computeTestId(testConfigSchema.parse(CONFIG))
+    );
+    test.dispose();
+    explicit.dispose();
+    keyed.dispose();
+  });
+
+  it("sends the config's region with choose and reward", async () => {
+    const server = fakeServer(1);
+    const test = await createTest(
+      { ...CONFIG, region: "eu" },
+      options(server, { externalId: "eu-user" })
+    );
+    expect(server.chooseCalls[0].region).toBe("eu");
+    await test.trackConversion(2);
+    expect(server.rewardCalls[0].region).toBe("eu");
+    test.dispose();
+  });
+
   it("accepts a pre-encoded config string and builds matching urls", async () => {
     const server = fakeServer();
     // Object round-trip: URLs from object and string input must agree.

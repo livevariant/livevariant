@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { cellCount, ctxDimSchema, MAX_CELLS } from "@livevariant/core";
+import {
+  cellCount,
+  ctxDimSchema,
+  MAX_CELLS,
+  TEST_REGIONS
+} from "@livevariant/core";
 
 /**
  * JS-mode request bodies. Deliberately content-free: the SDK sends only
@@ -42,6 +47,13 @@ export const chooseRequestSchema = z
     dim: z.number().int().min(16).max(256),
     priorStrengthCap: z.number().positive().optional(),
     noise: z.number().positive().max(5).optional(),
+    /**
+     * The config's region, so routing reaches the test's real home. A
+     * caller lying here reaches a DIFFERENT object than the config's
+     * own serves do, so the lie writes to a shadow nobody reads:
+     * self-isolating, like every other tampered identity input.
+     */
+    region: z.enum(TEST_REGIONS).optional(),
     idHash: hex64.optional(),
     ctxKey: hex64.optional(),
     /**
@@ -133,7 +145,9 @@ export const chooseRequestSchema = z
 export const rewardRequestSchema = z.object({
   testId: hex64,
   idHash: hex64,
-  amount: z.number().positive().max(MAX_REWARD_AMOUNT).default(1)
+  amount: z.number().positive().max(MAX_REWARD_AMOUNT).default(1),
+  /** See chooseRequestSchema.region; carried by SDK and handoff callers. */
+  region: z.enum(TEST_REGIONS).optional()
 });
 
 export type ChooseRequest = z.infer<typeof chooseRequestSchema>;

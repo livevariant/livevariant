@@ -7,7 +7,8 @@ import {
   generateStatsSecret,
   hashStatsSecret,
   MAX_CELLS,
-  type TestConfigInput
+  type TestConfigInput,
+  type TestRegion
 } from "@livevariant/core";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,8 +20,9 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/select";
 import { saveTest } from "@/lib/tests-store";
-import { useServeUrl } from "@/lib/serve-url";
+import { useDeploymentConfig } from "@/lib/serve-url";
 
 interface VariantDraft {
   name: string;
@@ -53,7 +55,8 @@ export function Builder() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   // Detected from the deployment, until the person types their own.
-  const detectedServerUrl = useServeUrl();
+  const deployment = useDeploymentConfig();
+  const detectedServerUrl = deployment.serveUrl;
   const [serverOverride, setServerOverride] = useState<string | null>(null);
   const serverUrl = serverOverride ?? detectedServerUrl;
   // Guarded at use, not in the change handler: an empty field has to stay
@@ -69,6 +72,9 @@ export function Builder() {
   const [redirectUrl, setRedirectUrl] = useState("");
   const [ctxKeys, setCtxKeys] = useState("");
   const [rewardEvents, setRewardEvents] = useState("");
+  // null = follow the detected creator region; "" = explicit none.
+  const [regionOverride, setRegionOverride] = useState<string | null>(null);
+  const region = regionOverride ?? deployment.region ?? "";
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -170,6 +176,7 @@ export function Builder() {
           ])
         ),
         ctx: dims.length > 0 ? { dims } : undefined,
+        region: region ? (region as TestRegion) : undefined,
         redirectUrl: redirectUrl || undefined,
         rewardEvents: rewardEvents
           ? rewardEvents
@@ -449,6 +456,35 @@ export function Builder() {
                 one of the three is set, rather than send people nowhere.
               </p>
             )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="region">Test data location</Label>
+            <NativeSelect
+              id="region"
+              value={region}
+              onChange={e => setRegionOverride(e.target.value)}
+            >
+              <option value="">Wherever the first visitor arrives</option>
+              <option value="eu">European Union (guaranteed, GDPR)</option>
+              <option value="weur">Western Europe</option>
+              <option value="eeur">Eastern Europe</option>
+              <option value="wnam">Western North America</option>
+              <option value="enam">Eastern North America</option>
+              <option value="sam">South America</option>
+              <option value="apac">Asia-Pacific</option>
+              <option value="oc">Oceania</option>
+              <option value="afr">Africa</option>
+              <option value="me">Middle East</option>
+            </NativeSelect>
+            <p className="text-xs text-muted-foreground">
+              Where the test's counters and model are stored. Defaults to your
+              own region: without a choice, storage is created wherever the
+              first request comes from, and in email that is often a mail
+              provider's US datacenter rather than your audience. "European
+              Union" is a hard guarantee (the data never leaves the EU); the
+              rest are placement preferences. Part of the test's identity:
+              changing it later creates a new test.
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="rewards">
