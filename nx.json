@@ -64,7 +64,9 @@
       "@livevariant/tools",
       "@livevariant/server",
       "@livevariant/mcp",
-      "@livevariant/sdk"
+      "@livevariant/sdk",
+      "@livevariant/workers",
+      "@livevariant/web"
     ],
     "version": {
       "preVersionCommand": "npx nx run-many -t build"
