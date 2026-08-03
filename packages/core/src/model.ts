@@ -192,6 +192,13 @@ export function chooseCell(
   rng: Rng,
   noise: number = MODEL_NOISE
 ): number {
+  // The Cholesky is O(dim^3) per serve: ~16M flops at the dim=256 cap,
+  // single-digit milliseconds, and most tests sit at 16-64 where it is
+  // negligible. Caching the factor was considered and rejected: every
+  // id'd pull rank-1-updates aInv (invalidating the factor), and server
+  // state is rehydrated from storage per request anyway, so a cache
+  // would have nowhere to live and nearly nothing to hit. Revisit with
+  // a rank-1 Cholesky update (O(dim^2)) only if profiling ever says so.
   const dim = model.b.length;
   const thetaHat = matVec(model.aInv, model.b);
   const chol = cholesky(model.aInv);

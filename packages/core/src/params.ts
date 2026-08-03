@@ -117,6 +117,7 @@ export async function configFromParams(
     throw new Error("a query-parameter test needs at least two `v` variants");
   }
 
+  const ctx = parseCtx(query.get("ctx"));
   const input: TestConfigInput = {
     v: 2,
     slots,
@@ -126,7 +127,7 @@ export async function configFromParams(
     // 64 hex characters, so the schema rejects it rather than quietly
     // running a different test than the sender meant.
     ...(query.get("kh") ? { statsKeyHash: query.get("kh") as string } : {}),
-    ...(parseCtx(query.get("ctx")) ? { ctx: parseCtx(query.get("ctx")) } : {}),
+    ...(ctx ? { ctx } : {}),
     ...(query.get("r") ? { redirectUrl: query.get("r") as string } : {}),
     ...(query.get("stamp")
       ? { variantParam: query.get("stamp") as string }

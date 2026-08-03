@@ -339,11 +339,21 @@ export class TestService implements TestBackend {
       slotSizes: params.slotSizes,
       dim: params.dim,
       cells: arrayToCounts(flat, cells),
-      model: await this.loadModel(params)
+      model: (await this.loadModel(params)).model
     };
   }
 
-  private async loadModel(params: ServingParams): Promise<JointModel> {
+  /**
+   * ONE read supplies both the model and the version its CAS write must
+   * present. Reading them separately opens a window where a concurrent
+   * writer bumps the version between the two reads, making every
+   * subsequent putBlob fail as stale without any genuine conflict, which
+   * under sustained traffic burns the whole retry budget on phantom
+   * races and silently drops the observation.
+   */
+  private async loadModel(
+    params: ServingParams
+  ): Promise<{ model: JointModel; version: number }> {
     const blob = await this.store.getBlob(modelKey(params.testId));
     if (blob) {
       const stored = blobToModel(blob.data);
@@ -356,9 +366,14 @@ export class TestService implements TestBackend {
         stored.slotSizes.length === params.slotSizes.length &&
         stored.slotSizes.every((n, i) => n === params.slotSizes[i])
       ) {
-        return stored.model;
+        return { model: stored.model, version: blob.version };
       }
+      return { model: this.freshModel(params), version: blob.version };
     }
+    return { model: this.freshModel(params), version: 0 };
+  }
+
+  private freshModel(params: ServingParams): JointModel {
     return newDerivedState({
       slotSizes: params.slotSizes,
       dim: params.dim,
@@ -416,13 +431,12 @@ export class TestService implements TestBackend {
   ): Promise<void> {
     const key = modelKey(params.testId);
     for (let attempt = 0; attempt < CAS_RETRIES; attempt++) {
-      const blob = await this.store.getBlob(key);
-      const model = await this.loadModel(params);
+      const { model, version } = await this.loadModel(params);
       mutate(model);
       const ok = await this.store.putBlob(
         key,
         modelToBlob({ slotSizes: params.slotSizes, dim: params.dim, model }),
-        blob?.version ?? 0
+        version
       );
       if (ok) {
         return;
