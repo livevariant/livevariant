@@ -57,6 +57,13 @@ const { workspaceVersion } = await releaseVersion({
   gitTag: false
 });
 
+// nx reports null when it decides no bump is needed; without this guard
+// the script would happily commit and tag "vnull".
+if (!workspaceVersion) {
+  console.error("release: no version was determined; nothing to release");
+  process.exit(1);
+}
+
 if (dryRun) {
   console.log(`release: dry run complete (would release v${workspaceVersion})`);
   process.exit(0);
