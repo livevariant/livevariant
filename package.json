@@ -17,8 +17,7 @@
     "prepare": "husky",
     "generate": "node scripts/generate-agent-assets.mjs",
     "dev:worker": "wrangler dev",
-    "deploy": "wrangler deploy --env=\"\"",
-    "deploy:production": "wrangler deploy --env production"
+    "deploy": "wrangler deploy --env production"
   },
   "lint-staged": {
     "*": "prettier --ignore-unknown --write"

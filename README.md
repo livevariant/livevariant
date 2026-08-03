@@ -356,13 +356,13 @@ Or deploy it yourself:
 ```bash
 npm install
 npm run build
-npm run deploy
+npx wrangler deploy --env=""
 ```
 
-That deploys the base configuration, which is the one meant for your own
-account: a single origin, no routes, and every URL built from the request.
-Our hosted deployment is `env.production` in the same file, and ships from
-Cloudflare Workers Builds on every push to `main`.
+`--env=""` targets the top-level configuration, which is the one meant for
+your own account: a single origin, no routes, and every URL built from the
+request. (`npm run deploy` is our hosted deployment, `env.production` in
+the same file, which names zones only we own.)
 
 `LV_ALLOWED_DESTINATIONS` deserves a moment's thought before you expose a
 deployment publicly. Anyone can author a config pointing anywhere, so an
