@@ -54,6 +54,33 @@ export function normalizeDomain(
   if (!/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(host)) {
     return { error: "not a valid domain" };
   }
+  // Two-label effective TLDs (co.uk, com.au, gov.br, ...) must not enter
+  // a globally unique table: verifying one would trust-cover every site
+  // under it. A full public-suffix list is overkill for a name a person
+  // typed; the common second-level registries share this small shape.
+  const labels = host.split(".");
+  const SECOND_LEVEL = new Set([
+    "co",
+    "com",
+    "net",
+    "org",
+    "gov",
+    "edu",
+    "ac",
+    "or",
+    "ne",
+    "go",
+    "mil"
+  ]);
+  // Only under two-letter country TLDs: go.com and co.com are real
+  // registrable names, while co.uk / com.au / go.kr are registries.
+  if (
+    labels.length === 2 &&
+    SECOND_LEVEL.has(labels[0]) &&
+    labels[1].length === 2
+  ) {
+    return { error: "enter your full domain, not a public suffix" };
+  }
   return { domain: host };
 }
 

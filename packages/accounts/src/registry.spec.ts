@@ -319,3 +319,58 @@ describe("SDK first-sight registration", () => {
     ).toBe("interstitial");
   });
 });
+
+describe("cache invalidation after verification", () => {
+  it("flips the redirect verdict immediately in the acting isolate", async () => {
+    const org = await makeOrg();
+    const domain = `flip-${seq}.example`;
+    const provider = new RegistryProvider(db, () => {
+      throw new Error("auth not needed");
+    });
+    await addDomain(db, {
+      domain,
+      orgId: org.orgId,
+      token: "tok",
+      method: "dns-txt"
+    });
+    const kh = freshKh();
+    await claimKey(db, { kh, ...org });
+    const ctx = {
+      testId: "x".repeat(64),
+      statsKeyHash: kh,
+      requestUrl: "https://serve.test/s/x"
+    };
+    // Prime the negative cache, then verify and invalidate: the verdict
+    // must flip now, not after the TTL.
+    expect(await provider.isDomainAllowedForRedirect(domain, ctx)).toBe(
+      "interstitial"
+    );
+    await markDomainVerified(db, org.orgId, domain, "dns-txt", true);
+    provider.invalidateDomain(org.orgId, domain);
+    expect(await provider.isDomainAllowedForRedirect(domain, ctx)).toBe(true);
+  });
+
+  it("stores NULL, not empty string, for a missing SDK config", async () => {
+    const org = await makeOrg();
+    const domain = `nullenc-${seq}.example`;
+    await addDomain(db, {
+      domain,
+      orgId: org.orgId,
+      token: "tok",
+      method: "dns-txt"
+    });
+    await markDomainVerified(db, org.orgId, domain, "dns-txt", true);
+    const pk = await createPublishableKey(db, org.orgId);
+    const provider = new RegistryProvider(db, () => {
+      throw new Error("auth not needed");
+    });
+    const testId = `nullenc-${seq}`.padEnd(64, "b");
+    await provider.registerFromSdk({
+      testId,
+      publishableKey: pk.key,
+      origin: `https://${domain}`
+    });
+    const page = await listTests(db, org.orgId);
+    expect(page.tests.find(t => t.testId === testId)?.encoded).toBeNull();
+  });
+});

@@ -102,3 +102,16 @@ describe("verifyDomain", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("effective TLD guard", () => {
+  it("rejects two-label public suffixes, keeps real names", () => {
+    expect("error" in normalizeDomain("co.uk")).toBe(true);
+    expect("error" in normalizeDomain("com.au")).toBe(true);
+    expect("error" in normalizeDomain("gov.br")).toBe(true);
+    // Real registrable domains that share the shape must keep working.
+    expect(normalizeDomain("go.com")).toEqual({ domain: "go.com" });
+    expect(normalizeDomain("example.co.uk")).toEqual({
+      domain: "example.co.uk"
+    });
+  });
+});

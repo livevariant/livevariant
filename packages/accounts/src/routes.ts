@@ -443,7 +443,7 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
       result.method ?? row.method,
       result.ok
     );
-    deps.provider.invalidateDomain(domain);
+    deps.provider.invalidateDomain(who.orgId, domain);
     if (!result.ok) {
       return c.json({ domain, verified: false, reason: result.reason }, 422);
     }
@@ -463,7 +463,7 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
     if (!removed) {
       return c.json({ error: "no such domain in this organization" }, 404);
     }
-    deps.provider.invalidateDomain(domain);
+    deps.provider.invalidateDomain(who.orgId, domain);
     return c.json({ removed: domain });
   });
 

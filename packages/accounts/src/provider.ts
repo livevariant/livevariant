@@ -208,7 +208,7 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
             testId: input.testId,
             orgId,
             name: input.name,
-            encoded: input.encoded ?? "",
+            encoded: input.encoded || undefined,
             region: input.region
           });
           this.invalidateTest(input.testId);
@@ -229,9 +229,11 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
     this.testOrgs.delete(testId);
   }
 
-  invalidateDomain(domain: string): void {
+  invalidateDomain(orgId: string, domain: string): void {
+    // Entries are keyed "orgId|domain" (domainVerifiedBy); a bare-domain
+    // delete would silently never match.
     for (const candidate of parentDomains(domain.toLowerCase())) {
-      this.verifiedDomains.delete(candidate);
+      this.verifiedDomains.delete(`${orgId}|${candidate}`);
     }
   }
 
