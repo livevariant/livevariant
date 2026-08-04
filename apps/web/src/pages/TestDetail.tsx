@@ -150,7 +150,7 @@ element.textContent = test.variant.text;`;
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-semibold">{test.name}</h1>
+        <h1 className="font-display text-3xl">{test.name}</h1>
         {stats && Object.keys(stats.slots).length > 1 && (
           <Badge variant="secondary">
             {stats.combinations.length} combinations

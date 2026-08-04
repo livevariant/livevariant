@@ -18,6 +18,9 @@
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "references": [
     {
+      "path": "../../packages/sdk"
+    },
+    {
       "path": "../../packages/core"
     }
   ]

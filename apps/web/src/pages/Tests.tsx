@@ -17,7 +17,7 @@ export function Tests() {
   if (tests.length === 0) {
     return (
       <div className="space-y-4 text-center">
-        <h1 className="text-2xl font-semibold">My tests</h1>
+        <h1 className="font-display text-3xl">My tests</h1>
         <p className="text-muted-foreground">
           Nothing here yet. Tests are stored in this browser only.
         </p>
@@ -31,7 +31,7 @@ export function Tests() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">My tests</h1>
+        <h1 className="font-display text-3xl">My tests</h1>
         <Button asChild>
           <Link to="/builder">Create a test</Link>
         </Button>

@@ -75,3 +75,156 @@
     color: var(--color-foreground);
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* LiveVariant design system (DESIGN.md): fonts + the midnight scope. */
+
+@font-face {
+  font-family: "General Sans";
+  src: url("/fonts/GeneralSans-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "General Sans";
+  src: url("/fonts/GeneralSans-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "General Sans";
+  src: url("/fonts/GeneralSans-600.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Commit Mono";
+  src: url("/fonts/CommitMono-400.otf") format("opentype");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Commit Mono";
+  src: url("/fonts/CommitMono-500.otf") format("opentype");
+  font-weight: 500;
+  font-display: swap;
+}
+
+:root {
+  /* Variant identity colors: reserved for variant identity ONLY.
+     Defaults are the midnight values; each theme scope re-tunes them
+     for its own contrast. */
+  --variant-a: #60a5fa;
+  --variant-b: #fb923c;
+  --variant-c: #a78bfa;
+  /* Liveness: reserved for things that are actually live. */
+  --live: #34d399;
+  /* Code syntax, per theme. */
+  --code-keyword: #9fc6b1;
+  --code-string: #d9bd8e;
+  --code-punct: #8a8578;
+}
+
+@theme inline {
+  --color-variant-a: var(--variant-a);
+  --color-variant-b: var(--variant-b);
+  --color-variant-c: var(--variant-c);
+  --color-live: var(--live);
+  --font-display: "Instrument Serif", "Times New Roman", serif;
+  --font-sans: "General Sans", system-ui, sans-serif;
+  --font-mono: "Commit Mono", ui-monospace, monospace;
+}
+
+/*
+ * The two site themes, both mapping the same shadcn variables so every
+ * component works unchanged. `midnight` is the brand's night mode
+ * (DESIGN.md); `daylight` is its slip-paper twin from the same design
+ * consultation. The shell picks one from the visitor's preference.
+ */
+.midnight {
+  --background: #0a0a0a;
+  --foreground: #f5f2ec;
+  --card: #141414;
+  --card-foreground: #f5f2ec;
+  --primary: #f5f2ec;
+  --primary-foreground: #0a0a0a;
+  --secondary: #1c1c1c;
+  --secondary-foreground: #f5f2ec;
+  --muted: #1c1c1c;
+  --muted-foreground: #8a8578;
+  --accent: #1c1c1c;
+  --accent-foreground: #f5f2ec;
+  --destructive: #f87171;
+  --destructive-foreground: #0a0a0a;
+  --border: #262626;
+  --input: #262626;
+  --ring: #34d399;
+
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.daylight {
+  --background: #f6f1e7;
+  --foreground: #1a1f1b;
+  --card: #fffdf7;
+  --card-foreground: #1a1f1b;
+  --primary: #1a1f1b;
+  --primary-foreground: #f6f1e7;
+  --secondary: #efe8d9;
+  --secondary-foreground: #1a1f1b;
+  --muted: #efe8d9;
+  --muted-foreground: #6e6a5e;
+  --accent: #efe8d9;
+  --accent-foreground: #1a1f1b;
+  --destructive: #b3261e;
+  --destructive-foreground: #fffdf7;
+  --border: #e0d9c8;
+  --input: #e0d9c8;
+  --ring: #0e7a55;
+
+  /* Deeper variant inks and a bookmaker green, for contrast on cream. */
+  --variant-a: #2456e6;
+  --variant-b: #e8590c;
+  --variant-c: #7c3aed;
+  --live: #0e7a55;
+  --code-keyword: #0e6b4a;
+  --code-string: #8a5a17;
+  --code-punct: #8a8578;
+
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* Band drift for the streamgraph; a slow breathing loop. */
+@media (prefers-reduced-motion: no-preference) {
+  .live-dot {
+    animation: live-pulse 2.4s ease-in-out infinite;
+  }
+}
+@keyframes live-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Dark, quiet scrollbars inside the midnight scope. */
+.midnight * {
+  scrollbar-width: thin;
+  scrollbar-color: #262626 transparent;
+}
+.midnight *::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.midnight *::-webkit-scrollbar-track {
+  background: transparent;
+}
+.midnight *::-webkit-scrollbar-thumb {
+  background: #262626;
+  border-radius: 3px;
+}

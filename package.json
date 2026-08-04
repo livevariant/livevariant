@@ -74,5 +74,9 @@
         "description": "Optional. Enables image hosting (uploads at /assets, download URLs signed per serve). Generate one with `openssl rand -hex 32`. Leave empty to run without image hosting."
       }
     }
+  },
+  "dependencies": {
+    "@fontsource/instrument-serif": "^5.3.0",
+    "@radix-ui/react-tabs": "^1.1.21"
   }
 }
