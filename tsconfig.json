@@ -23,6 +23,9 @@
     },
     {
       "path": "./apps/web"
+    },
+    {
+      "path": "./packages/accounts"
     }
   ],
   "compilerOptions": {

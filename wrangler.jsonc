@@ -76,6 +76,9 @@
       "/recompute/*",
       "/exclude/*",
       "/manage/*",
+      "/auth/*",
+      "/account/*",
+      "/.well-known/*",
       "/health",
       "/config",
       "/assets",
@@ -94,6 +97,14 @@
   "env": {
     "production": {
       "workers_dev": false,
+      // The hosted entry: base serving plus the accounts module. It
+      // re-exports TestStateDO, which the durable_objects block below
+      // resolves against. A bare `wrangler deploy` never touches this
+      // file, so no auth framework ever reaches a self-host bundle.
+      "main": "packages/workers/src/index.hosted.ts",
+      // Better Auth pulls node:crypto and node:async_hooks; the compat
+      // layer exists only where accounts do.
+      "compatibility_flags": ["nodejs_compat"],
       // Repeated, not inherited: wrangler does NOT copy bindings down into
       // a named environment, so leaving this out deploys a Worker with no
       // state store at all.
@@ -121,6 +132,19 @@
           "bucket_name": "livevariant-assets"
         }
       ],
+      // Accounts registry + Better Auth tables. Production-only on
+      // purpose (d1_databases is not inheritable, and the base config
+      // must deploy on a stranger's account with no database). Apply
+      // migrations with `npm run migrate:livevariant` BEFORE deploying
+      // a schema-dependent build; never automatically on push.
+      "d1_databases": [
+        {
+          "binding": "LV_ACCOUNTS_DB",
+          "database_name": "livevariant-accounts",
+          "database_id": "8d35e487-9220-4661-9f8f-aa5896c8ed42",
+          "migrations_dir": "packages/accounts/migrations"
+        }
+      ],
       "vars": {
         "LV_SERVE_URL": "https://livevariant.link",
         "LV_ALLOWED_DESTINATIONS": "",
@@ -128,7 +152,9 @@
         // The hosted deployment is open to strangers, so unverified
         // redirect destinations get the explicit continue screen instead
         // of making livevariant.link a one-hop open redirector.
-        "LV_UNLISTED_DESTINATIONS": "interstitial"
+        "LV_UNLISTED_DESTINATIONS": "interstitial",
+        "LV_APP_URL": "https://livevariant.com",
+        "LV_EMAIL_FROM": "LiveVariant <login@mail.livevariant.com>"
       },
       "routes": [
         { "pattern": "livevariant.link/*", "zone_name": "livevariant.link" },

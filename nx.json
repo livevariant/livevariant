@@ -66,6 +66,7 @@
       "@livevariant/mcp",
       "@livevariant/sdk",
       "@livevariant/workers",
+      "@livevariant/accounts",
       "@livevariant/web"
     ],
     "version": {

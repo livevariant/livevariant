@@ -60,6 +60,7 @@ import {
   type ServingParams,
   type TestBackend
 } from "./service.js";
+import type { AccountsProvider } from "./accounts-port.js";
 import type { StateStore } from "./store/types.js";
 
 export interface AppOptions {
@@ -100,6 +101,18 @@ export interface AppOptions {
    * is one implementation).
    */
   trust?: TrustPolicy;
+  /**
+   * Accounts sub-app (sign-in, key claiming, domains), mounted at "/".
+   * Built elsewhere and passed in ready-made: this package never
+   * imports an auth framework, which is what keeps one out of a
+   * self-hoster's bundle.
+   */
+  accounts?: Hono;
+  /**
+   * The read side of accounts for the creator-only endpoints. Unset
+   * (self-host, Node, tests) keeps the classic bearer-secret behavior.
+   */
+  provider?: AccountsProvider;
   /**
    * Optional image hosting: uploads at /assets, signed serving at /a.
    * Unset disables both routes entirely, and configs referencing hosted
@@ -540,22 +553,54 @@ export function createApp(options: AppOptions): Hono {
    * Stats secret via Authorization: Bearer only. Query parameters would
    * land in access/proxy logs; the shareable manage URL instead carries
    * the secret in its #fragment, which never leaves the browser, and the
-   * manage page's script converts it into this Bearer header.
+   * page's script converts it into this Bearer header.
+   *
+   * With an accounts provider configured, a claimed key adds a second
+   * way in (a session in the owning org) and lockReads can remove the
+   * first. Read the branches in order and note what does not change:
+   * with no provider, or for an unclaimed key, this is byte-for-byte
+   * the classic zero-I/O check, which is the self-host guarantee. Not
+   * on the serving hot path: only /stats, /recompute and /exclude call
+   * this.
    */
   async function authorized(
-    c: { req: { header(name: string): string | undefined } },
+    c: { req: { header(name: string): string | undefined; raw: Request } },
     decoded: DecodedConfig
   ): Promise<boolean> {
     const header = c.req.header("authorization");
     const match = header?.match(/^Bearer\s+(\S+)$/i);
     const secret = match?.[1];
     const { statsKeyHash } = decoded.config;
-    // A config without a stats key has no owner: nothing can match, so
-    // every creator-only endpoint stays shut rather than open.
-    if (!secret || !statsKeyHash) {
+    // A config without a stats key has no owner through the secret path:
+    // nothing can match a hash that is not there. It can still have an
+    // org owner via registration (keyless SDK tests), checked below.
+    const bearerOk =
+      secret && statsKeyHash
+        ? await verifyStatsSecret(secret, statsKeyHash)
+        : false;
+    const provider = options.provider;
+    if (!provider) {
+      return bearerOk;
+    }
+    const policy = statsKeyHash ? await provider.keyPolicy(statsKeyHash) : null;
+    if (policy) {
+      const orgs = await provider.sessionOrgIds(c.req.raw);
+      const orgOk = orgs.includes(policy.orgId);
+      // A locked key must fail exactly like a wrong secret, or an old
+      // secret becomes an oracle for "claimed and locked".
+      return orgOk || (bearerOk && !policy.lockReads);
+    }
+    if (bearerOk) {
+      return true;
+    }
+    // Keyless-but-registered tests: readable by the owning org, which is
+    // the first time a config without a stats key is readable at all.
+    const owner = await provider.testOrg(decoded.testId);
+    if (!owner) {
       return false;
     }
-    return verifyStatsSecret(secret, statsKeyHash);
+    const orgs = await provider.sessionOrgIds(c.req.raw);
+    return orgs.includes(owner);
   }
 
   app.get("/health", c => c.json({ ok: true }));
@@ -565,6 +610,14 @@ export function createApp(options: AppOptions): Hono {
       "/",
       createAssetRoutes({ ...options.assets, serveUrl: options.serveUrl })
     );
+  }
+
+  // Accounts (hosted only): the sub-app arrives ready-made so this
+  // package never depends on an auth framework. Mounted before the tool
+  // API so its /auth and /account prefixes are matched by their own
+  // middleware and nothing else.
+  if (options.accounts) {
+    app.route("/", options.accounts);
   }
 
   /**

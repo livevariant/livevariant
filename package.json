@@ -21,7 +21,9 @@
     "dev:worker": "wrangler dev",
     "deploy": "wrangler deploy --env=\"\"",
     "deploy:livevariant": "wrangler deploy --env production",
-    "versions:livevariant": "wrangler versions upload --env production"
+    "versions:livevariant": "wrangler versions upload --env production",
+    "migrate:livevariant": "wrangler d1 migrations apply livevariant-accounts --env production --remote",
+    "migrate:local": "wrangler d1 migrations apply livevariant-accounts --env production --local"
   },
   "lint-staged": {
     "*": "prettier --ignore-unknown --write"

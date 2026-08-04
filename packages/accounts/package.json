@@ -1,0 +1,44 @@
+{
+  "name": "@livevariant/accounts",
+  "version": "0.0.2",
+  "description": "Hosted-only accounts module: Better Auth over Drizzle on Cloudflare D1, org-owned stats keys, domain verification. Never published and never imported by the self-host entry, which is what keeps auth out of a one-click deploy's bundle",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/livevariant/livevariant.git",
+    "directory": "packages/accounts"
+  },
+  "private": true,
+  "type": "module",
+  "scripts": {},
+  "nx": {
+    "includedScripts": []
+  },
+  "dependencies": {
+    "@livevariant/core": "0.0.2",
+    "@livevariant/server": "0.0.2",
+    "better-auth": "^1.6.26",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.33",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@better-auth/cli": "^1.4.21",
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "drizzle-kit": "^0.31.10",
+    "wrangler": "^4.118.0"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@livevariant/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  }
+}

@@ -8,6 +8,7 @@ import {
 import {
   createApp,
   counterKey,
+  type AppOptions,
   derivedToArtifacts,
   ModelCache,
   TestService,
@@ -194,7 +195,7 @@ export class TestStateDO extends DurableObject {
   }
 }
 
-interface Env {
+export interface Env {
   TEST_STATE: DurableObjectNamespace<TestStateDO>;
   /** Comma-separated destination hosts; a host admits its subdomains. */
   LV_ALLOWED_DESTINATIONS?: string;
@@ -309,6 +310,28 @@ function listVar(value: string | undefined): string[] | undefined {
   return entries && entries.length > 0 ? entries : undefined;
 }
 
+/**
+ * The AppOptions every entry shares. The hosted entry (index.hosted.ts)
+ * layers accounts on top of exactly this, so the two cannot drift.
+ */
+export function baseAppOptions(env: Env): AppOptions {
+  return {
+    backend: new DurableObjectBackend(env.TEST_STATE),
+    allowedDestinations: listVar(env.LV_ALLOWED_DESTINATIONS),
+    allowedOrigins: listVar(env.LV_ALLOWED_ORIGINS),
+    unlistedDestinations: unlistedDestinationMode(env.LV_UNLISTED_DESTINATIONS),
+    serveUrl: env.LV_SERVE_URL,
+    assets:
+      env.ASSET_STORE && env.LV_ASSET_SECRET
+        ? {
+            store: new R2AssetStore(env.ASSET_STORE),
+            signingSecret: env.LV_ASSET_SECRET,
+            uploadToken: env.LV_ASSET_UPLOAD_TOKEN
+          }
+        : undefined
+  };
+}
+
 // One app per env (i.e. per isolate in practice): route registration and
 // middleware chains are not free, and the binding object is stable across
 // requests, so rebuilding the app each request is pure waste.
@@ -318,23 +341,7 @@ export default {
   fetch(request: Request, env: Env): Response | Promise<Response> {
     let app = apps.get(env);
     if (!app) {
-      app = createApp({
-        backend: new DurableObjectBackend(env.TEST_STATE),
-        allowedDestinations: listVar(env.LV_ALLOWED_DESTINATIONS),
-        allowedOrigins: listVar(env.LV_ALLOWED_ORIGINS),
-        unlistedDestinations: unlistedDestinationMode(
-          env.LV_UNLISTED_DESTINATIONS
-        ),
-        serveUrl: env.LV_SERVE_URL,
-        assets:
-          env.ASSET_STORE && env.LV_ASSET_SECRET
-            ? {
-                store: new R2AssetStore(env.ASSET_STORE),
-                signingSecret: env.LV_ASSET_SECRET,
-                uploadToken: env.LV_ASSET_UPLOAD_TOKEN
-              }
-            : undefined
-      });
+      app = createApp(baseAppOptions(env));
       apps.set(env, app);
     }
     return app.fetch(request);

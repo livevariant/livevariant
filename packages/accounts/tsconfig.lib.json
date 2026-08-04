@@ -7,20 +7,16 @@
     "emitDeclarationOnly": false,
     "declaration": true,
     "forceConsistentCasingInFileNames": true,
-    // Workers runtime: its own type universe instead of dom/node. The
-    // workers-types package also declares the cloudflare:workers module.
+    // Runs inside the Worker: same type universe as @livevariant/workers.
     "types": ["@cloudflare/workers-types"]
   },
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../accounts/tsconfig.lib.json"
+      "path": "../core/tsconfig.lib.json"
     },
     {
       "path": "../server/tsconfig.lib.json"
-    },
-    {
-      "path": "../core/tsconfig.lib.json"
     }
   ],
   "exclude": ["src/**/*.spec.ts"]

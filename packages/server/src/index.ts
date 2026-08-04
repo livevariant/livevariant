@@ -52,6 +52,7 @@ export {
   type TestPolicy,
   type TestShape
 } from "./store/types.js";
+export { type AccountsProvider, type KeyPolicy } from "./accounts-port.js";
 export {
   envTrustPolicy,
   originMatches,

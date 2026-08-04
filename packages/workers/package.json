@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@livevariant/core": "0.0.2",
-    "@livevariant/server": "0.0.2"
+    "@livevariant/server": "0.0.2",
+    "@livevariant/accounts": "0.0.2"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260801.1",
