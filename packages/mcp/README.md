@@ -1,7 +1,7 @@
 # @livevariant/mcp
 
 MCP server for [LiveVariant](https://livevariant.com): build, inspect and
-read bandit-driven A/B tests from Claude, ChatGPT, Copilot or any MCP
+read adaptive A/B tests from Claude, ChatGPT, Copilot or any MCP
 client.
 
 ```bash
