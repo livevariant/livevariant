@@ -8,13 +8,21 @@ different winner per audience, and tests several elements as one
 combination. The whole test lives in a URL: no account, no platform,
 nothing to install on your site.
 
-Built for LLM agents first: your assistant drafts the variants, uploads
-them, builds the test, and hands you one URL to paste in your
-newsletter.
+[livevariant.com](https://livevariant.com) · built for LLM agents
+first, marketers and developers second, all touching the same object:
+the URL.
 
-## Install the toolkit
+## See it live
 
-Skills (recommended, works with Claude Code and Cowork):
+The headline on [livevariant.com](https://livevariant.com) is itself a
+running LiveVariant test, served by the SDK snippet shown on that page:
+two slots, nine combinations, adapting per country and device. We test
+our own homepage with our own product.
+
+## Let your LLM run it
+
+Install the toolkit. Skills (recommended, works with Claude Code and
+Cowork):
 
 ```bash
 npx skills add livevariant/livevariant
@@ -35,9 +43,10 @@ codex plugin marketplace add livevariant/livevariant
 codex plugin add livevariant/livevariant
 ```
 
-Any other agent, via MCP: hosted at `https://livevariant.com/mcp`, or
-stdio with `npx -y @livevariant/mcp`. No API keys: a test's config and
-its stats secret carry all the authority there is.
+Any other agent: MCP hosted at `https://livevariant.com/mcp`, stdio via
+`npx -y @livevariant/mcp`, or plain HTTP at `POST /api/v1/<tool>`
+(interactive docs at `/docs`, spec at `/openapi.json`). No API keys: a
+test's config and its stats secret carry all the authority there is.
 
 Then just ask your assistant:
 
@@ -47,27 +56,29 @@ It uploads the images, builds the test, and returns one URL. Ask it for
 `get_stats` later and it tells you the win probability per combination,
 not just raw rates.
 
-## Test a hero image by swapping one URL
+## Or do it yourself
 
-Replace your email's image URL with ours and reference your variants.
-That's the whole integration:
+The [builder](https://livevariant.com/builder) composes a test in the
+browser, no code and no account. Or write the URL by hand:
 
 ```
-https://livevariant.link/s?v=https://cdn.you.com/hero-a.jpg
-                          &v=https://cdn.you.com/hero-b.jpg
-                          &id={{recipient_id}}
+https://livevariant.link/s?v=https://cdn.you.com/hero-a.jpg&v=https://cdn.you.com/hero-b.jpg&id={{recipient_id}}
 ```
 
+Replace your email's image URL with that, and the integration is done.
 Every recipient sticks to their variant across opens, traffic shifts
 toward the winner while the campaign runs, and clicks (`/c`) plus a
 thank-you-page pixel (`/px`) close the loop. Add `&kh=<hash>` from the
 builder to make results readable with your stats secret.
 
-Multiple elements? Slots test the **combination**, not isolated pieces:
+Multiple elements? Slots test the **combination**, not isolated pieces
+(wrapped here for reading; variant values are full URLs):
 
 ```
-https://livevariant.link/s?s=hero&v=hero-a.jpg&v=hero-b.jpg
-                          &s=product&v=shot-1.jpg&v=shot-2.jpg
+https://livevariant.link/s?s=hero&v=https://cdn.you.com/hero-a.jpg
+                          &v=https://cdn.you.com/hero-b.jpg
+                          &s=product&v=https://cdn.you.com/shot-1.jpg
+                          &v=https://cdn.you.com/shot-2.jpg
                           &id={{recipient_id}}&slot=hero
 ```
 
@@ -79,7 +90,7 @@ For audience segments in email, use what survives mail proxies: campaign
 tags (`ctx=source:utm_source`) or your ESP's merge fields
 (`&c_country={{country}}`).
 
-## Test copy inline with the SDK
+### Test copy inline with the SDK
 
 The config is readable on purpose; this is the whole test:
 
@@ -108,8 +119,24 @@ cta.textContent = test.slots.cta.text;
 ```
 
 Two slots, nine combinations, a different winner per country and device,
-and the test is scoped to your domain automatically. If our server is
+and the test is scoped to your domain automatically. If the server is
 unreachable, visitors get your control and nothing breaks.
+
+## Read your results
+
+Building a test (through the builder or `build_test`) shows the stats
+secret exactly **once**; only its hash travels in the config, so nobody
+can recover it later, including us. Keep it.
+
+- The **manage URL** carries the secret in its `#fragment` (which never
+  reaches server logs): open it for live per-combination and per-slot
+  numbers.
+- Agents call **`get_stats`** with the same secret and get win
+  probabilities plus an honest stop/continue call, instead of eyeballed
+  conversion rates.
+- A test built without a stats key still serves and learns, but its
+  results are unreadable forever: no secret can match a hash that is
+  not there.
 
 ## Why not a normal A/B test?
 
@@ -126,23 +153,18 @@ published literature (Thompson 1933; Chapelle & Li 2011; Li et al.
 2010; Hill et al., KDD 2017; Shivaswamy & Joachims 2012), implemented
 small enough to audit.
 
-## Private by minimization
-
-The server stores hashed visitor ids, opaque context keys, numeric
-model state, and coarse signals for stats. Raw ids and raw context
-never; variant content never, except images you explicitly host with
-us. EU customers can pin a test's entire state inside the EU
-(`region: "eu"`). AGPL, so every claim is checkable.
-
 ## Deploy your own
+
+This product is designed to be self-deployed. Our server can be used
+for testing, but its state can be destroyed at any time; a managed
+hosted version is in the works. Your deployment runs the same AGPL code
+with none of those caveats:
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/livevariant/livevariant)
 
 One click clones this repo into your account and deploys the whole
 thing: serving, dashboard, tools API, MCP endpoint. Nothing to
 configure; every URL is built from the origin the request arrived on.
-We encourage it: the hosted service and your deployment run the same
-AGPL code.
 
 ```bash
 npm ci && npm run build && npm run deploy
