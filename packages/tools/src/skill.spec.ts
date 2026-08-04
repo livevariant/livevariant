@@ -20,7 +20,10 @@ const root = path.join(
   "..",
   ".."
 );
-const skill = fs.readFileSync(path.join(root, "SKILL.md"), "utf8");
+const skill = fs.readFileSync(
+  path.join(root, "skills", "livevariant", "SKILL.md"),
+  "utf8"
+);
 
 describe("the generated SKILL", () => {
   it("documents every tool and invents none", () => {
