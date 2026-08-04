@@ -11,3 +11,7 @@ LV_ALLOWED_ORIGINS=
 # allow | block | interstitial. Unset keeps the defaults (allow everything
 # with no list, block unlisted with one).
 LV_UNLISTED_DESTINATIONS=
+
+# When set, the tools API (/api/v1) and /mcp require this Bearer token.
+# Generate one with: openssl rand -hex 32. Unset keeps them open.
+LV_API_TOKEN=

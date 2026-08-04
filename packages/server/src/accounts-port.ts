@@ -35,4 +35,18 @@ export interface AccountsProvider {
   keyPolicy(kh: string): Promise<KeyPolicy | null>;
   /** Owning org of a registered test (keyless SDK tests). null = none. */
   testOrg(testId: string): Promise<string | null>;
+  /** The account test list, across every org the caller belongs to. */
+  listTests(
+    orgIds: string[],
+    options: { q?: string; cursor?: string; limit?: number }
+  ): Promise<{
+    tests: Array<{
+      testId: string;
+      name: string | null;
+      encoded: string;
+      region: string | null;
+      addedAt: number;
+    }>;
+    nextCursor: string | null;
+  }>;
 }

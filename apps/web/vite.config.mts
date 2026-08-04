@@ -22,7 +22,10 @@ export default defineConfig({
     proxy: {
       "/config": "http://localhost:8787",
       "/choose": "http://localhost:8787",
-      "/reward": "http://localhost:8787"
+      "/reward": "http://localhost:8787",
+      "/stats": "http://localhost:8787",
+      "/account": "http://localhost:8787",
+      "/auth": "http://localhost:8787"
     }
   }
 });

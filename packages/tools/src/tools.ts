@@ -1112,12 +1112,62 @@ export const uploadImage = defineTool({
 
 // ---------------------------------------------------------------------------
 
+const listTests = defineTool({
+  name: "list_tests",
+  title: "List my tests",
+  summary: "Lists the tests saved to the caller's account, with search.",
+  description:
+    "Lists tests registered to the signed-in account, newest first, with " +
+    "cursor pagination and an optional case-insensitive name filter. Only " +
+    "exists on deployments with accounts, and only answers for an " +
+    "identified caller: unlike every other tool, WHOSE tests these are " +
+    "cannot be expressed as an argument. Each entry carries the encoded " +
+    "config, which inspect_test and get_stats accept directly.",
+  input: z.object({
+    q: z
+      .string()
+      .max(200)
+      .optional()
+      .describe("Case-insensitive substring filter on the test name"),
+    cursor: z
+      .string()
+      .optional()
+      .describe("Opaque cursor from a previous page's nextCursor"),
+    limit: z.number().int().min(1).max(100).optional()
+  }),
+  output: z.object({
+    tests: z.array(
+      z.object({
+        testId: z.string(),
+        name: z.string().nullable(),
+        encoded: z.string(),
+        region: z.string().nullable(),
+        addedAt: z.number()
+      })
+    ),
+    nextCursor: z.string().nullable()
+  }),
+  readOnly: true,
+  reachesNetwork: false,
+  scope: "account",
+  handler: async (input, context) => {
+    if (!context.accounts) {
+      throw new ToolInputError(
+        "this deployment has no accounts, so there is no test list to read",
+        404
+      );
+    }
+    return context.accounts.listTests(input);
+  }
+});
+
 /** Every tool, in the order a person meets them. */
 export const TOOLS = [
   buildTest,
   inspectTest,
   generatePriors,
   getStats,
+  listTests,
   uploadImage,
   variantBrief
 ] as const;

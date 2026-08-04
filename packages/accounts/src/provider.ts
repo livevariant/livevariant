@@ -8,6 +8,7 @@
  * interstitials, bearer secrets keep working), never availability.
  */
 import { eq } from "drizzle-orm";
+import { listTests } from "./registry.js";
 import type {
   AccountsProvider,
   KeyPolicy,
@@ -157,6 +158,13 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
    */
   isOriginAllowedForSDK(): Promise<boolean> {
     return Promise.resolve(true);
+  }
+
+  listTests(
+    orgIds: string[],
+    options: { q?: string; cursor?: string; limit?: number }
+  ) {
+    return listTests(this.db, orgIds, options);
   }
 
   /** Invalidate after a claim/verify so the acting isolate sees it now. */

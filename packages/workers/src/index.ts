@@ -230,6 +230,12 @@ export interface Env {
   LV_ASSET_SECRET?: string;
   /** Optional bearer token gating POST /assets; unset means open uploads. */
   LV_ASSET_UPLOAD_TOKEN?: string;
+  /**
+   * Self-host machine credential: when set, the tool API (/api/v1) and
+   * /mcp require it as a Bearer token. The hosted deployment must not
+   * set it ("operator" is the wrong granularity for multi-tenant).
+   */
+  LV_API_TOKEN?: string;
 }
 
 /** Counter keys arrive as c:{testId}:{scope}; the DO stores scopes. */
@@ -321,6 +327,7 @@ export function baseAppOptions(env: Env): AppOptions {
     allowedOrigins: listVar(env.LV_ALLOWED_ORIGINS),
     unlistedDestinations: unlistedDestinationMode(env.LV_UNLISTED_DESTINATIONS),
     serveUrl: env.LV_SERVE_URL,
+    apiToken: env.LV_API_TOKEN,
     assets:
       env.ASSET_STORE && env.LV_ASSET_SECRET
         ? {

@@ -42,7 +42,6 @@ import {
   type AssetOptions
 } from "./assets/routes.js";
 import { renderInterstitialPage } from "./interstitial-page.js";
-import { renderManagePage } from "./manage-page.js";
 import {
   envTrustPolicy,
   originMatches,
@@ -126,6 +125,11 @@ export interface AppOptions {
    * keep bulk email traffic off the dashboard's reputation.
    */
   serveUrl?: string;
+  /**
+   * Self-host machine credential: when set, the tool API (/api/v1) and
+   * /mcp require it as a Bearer token. See ApiOptions.apiToken.
+   */
+  apiToken?: string;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -650,6 +654,8 @@ export function createApp(options: AppOptions): Hono {
     "/",
     createApi({
       serveUrl: options.serveUrl,
+      apiToken: options.apiToken,
+      provider: options.provider,
       fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
         app.fetch(new Request(input as RequestInfo, init))) as typeof fetch
     })
@@ -1010,16 +1016,10 @@ export function createApp(options: AppOptions): Hono {
     return c.json({ ok: true, events, policy });
   });
 
-  // Unauthenticated static shell: exposes nothing beyond the (public)
-  // config; its script reads the secret from the #fragment and fetches
-  // /stats with a Bearer header.
-  app.get("/manage/:cfg", async c => {
-    const result = await decodeOr404(c.req.param("cfg"));
-    if ("error" in result) {
-      return result.error;
-    }
-    return c.html(renderManagePage(result.decoded.config, c.req.param("cfg")));
-  });
+  // /manage/<cfg> is deliberately NOT here anymore: it is a dashboard
+  // route (apps/web), served by the SPA fallback, so the stats page
+  // exists exactly once. The URL shape and its #fragment secret are
+  // unchanged for everyone holding an old link.
 
   return app;
 }

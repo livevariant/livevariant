@@ -5,7 +5,7 @@
  * upserts with a read-back, so concurrency yields exactly one winner
  * instead of a double claim.
  */
-import { and, desc, eq, like, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, lt, or, sql } from "drizzle-orm";
 import { domains, keys, tests } from "./schema.js";
 import type { Db } from "./auth.js";
 
@@ -151,11 +151,15 @@ export interface TestPage {
  */
 export async function listTests(
   db: Db,
-  orgId: string,
+  orgId: string | string[],
   options: { q?: string; cursor?: string; limit?: number } = {}
 ): Promise<TestPage> {
   const limit = Math.min(Math.max(options.limit ?? 25, 1), 100);
-  const conditions = [eq(tests.orgId, orgId)];
+  const orgIds = Array.isArray(orgId) ? orgId : [orgId];
+  if (orgIds.length === 0) {
+    return { tests: [], nextCursor: null };
+  }
+  const conditions = [inArray(tests.orgId, orgIds)];
   if (options.q) {
     // Escape LIKE wildcards so a literal % in a name stays literal.
     const escaped = options.q.replace(/[\\%_]/g, ch => `\\${ch}`);

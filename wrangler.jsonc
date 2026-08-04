@@ -75,7 +75,6 @@
       "/stats/*",
       "/recompute/*",
       "/exclude/*",
-      "/manage/*",
       "/auth/*",
       "/account/*",
       "/.well-known/*",

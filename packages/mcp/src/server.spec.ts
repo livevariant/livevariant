@@ -37,8 +37,12 @@ describe("the MCP server", () => {
     // documenting a server that does not exist.
     const client = await connect();
     const { tools } = await client.listTools();
+    // No accounts capability on this server, so account-scoped tools
+    // are deliberately absent.
     expect(tools.map(t => t.name).sort()).toEqual(
-      TOOLS.map(t => t.name).sort()
+      TOOLS.filter(t => t.scope !== "account")
+        .map(t => t.name)
+        .sort()
     );
   });
 

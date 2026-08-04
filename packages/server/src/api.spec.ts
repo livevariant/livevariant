@@ -28,11 +28,17 @@ async function post(path: string, body: unknown) {
 }
 
 describe("the tool API", () => {
-  it("mounts every tool in the registry", async () => {
+  it("mounts every open tool; account tools need the capability", async () => {
     for (const tool of TOOLS) {
       const res = await post(toolPath(tool.name), {});
-      // Present, whatever it thinks of an empty body.
-      expect(res.status).not.toBe(404);
+      if (tool.scope === "account") {
+        // No accounts on this deployment: the tool does not exist, so
+        // an agent is never shown something the server cannot answer.
+        expect(res.status).toBe(404);
+      } else {
+        // Present, whatever it thinks of an empty body.
+        expect(res.status).not.toBe(404);
+      }
     }
   });
 
@@ -198,5 +204,103 @@ describe("the tool API", () => {
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as any).totalAssignments).toBe(1);
+  });
+});
+
+describe("the API token gate", () => {
+  const gated = () =>
+    createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      apiToken: "0".repeat(64)
+    });
+
+  it("401s tools and /mcp without the token, and answers with it", async () => {
+    const app = gated();
+    const anon = await app.request(`https://x.test${toolPath("build_test")}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ variants: [{ url: A }, { url: B }] })
+    });
+    expect(anon.status).toBe(401);
+    const anonMcp = await app.request("https://x.test/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
+    expect(anonMcp.status).toBe(401);
+    const authed = await app.request(
+      `https://x.test${toolPath("build_test")}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${"0".repeat(64)}`
+        },
+        body: JSON.stringify({ variants: [{ url: A }, { url: B }] })
+      }
+    );
+    expect(authed.status).toBe(200);
+  });
+
+  it("leaves discovery and serving open", async () => {
+    const app = gated();
+    expect((await app.request("https://x.test/config")).status).toBe(200);
+    expect((await app.request("https://x.test/openapi.json")).status).toBe(200);
+    expect((await app.request("https://x.test/health")).status).toBe(200);
+  });
+});
+
+describe("account-scoped tools with a provider", () => {
+  const provider = {
+    sessionOrgIds: async (req: Request) =>
+      req.headers.get("cookie")?.includes("session=yes") ? ["org-1"] : [],
+    keyPolicy: async () => null,
+    testOrg: async () => null,
+    listTests: async () => ({
+      tests: [
+        {
+          testId: "t".repeat(64),
+          name: "claimed test",
+          encoded: "enc",
+          region: null,
+          addedAt: 1
+        }
+      ],
+      nextCursor: null
+    })
+  };
+
+  const withAccounts = () =>
+    createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider
+    });
+
+  it("mounts list_tests and resolves identity per call", async () => {
+    const app = withAccounts();
+    const anon = await app.request(`https://x.test${toolPath("list_tests")}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}"
+    });
+    // Listed but unanswerable without identity: a clear 401, never an
+    // empty list pretending to be an answer.
+    expect(anon.status).toBe(401);
+    const signed = await app.request(
+      `https://x.test${toolPath("list_tests")}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: "session=yes"
+        },
+        body: "{}"
+      }
+    );
+    expect(signed.status).toBe(200);
+    const body = (await signed.json()) as { tests: Array<{ name: string }> };
+    expect(body.tests[0].name).toBe("claimed test");
   });
 });

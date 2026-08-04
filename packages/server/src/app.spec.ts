@@ -701,40 +701,6 @@ describe("source visibility and creator quarantine", () => {
     });
     expect(wrong.status).toBe(401);
   });
-
-  it("serves the manage shell openly; stats stay behind the fragment secret", async () => {
-    const { encoded } = await makeTest();
-    const res = await app.request(`/manage/${encoded}`);
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).toContain("landing page test");
-    // The shell contains no stats data (only loading placeholders), just
-    // the fetch wiring that turns the #fragment into a Bearer header.
-    expect(html).toContain("location.hash");
-    expect(html).toContain("Bearer");
-    expect(html).toContain("loading…");
-  });
-
-  it("offers the plain-URL toggle when the config can be spelled that way", async () => {
-    // Per-variant redirectUrl has no query spelling, so use a config
-    // without one.
-    const { encoded } = await makeTest({
-      variants: [
-        { name: "control", url: "https://example.com/a" },
-        { name: "variant", url: "https://example.com/b" }
-      ]
-    });
-    const html = await (await app.request(`/manage/${encoded}`)).text();
-    expect(html).toContain('id="toggle-plain"');
-    // Inline text variants have no query spelling, so no toggle.
-    const inline = await makeTest({
-      variants: ["Ship faster", "Ship safer"] as any
-    });
-    const inlineHtml = await (
-      await app.request(`/manage/${inline.encoded}`)
-    ).text();
-    expect(inlineHtml).not.toContain('id="toggle-plain"');
-  });
 });
 
 describe("region and scope", () => {

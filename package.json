@@ -80,6 +80,9 @@
       },
       "LV_ASSET_SECRET": {
         "description": "Optional. Enables image hosting (uploads at /assets, download URLs signed per serve). Generate one with `openssl rand -hex 32`. Leave empty to run without image hosting."
+      },
+      "LV_API_TOKEN": {
+        "description": "Optional. When set, calling the tools API (/api/v1) and the MCP endpoint requires this value as a Bearer token: your server-to-server credential. Generate one with `openssl rand -hex 32`. Leave empty to keep the API open."
       }
     }
   },
