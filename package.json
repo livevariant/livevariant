@@ -74,5 +74,6 @@
         "description": "Optional. Enables image hosting (uploads at /assets, download URLs signed per serve). Generate one with `openssl rand -hex 32`. Leave empty to run without image hosting."
       }
     }
-  }
+  },
+  "dependencies": {}
 }

@@ -13,5 +13,16 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true
+  },
+  server: {
+    // Dev-only: /config answered by a locally running LiveVariant server
+    // (npx tsx packages/server/src/main.ts) makes the page's own
+    // dogfooding test live in development; without one, /config 404s and
+    // the SDK falls back to control, which is the documented behaviour.
+    proxy: {
+      "/config": "http://localhost:8787",
+      "/choose": "http://localhost:8787",
+      "/reward": "http://localhost:8787"
+    }
   }
 });

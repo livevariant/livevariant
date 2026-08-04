@@ -9,7 +9,10 @@
     "includedScripts": []
   },
   "dependencies": {
+    "@fontsource/instrument-serif": "^5.3.0",
     "@livevariant/core": "0.0.2",
+    "@livevariant/sdk": "0.0.2",
+    "@radix-ui/react-tabs": "^1.1.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.28.0",

@@ -57,9 +57,15 @@ function CopyField({ label, value }: { label: string; value: string }) {
           size="icon"
           aria-label={`Copy ${label}`}
           onClick={() => {
-            void navigator.clipboard.writeText(value);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
+            navigator.clipboard
+              .writeText(value)
+              .then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              })
+              .catch(() => {
+                // Denied clipboard must not show a green check.
+              });
           }}
         >
           {copied ? <Check /> : <Copy />}
@@ -150,7 +156,7 @@ element.textContent = test.variant.text;`;
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
-        <h1 className="text-2xl font-semibold">{test.name}</h1>
+        <h1 className="font-display text-3xl">{test.name}</h1>
         {stats && Object.keys(stats.slots).length > 1 && (
           <Badge variant="secondary">
             {stats.combinations.length} combinations
@@ -351,9 +357,15 @@ element.textContent = test.variant.text;`;
             variant="outline"
             size="sm"
             onClick={() => {
-              void navigator.clipboard.writeText(snippet);
-              setSnippetCopied(true);
-              setTimeout(() => setSnippetCopied(false), 1500);
+              navigator.clipboard
+                .writeText(snippet)
+                .then(() => {
+                  setSnippetCopied(true);
+                  setTimeout(() => setSnippetCopied(false), 1500);
+                })
+                .catch(() => {
+                  // Denied clipboard must not show a green check.
+                });
             }}
           >
             {snippetCopied ? <Check /> : <Copy />} Copy

@@ -3,11 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LiveVariant: A/B testing without the platform</title>
+    <title>LiveVariant: the A/B test that keeps testing</title>
     <meta
       name="description"
-      content="Bandit-driven A/B testing where the entire test lives in a URL. No accounts, no snippets to configure, no data stored about your users."
+      content="Adaptive A/B testing where the entire test lives in a URL. Traffic shifts toward the winner while the test runs, several elements are optimized as one combination, and no raw visitor data is stored. No accounts, no platform."
     />
+    <script>
+      // Theme before paint: stored choice wins, else the OS preference.
+      (function () {
+        var stored = localStorage.getItem("lv-theme");
+        var dark =
+          stored === "dark" ||
+          (!stored &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.style.backgroundColor = dark
+          ? "#0a0a0a"
+          : "#f6f1e7";
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
