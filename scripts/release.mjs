@@ -84,7 +84,7 @@ run("git add package-lock.json");
 // The generated manifests embed the version, so they are part of the
 // release commit or the drift check fails on it.
 run("npm run generate");
-run("git add SKILL.md plugins .claude-plugin .agents");
+run("git add skills plugins .claude-plugin .agents");
 
 run(`git commit -m "release: v${workspaceVersion}"`);
 // Annotated, not lightweight: `git push --follow-tags` only pushes

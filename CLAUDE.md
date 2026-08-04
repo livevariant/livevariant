@@ -136,7 +136,7 @@ npm run build              # nx run-many -t build
 npm test                   # all, incl. Playwright browser tests (sdk, web)
 npm run test:no-browser    # CI-safe subset
 npm run lint && npm run typecheck
-npm run generate           # regenerate SKILL.md + plugins from the tools registry; CI fails on diff
+npm run generate           # regenerate skills/livevariant/SKILL.md + plugins; CI fails on diff
 npm run release            # lockstep versioning: ALL five npm packages, one version, every release
 ```
 
@@ -154,7 +154,7 @@ npm run release            # lockstep versioning: ALL five npm packages, one ver
 
 - Tools live ONLY in the `@livevariant/tools` registry; MCP, REST,
   OpenAPI and SKILL are all generated from it. Never hand-edit
-  `SKILL.md` or `plugins/` (edit `skill/SKILL.template.md` +
+  `skills/` or `plugins/` (edit `skill/SKILL.template.md` +
   `scripts/generate-agent-assets.mjs` inputs, then `npm run generate`).
 - Deployment split: plain `npm run deploy` is the anyone's-account
   config; anything named `*:livevariant` carries our zones and is ours.

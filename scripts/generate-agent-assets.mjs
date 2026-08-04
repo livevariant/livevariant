@@ -5,7 +5,8 @@
  *
  * Output (all committed, because this repository is public and therefore IS
  * the skill repository people install from):
- *   SKILL.md                          the skill itself
+ *   skills/livevariant/SKILL.md       the skill itself (its own directory,
+ *                                     so `npx skills add` copies just that)
  *   plugins/{claude,chatgpt,copilot}/ one bundle per platform
  *   .claude-plugin/marketplace.json   so `/plugin marketplace add` works here
  *   .agents/plugins/marketplace.json  the same for Codex
@@ -22,12 +23,13 @@ import { fileURLToPath } from "node:url";
 import { TOOLS } from "@livevariant/tools";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const PLUGIN_NAME = "livevariant";
 const TEMPLATE = path.join(root, "skill", "SKILL.template.md");
-const SKILL = path.join(root, "SKILL.md");
+const SKILL = path.join(root, "skills", PLUGIN_NAME, "SKILL.md");
 const TOOLS_MARKER = "<!-- TOOLS_TABLE -->";
 
 export const PLUGIN = {
-  name: "livevariant",
+  name: PLUGIN_NAME,
   displayName: "LiveVariant",
   // The npm packages' lockstep version, read rather than written so a
   // release bump (scripts/release.mjs regenerates after versioning) flows
@@ -222,6 +224,6 @@ if (
 ) {
   const { tools, platforms } = generateAll();
   console.log(
-    `[generate-agent-assets] ${tools} tools -> SKILL.md + plugins/{${platforms.join(",")}}`
+    `[generate-agent-assets] ${tools} tools -> skills/livevariant/SKILL.md + plugins/{${platforms.join(",")}}`
   );
 }
