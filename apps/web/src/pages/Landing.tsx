@@ -121,14 +121,18 @@ function usePageTest(): PageTestState {
           // interception on our own page.
           rewardEvents: false
         });
-        if (live) {
-          setState({
-            headline: created.slots.headline.index,
-            sub: created.slots.sub.index,
-            fallback: created.fallback,
-            test: created
-          });
+        if (!live) {
+          // Unmounted while awaiting: the cleanup below already ran
+          // with `created` still null, so dispose here.
+          created.dispose();
+          return;
         }
+        setState({
+          headline: created.slots.headline.index,
+          sub: created.slots.sub.index,
+          fallback: created.fallback,
+          test: created
+        });
       } catch {
         // The SDK already degrades to control; this catch only guards
         // the config fetch. The page must render regardless.
@@ -472,10 +476,16 @@ function CopyButton({
       aria-label="Copy command"
       className="text-muted-foreground hover:text-foreground"
       onClick={() => {
-        void navigator.clipboard.writeText(text);
-        onCopied?.();
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        navigator.clipboard
+          .writeText(text)
+          .then(() => {
+            onCopied?.();
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+          .catch(() => {
+            // Clipboard can be denied; showing a green check would lie.
+          });
       }}
     >
       {copied ? <Check className="text-live" /> : <Copy />}
