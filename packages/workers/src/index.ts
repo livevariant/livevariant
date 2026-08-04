@@ -11,6 +11,7 @@ import {
   derivedToArtifacts,
   ModelCache,
   TestService,
+  unlistedDestinationMode,
   type RequestIdentity,
   type ServingParams,
   type StateStore,
@@ -195,8 +196,21 @@ export class TestStateDO extends DurableObject {
 
 interface Env {
   TEST_STATE: DurableObjectNamespace<TestStateDO>;
-  /** Comma-separated destination hosts; unset means allow-all. */
+  /** Comma-separated destination hosts; a host admits its subdomains. */
   LV_ALLOWED_DESTINATIONS?: string;
+  /**
+   * Comma-separated page origins allowed to drive tests through the SDK
+   * (/choose, /reward). Unset means any origin. Entries are origins or
+   * bare hostnames; a hostname admits its subdomains.
+   */
+  LV_ALLOWED_ORIGINS?: string;
+  /**
+   * What redirects do with a destination LV_ALLOWED_DESTINATIONS does
+   * not name: "allow", "block", or "interstitial" (an explicit
+   * "Redirecting you to…" continue screen). Unset keeps the classic
+   * defaults: allow-all with no list, block-unlisted with one.
+   */
+  LV_UNLISTED_DESTINATIONS?: string;
   /**
    * Origin to put in the links visitors follow. Unset means every URL is
    * built from the origin the request arrived on, which is all a
@@ -286,6 +300,15 @@ class DurableObjectBackend implements TestBackend {
   }
 }
 
+/** Comma-separated env var to list; blank means unset (deploy button). */
+function listVar(value: string | undefined): string[] | undefined {
+  const entries = value
+    ?.split(",")
+    .map(h => h.trim())
+    .filter(Boolean);
+  return entries && entries.length > 0 ? entries : undefined;
+}
+
 // One app per env (i.e. per isolate in practice): route registration and
 // middleware chains are not free, and the binding object is stable across
 // requests, so rebuilding the app each request is pure waste.
@@ -297,11 +320,11 @@ export default {
     if (!app) {
       app = createApp({
         backend: new DurableObjectBackend(env.TEST_STATE),
-        allowedDestinations: env.LV_ALLOWED_DESTINATIONS
-          ? env.LV_ALLOWED_DESTINATIONS.split(",")
-              .map(h => h.trim())
-              .filter(Boolean)
-          : undefined,
+        allowedDestinations: listVar(env.LV_ALLOWED_DESTINATIONS),
+        allowedOrigins: listVar(env.LV_ALLOWED_ORIGINS),
+        unlistedDestinations: unlistedDestinationMode(
+          env.LV_UNLISTED_DESTINATIONS
+        ),
         serveUrl: env.LV_SERVE_URL,
         assets:
           env.ASSET_STORE && env.LV_ASSET_SECRET

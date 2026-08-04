@@ -39,7 +39,9 @@
   // single-domain deployment, and the server treats blank as unset.
   "vars": {
     "LV_SERVE_URL": "",
-    "LV_ALLOWED_DESTINATIONS": ""
+    "LV_ALLOWED_DESTINATIONS": "",
+    "LV_ALLOWED_ORIGINS": "",
+    "LV_UNLISTED_DESTINATIONS": ""
   },
   // Deliberately no routes here. This is the config a
   // stranger gets when they deploy their own copy, and it has to work on
@@ -121,7 +123,12 @@
       ],
       "vars": {
         "LV_SERVE_URL": "https://livevariant.link",
-        "LV_ALLOWED_DESTINATIONS": ""
+        "LV_ALLOWED_DESTINATIONS": "",
+        "LV_ALLOWED_ORIGINS": "",
+        // The hosted deployment is open to strangers, so unverified
+        // redirect destinations get the explicit continue screen instead
+        // of making livevariant.link a one-hop open redirector.
+        "LV_UNLISTED_DESTINATIONS": "interstitial"
       },
       "routes": [
         { "pattern": "livevariant.link/*", "zone_name": "livevariant.link" },

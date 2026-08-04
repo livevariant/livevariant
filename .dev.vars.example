@@ -2,3 +2,12 @@
 # Generate a value with: openssl rand -hex 32
 # Leave unset to run without image hosting.
 LV_ASSET_SECRET=
+
+# Page origins allowed to drive tests through the SDK (/choose, /reward),
+# comma-separated. Leave unset to accept any origin.
+LV_ALLOWED_ORIGINS=
+
+# What redirects do with destinations not on LV_ALLOWED_DESTINATIONS:
+# allow | block | interstitial. Unset keeps the defaults (allow everything
+# with no list, block unlisted with one).
+LV_UNLISTED_DESTINATIONS=

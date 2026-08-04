@@ -52,3 +52,13 @@ export {
   type TestPolicy,
   type TestShape
 } from "./store/types.js";
+export {
+  envTrustPolicy,
+  originMatches,
+  unlistedDestinationMode,
+  type EnvTrustOptions,
+  type RedirectVerdict,
+  type TrustContext,
+  type TrustPolicy,
+  type UnlistedDestinationMode
+} from "./trust.js";

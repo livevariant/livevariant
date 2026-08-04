@@ -331,6 +331,15 @@ export async function createTest(
       })
     });
     if (!response.ok) {
+      if (response.status === 403) {
+        // Origin gate: silent-degrade would make this undiagnosable, so
+        // name the cause. Serving still falls back to control below.
+        console.warn(
+          `[livevariant] ${options.serverUrl} refused this origin ` +
+            `(${win.location.origin}); add it to the deployment's ` +
+            `LV_ALLOWED_ORIGINS to run tests from this site. Serving control.`
+        );
+      }
       return { cell: 0, fallback: true };
     }
     const {

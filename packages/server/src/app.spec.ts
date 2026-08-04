@@ -3,6 +3,7 @@ import type { Hono } from "hono";
 import {
   bucketKey,
   configFromParams,
+  decodeConfig,
   dimForShape,
   encodeConfig,
   featureIndices,
@@ -12,6 +13,7 @@ import {
   type TestConfigInput
 } from "@livevariant/core";
 import { createApp } from "./app.js";
+import { paramsFromConfig } from "./service.js";
 import { MemoryStore } from "./store/memory.js";
 
 /**
@@ -1401,5 +1403,206 @@ describe("campaign tags as context", () => {
     const s = await statsFor(TEST);
     expect(s.bySignal.utm_source.newsletter.pulls).toBe(1);
     expect(s.bySignal.country).toBeUndefined();
+  });
+});
+
+describe("interstitial for unverified destinations", () => {
+  const hosted = () =>
+    createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      unlistedDestinations: "interstitial"
+    });
+
+  it("shows the continue screen to a navigation, with the decorated target", async () => {
+    const app = hosted();
+    const { encoded } = await makeTest();
+    const res = await app.request(`/s/${encoded}?id=u1&utm_source=nl`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("cache-control")).toContain("no-store");
+    const html = await res.text();
+    expect(html).toContain("example.com");
+    expect(html).toContain("Redirecting you to");
+    expect(html).toContain('rel="noreferrer"');
+    // Handoff + passthrough decoration survives onto the continue link.
+    expect(html).toContain("_lvt");
+    expect(html).toContain("utm_source=nl");
+  });
+
+  it("still 302s an image-shaped fetch (email clients)", async () => {
+    const app = hosted();
+    const { encoded } = await makeTest();
+    const res = await app.request(`/s/${encoded}?id=u1`, {
+      headers: {
+        accept: "image/webp,image/apng,*/*",
+        "sec-fetch-dest": "image"
+      }
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("example.com");
+  });
+
+  it("302s a listed destination even in interstitial mode", async () => {
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      allowedDestinations: ["example.com"],
+      unlistedDestinations: "interstitial"
+    });
+    const { encoded } = await makeTest();
+    const res = await app.request(`/s/${encoded}?id=u1`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(302);
+  });
+
+  it("gives every variant the same friction when one destination is unlisted", async () => {
+    // One variant on a listed host, one off it: the strictest verdict
+    // wins for the whole test, or the bandit would measure our screen.
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      allowedDestinations: ["example.com"],
+      unlistedDestinations: "interstitial"
+    });
+    const { encoded } = await makeTest({
+      variants: [
+        { name: "listed", url: "https://example.com/a" },
+        { name: "unlisted", url: "https://elsewhere.test/b" }
+      ]
+    });
+    for (const id of ["u1", "u2", "u3", "u4"]) {
+      const res = await app.request(`/s/${encoded}?id=${id}`, {
+        headers: { accept: BROWSER_ACCEPT }
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+    }
+  });
+
+  it("shows the screen on /c clicks and still records the reward", async () => {
+    const app = hosted();
+    const { encoded } = await makeTest();
+    await app.request(`/s/${encoded}?id=u1`, {
+      headers: { accept: "image/webp,*/*" }
+    });
+    const res = await app.request(`/c/${encoded}?id=u1`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Redirecting you to");
+    const s = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    const rewards = (await s.json()).combinations.reduce(
+      (sum: number, combo: any) => sum + combo.rewardTotal,
+      0
+    );
+    expect(rewards).toBeGreaterThan(0);
+  });
+
+  it("keeps default deployments byte-for-byte on the 302 path", async () => {
+    const app = createApp({ store: new MemoryStore(), rng: mulberry32(7) });
+    const { encoded } = await makeTest();
+    const res = await app.request(`/s/${encoded}?id=u1`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(302);
+  });
+});
+
+describe("SDK origin gate", () => {
+  const gated = () =>
+    createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      allowedOrigins: ["site.example"]
+    });
+
+  async function chooseBody() {
+    const { encoded, testId } = await makeTest();
+    const params = paramsFromConfig(await decodeConfig(encoded));
+    return {
+      testId,
+      slotSizes: params.slotSizes,
+      dim: params.dim,
+      idHash: hex("visitor-1")
+    };
+  }
+
+  it("403s /choose from a foreign origin without recording anything", async () => {
+    const app = gated();
+    const body = await chooseBody();
+    const res = await app.request("/choose", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://stranger.example"
+      },
+      body: JSON.stringify(body)
+    });
+    expect(res.status).toBe(403);
+    const { encoded } = await makeTest();
+    const s = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect((await s.json()).totalAssignments).toBe(0);
+  });
+
+  it("answers /choose from an allowed origin, echoing it in CORS", async () => {
+    const app = gated();
+    const body = await chooseBody();
+    const res = await app.request("/choose", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://site.example"
+      },
+      body: JSON.stringify(body)
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe(
+      "https://site.example"
+    );
+  });
+
+  it("lets server-to-server calls (no Origin) through", async () => {
+    const app = gated();
+    const body = await chooseBody();
+    const res = await app.request("/choose", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("403s /reward from a foreign origin", async () => {
+    const app = gated();
+    const { testId } = await makeTest();
+    const res = await app.request("/reward", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://stranger.example"
+      },
+      body: JSON.stringify({ testId, idHash: hex("visitor-1"), amount: 1 })
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("denies the preflight for a foreign origin", async () => {
+    const app = gated();
+    const res = await app.request("/choose", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://stranger.example",
+        "access-control-request-method": "POST"
+      }
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
   });
 });
