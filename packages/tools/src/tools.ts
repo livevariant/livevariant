@@ -1140,7 +1140,7 @@ const listTests = defineTool({
       z.object({
         testId: z.string(),
         name: z.string().nullable(),
-        encoded: z.string(),
+        encoded: z.string().nullable(),
         region: z.string().nullable(),
         addedAt: z.number()
       })

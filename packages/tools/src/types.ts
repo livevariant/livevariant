@@ -53,7 +53,7 @@ export interface AccountTools {
     tests: Array<{
       testId: string;
       name: string | null;
-      encoded: string;
+      encoded: string | null;
       region: string | null;
       addedAt: number;
     }>;

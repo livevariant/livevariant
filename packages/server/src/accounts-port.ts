@@ -43,10 +43,25 @@ export interface AccountsProvider {
     tests: Array<{
       testId: string;
       name: string | null;
-      encoded: string;
+      encoded: string | null;
       region: string | null;
       addedAt: number;
     }>;
     nextCursor: string | null;
   }>;
+  /**
+   * SDK first-sight registration, called off the response path
+   * (waitUntil) when /choose carries a publishable key. The
+   * implementation decides whether the pair (key, page origin) earns a
+   * registration; a no-op is a valid answer. Optional: providers that
+   * never register from serving simply omit it.
+   */
+  registerFromSdk?(input: {
+    testId: string;
+    encoded?: string;
+    name?: string;
+    region?: string;
+    publishableKey: string;
+    origin: string | null;
+  }): Promise<void>;
 }

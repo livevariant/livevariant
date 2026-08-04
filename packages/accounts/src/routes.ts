@@ -18,13 +18,16 @@ import {
 import {
   addDomain,
   claimKey,
+  createPublishableKey,
   listDomains,
   listKeys,
+  listPublishableKeys,
   listTests,
   markDomainVerified,
   registerTest,
   releaseKey,
   removeDomain,
+  removePublishableKey,
   setLockReads
 } from "./registry.js";
 import { member, organization } from "./schema.js";
@@ -308,6 +311,50 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
     });
     deps.provider.invalidateTest(decoded.testId);
     return c.json({ testId: decoded.testId, orgId }, 201);
+  });
+
+  app.post("/account/publishable-keys", async c => {
+    const who = await caller(c);
+    if (!who) {
+      return c.json(unauthorized, 401);
+    }
+    const body = (await c.req.json().catch(() => ({}))) as {
+      label?: unknown;
+    };
+    const label =
+      typeof body.label === "string" ? body.label.slice(0, 120) : undefined;
+    const orgId = await ensureOrg(who);
+    return c.json(await createPublishableKey(deps.db, orgId, label), 201);
+  });
+
+  app.get("/account/publishable-keys", async c => {
+    const who = await caller(c);
+    if (!who) {
+      return c.json(unauthorized, 401);
+    }
+    if (!who.orgId) {
+      return c.json({ keys: [] });
+    }
+    return c.json({ keys: await listPublishableKeys(deps.db, who.orgId) });
+  });
+
+  app.delete("/account/publishable-keys/:key", async c => {
+    const who = await caller(c);
+    if (!who) {
+      return c.json(unauthorized, 401);
+    }
+    if (!who.orgId || !canAdmin(who, who.orgId)) {
+      return c.json({ error: "requires an owner or admin role" }, 403);
+    }
+    const removed = await removePublishableKey(
+      deps.db,
+      who.orgId,
+      c.req.param("key")
+    );
+    if (!removed) {
+      return c.json({ error: "no such key in this organization" }, 404);
+    }
+    return c.json({ removed: c.req.param("key") });
   });
 
   app.post("/account/domains", async c => {

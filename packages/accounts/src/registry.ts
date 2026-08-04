@@ -6,7 +6,7 @@
  * instead of a double claim.
  */
 import { and, desc, eq, inArray, like, lt, or, sql } from "drizzle-orm";
-import { domains, keys, tests } from "./schema.js";
+import { domains, keys, publishableKeys, tests } from "./schema.js";
 import type { Db } from "./auth.js";
 
 export interface ClaimResult {
@@ -114,7 +114,7 @@ export async function registerTest(
     orgId: string;
     kh?: string;
     name?: string;
-    encoded: string;
+    encoded?: string;
     region?: string;
   }
 ): Promise<void> {
@@ -125,7 +125,7 @@ export async function registerTest(
       orgId: input.orgId,
       kh: input.kh ?? null,
       name: input.name ?? null,
-      encoded: input.encoded,
+      encoded: input.encoded ?? null,
       region: input.region ?? null,
       addedAt: new Date()
     })
@@ -137,7 +137,7 @@ export interface TestPage {
     testId: string;
     kh: string | null;
     name: string | null;
-    encoded: string;
+    encoded: string | null;
     region: string | null;
     addedAt: number;
   }>;
@@ -224,6 +224,60 @@ function decodeCursor(
   } catch {
     return null;
   }
+}
+
+export async function createPublishableKey(
+  db: Db,
+  orgId: string,
+  label?: string
+): Promise<{ key: string; label: string | null; createdAt: number }> {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  let suffix = "";
+  for (const b of bytes) {
+    suffix += "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36];
+  }
+  const key = `pk_${suffix}`;
+  const createdAt = new Date();
+  await db.insert(publishableKeys).values({
+    key,
+    orgId,
+    label: label ?? null,
+    createdAt
+  });
+  return { key, label: label ?? null, createdAt: createdAt.getTime() };
+}
+
+export async function listPublishableKeys(db: Db, orgId: string) {
+  const rows = await db.query.publishableKeys.findMany({
+    where: eq(publishableKeys.orgId, orgId)
+  });
+  return rows.map(row => ({
+    key: row.key,
+    label: row.label,
+    createdAt: row.createdAt.getTime()
+  }));
+}
+
+export async function removePublishableKey(
+  db: Db,
+  orgId: string,
+  key: string
+): Promise<boolean> {
+  const result = await db
+    .delete(publishableKeys)
+    .where(and(eq(publishableKeys.key, key), eq(publishableKeys.orgId, orgId)));
+  return result.meta.changes > 0;
+}
+
+export async function publishableKeyOrg(
+  db: Db,
+  key: string
+): Promise<string | null> {
+  const row = await db.query.publishableKeys.findFirst({
+    where: eq(publishableKeys.key, key)
+  });
+  return row?.orgId ?? null;
 }
 
 export async function addDomain(

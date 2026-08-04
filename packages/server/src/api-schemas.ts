@@ -90,7 +90,19 @@ export const chooseRequestSchema = z
     // Bounds are re-checked against the request's own `dim` in superRefine:
     // an index >= dim reads past the model matrix and poisons it with NaN.
     featIdx: z.array(z.number().int().min(0).max(255)).max(32).optional(),
-    priors: z.array(variantPrior).max(128).optional()
+    priors: z.array(variantPrior).max(128).optional(),
+    /**
+     * First-sight registration (hosted, opt-in). A publishable key in
+     * the page plus a verified page origin registers this test to the
+     * key's org; `encoded` rides along ONLY then, which is the explicit
+     * consent that lets a JS-mode config reach the server at all. Both
+     * are ignored entirely on deployments without accounts.
+     */
+    publishableKey: z
+      .string()
+      .regex(/^pk_[a-z0-9]{24}$/)
+      .optional(),
+    encoded: z.string().max(8192).optional()
   })
   .superRefine((body, issues) => {
     const cells = cellCount(body.slotSizes);

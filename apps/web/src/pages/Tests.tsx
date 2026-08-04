@@ -25,6 +25,8 @@ interface Row {
   /** Where this row is known: this browser, the account, or both. */
   local: boolean;
   onAccount: boolean;
+  /** For account-only rows: the config, so the detail page can open. */
+  encoded: string | null;
 }
 
 function merge(
@@ -38,7 +40,8 @@ function merge(
       name: test.name ?? "LiveVariant test",
       createdAt: test.addedAt,
       local: false,
-      onAccount: true
+      onAccount: true,
+      encoded: test.encoded
     });
   }
   for (const test of local) {
@@ -52,7 +55,8 @@ function merge(
         name: test.name,
         createdAt: test.createdAt,
         local: true,
-        onAccount: false
+        onAccount: false,
+        encoded: test.encoded
       });
     }
   }
@@ -173,7 +177,16 @@ export function Tests() {
             <CardHeader className="flex-row items-center gap-3 space-y-0">
               <div className="flex-1">
                 <CardTitle>
-                  <Link className="hover:underline" to={`/tests/${row.testId}`}>
+                  <Link
+                    className="hover:underline"
+                    to={
+                      row.local
+                        ? `/tests/${row.testId}`
+                        : row.encoded
+                          ? `/manage/${row.encoded}`
+                          : `/tests/${row.testId}`
+                    }
+                  >
                     {row.name}
                   </Link>
                 </CardTitle>

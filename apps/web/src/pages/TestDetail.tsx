@@ -161,7 +161,7 @@ export function TestDetail() {
   const [snippetCopied, setSnippetCopied] = useState(false);
 
   const refresh = useCallback(async () => {
-    if (!test || !test.statsSecret) {
+    if (!test) {
       return;
     }
     setLoading(true);
@@ -172,7 +172,9 @@ export function TestDetail() {
       // read without the bearer secret at all.
       const res = await fetch(`/stats/${test.encoded}`, {
         credentials: "include",
-        headers: { authorization: `Bearer ${test.statsSecret}` }
+        headers: test.statsSecret
+          ? { authorization: `Bearer ${test.statsSecret}` }
+          : {}
       });
       if (!res.ok) {
         throw new Error(`stats request failed (${res.status})`);
@@ -240,7 +242,7 @@ element.textContent = test.variant.text;`;
           <Button
             variant="outline"
             size="sm"
-            disabled={loading || !test.statsSecret}
+            disabled={loading}
             onClick={() => void refresh()}
           >
             <RefreshCw className={loading ? "animate-spin" : ""} /> Refresh
@@ -252,13 +254,15 @@ element.textContent = test.variant.text;`;
         <CardHeader>
           <CardTitle>Results</CardTitle>
           <CardDescription>
-            {!test.statsSecret
-              ? "This link is missing its #secret fragment, so results cannot be read here."
-              : stats
-                ? `${stats.totalAssignments} assignments · ${Object.keys(stats.buckets).length} context buckets`
-                : error
-                  ? `Could not load stats: ${error}`
-                  : "loading…"}
+            {stats
+              ? `${stats.totalAssignments} assignments · ${Object.keys(stats.buckets).length} context buckets`
+              : error
+                ? `Could not load stats: ${error}${
+                    test.statsSecret
+                      ? ""
+                      : " (open the manage link with its #secret, or sign in to the owning account)"
+                  }`
+                : "loading…"}
           </CardDescription>
         </CardHeader>
         {stats && (

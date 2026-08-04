@@ -7,8 +7,10 @@ import { createDb, type Db } from "./auth.js";
 import {
   addDomain,
   claimKey,
+  createPublishableKey,
   listKeys,
   listTests,
+  markDomainVerified,
   registerTest,
   setLockReads
 } from "./registry.js";
@@ -233,5 +235,87 @@ describe("domains", () => {
         method: "dns-txt"
       })
     ).toBe("conflict");
+  });
+});
+
+describe("SDK first-sight registration", () => {
+  async function providerWithVerifiedDomain() {
+    const org = await makeOrg();
+    const domain = `sdk-${seq}.example`;
+    await addDomain(db, {
+      domain,
+      orgId: org.orgId,
+      token: "tok",
+      method: "dns-txt"
+    });
+    await markDomainVerified(db, org.orgId, domain, "dns-txt", true);
+    const pk = await createPublishableKey(db, org.orgId, "site");
+    const provider = new RegistryProvider(db, () => {
+      throw new Error("auth not needed");
+    });
+    return { org, domain, pk, provider };
+  }
+
+  it("registers for a publishable key on a verified origin, once", async () => {
+    const { org, domain, pk, provider } = await providerWithVerifiedDomain();
+    const testId = `sdk-t-${seq}`.padEnd(64, "e");
+    await provider.registerFromSdk({
+      testId,
+      encoded: "enc-sdk",
+      publishableKey: pk.key,
+      origin: `https://shop.${domain}`
+    });
+    const page = await listTests(db, org.orgId);
+    const row = page.tests.find(t => t.testId === testId);
+    expect(row?.encoded).toBe("enc-sdk");
+    // Registered rows stay put; a second sight changes nothing.
+    await provider.registerFromSdk({
+      testId,
+      encoded: "enc-other",
+      publishableKey: pk.key,
+      origin: `https://${domain}`
+    });
+    const again = await listTests(db, org.orgId);
+    expect(
+      again.tests.filter(t => t.testId === testId).map(t => t.encoded)
+    ).toEqual(["enc-sdk"]);
+  });
+
+  it("refuses unverified origins and unknown keys", async () => {
+    const { org, pk, provider } = await providerWithVerifiedDomain();
+    const testId = `sdk-x-${seq}`.padEnd(64, "f");
+    await provider.registerFromSdk({
+      testId,
+      encoded: "enc",
+      publishableKey: pk.key,
+      origin: "https://stranger.example"
+    });
+    await provider.registerFromSdk({
+      testId,
+      encoded: "enc",
+      publishableKey: "pk_000000000000000000000000",
+      origin: "https://stranger.example"
+    });
+    const page = await listTests(db, org.orgId);
+    expect(page.tests.some(t => t.testId === testId)).toBe(false);
+  });
+
+  it("makes the redirect verdict true for a verified destination", async () => {
+    const { domain, pk, provider } = await providerWithVerifiedDomain();
+    const testId = `sdk-v-${seq}`.padEnd(64, "a");
+    await provider.registerFromSdk({
+      testId,
+      encoded: "enc",
+      publishableKey: pk.key,
+      origin: `https://${domain}`
+    });
+    provider.invalidateTest(testId);
+    const ctx = { testId, requestUrl: "https://serve.test/s/x" };
+    expect(
+      await provider.isDomainAllowedForRedirect(`shop.${domain}`, ctx)
+    ).toBe(true);
+    expect(
+      await provider.isDomainAllowedForRedirect("elsewhere.example", ctx)
+    ).toBe("interstitial");
   });
 });

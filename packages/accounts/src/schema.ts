@@ -52,8 +52,12 @@ export const tests = sqliteTable(
     /** NULL for keyless SDK tests registered via a publishable key. */
     kh: text("kh").references(() => keys.kh, { onDelete: "cascade" }),
     name: text("name"),
-    /** The base64url config, so the dashboard list can render offline. */
-    encoded: text("encoded").notNull(),
+    /**
+     * The base64url config, so the dashboard can render and read the
+     * test. NULL only if registration ever happens without one; every
+     * current path supplies it.
+     */
+    encoded: text("encoded"),
     region: text("region"),
     addedAt: integer("added_at", { mode: "timestamp_ms" }).notNull()
   },
@@ -62,6 +66,26 @@ export const tests = sqliteTable(
     index("tests_org_added_idx").on(table.orgId, table.addedAt, table.testId),
     index("tests_kh_idx").on(table.kh)
   ]
+);
+
+export const publishableKeys = sqliteTable(
+  "publishable_keys",
+  {
+    /**
+     * A PUBLIC identifier (pk_ prefix), safe in page source: paired
+     * with a verified page origin it lets the SDK register tests to the
+     * org, and grants nothing else. Not authentication: reading stats
+     * still needs a session or a stats secret, and a forged pair cannot
+     * move a model further than an anonymous /choose already could.
+     */
+    key: text("key").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    label: text("label"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull()
+  },
+  table => [index("publishable_keys_org_idx").on(table.orgId)]
 );
 
 export const domains = sqliteTable(

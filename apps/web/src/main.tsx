@@ -10,6 +10,7 @@ import { Builder } from "./pages/Builder.js";
 import { Tests } from "./pages/Tests.js";
 import { TestDetail } from "./pages/TestDetail.js";
 import { Login } from "./pages/Login.js";
+import { Settings } from "./pages/Settings.js";
 
 const router = createBrowserRouter([
   {
@@ -23,7 +24,8 @@ const router = createBrowserRouter([
       // its #fragment. Served by the SPA fallback; the old server-side
       // shell is gone and the URL shape is unchanged.
       { path: "/manage/:encoded", element: <TestDetail /> },
-      { path: "/login", element: <Login /> }
+      { path: "/login", element: <Login /> },
+      { path: "/settings", element: <Settings /> }
     ]
   }
 ]);

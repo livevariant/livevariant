@@ -78,6 +78,11 @@ export function AppLayout() {
           <NavLink to="/tests" className={navClass}>
             My tests
           </NavLink>
+          {account.ready && account.available && account.me && (
+            <NavLink to="/settings" className={navClass}>
+              Settings
+            </NavLink>
+          )}
         </nav>
         <nav className="ml-auto flex items-center gap-5 text-sm">
           <a

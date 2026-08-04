@@ -908,6 +908,24 @@ export function createApp(options: AppOptions): Hono {
       signals
     });
     const choice = decodeCell(r.slotSizes, cell);
+    // First-sight registration, entirely off the response path: a
+    // publishable key plus a verified page origin may register this
+    // test to an org. The provider decides; serving never waits.
+    if (r.publishableKey && options.provider?.registerFromSdk) {
+      const registration = options.provider.registerFromSdk({
+        testId: r.testId,
+        encoded: r.encoded,
+        region: r.region,
+        publishableKey: r.publishableKey,
+        origin: c.req.header("origin") ?? null
+      });
+      try {
+        c.executionCtx.waitUntil(registration);
+      } catch {
+        // Node has no executionCtx; let it run unanchored (dev only).
+        void registration;
+      }
+    }
     // Signatures for the WINNING combination's hosted assets only. The
     // SDK holds canonical asset URLs in its config that 403 on their own;
     // this is the JS-mode counterpart of the redirect path signing its

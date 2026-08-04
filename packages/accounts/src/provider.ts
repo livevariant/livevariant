@@ -8,7 +8,7 @@
  * interstitials, bearer secrets keep working), never availability.
  */
 import { eq } from "drizzle-orm";
-import { listTests } from "./registry.js";
+import { listTests, publishableKeyOrg, registerTest } from "./registry.js";
 import type {
   AccountsProvider,
   KeyPolicy,
@@ -165,6 +165,59 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
     options: { q?: string; cursor?: string; limit?: number }
   ) {
     return listTests(this.db, orgIds, options);
+  }
+
+  /**
+   * SDK first-sight registration. The pair that earns it: a publishable
+   * key resolving to an org AND a page origin whose domain that same
+   * org has verified. Not a security boundary (both ride in public page
+   * source); it grants registration and nothing else, and the verified
+   * origin is what stops a copied key registering strangers' tests to
+   * your account. Never throws: this runs in waitUntil where an error
+   * helps nobody.
+   */
+  async registerFromSdk(input: {
+    testId: string;
+    encoded?: string;
+    name?: string;
+    region?: string;
+    publishableKey: string;
+    origin: string | null;
+  }): Promise<void> {
+    try {
+      if (!input.origin) {
+        return;
+      }
+      const known = await this.testOrg(input.testId);
+      if (known) {
+        return;
+      }
+      const orgId = await publishableKeyOrg(this.db, input.publishableKey);
+      if (!orgId) {
+        return;
+      }
+      let host: string;
+      try {
+        host = new URL(input.origin).hostname.toLowerCase();
+      } catch {
+        return;
+      }
+      for (const candidate of parentDomains(host)) {
+        if (await this.domainVerifiedBy(candidate, orgId)) {
+          await registerTest(this.db, {
+            testId: input.testId,
+            orgId,
+            name: input.name,
+            encoded: input.encoded ?? "",
+            region: input.region
+          });
+          this.invalidateTest(input.testId);
+          return;
+        }
+      }
+    } catch {
+      // Registration is best-effort by design.
+    }
   }
 
   /** Invalidate after a claim/verify so the acting isolate sees it now. */

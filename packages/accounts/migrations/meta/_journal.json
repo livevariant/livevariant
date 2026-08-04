@@ -8,6 +8,13 @@
       "when": 1785882432933,
       "tag": "0000_accounts-initial",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1785884047874,
+      "tag": "0001_sdk-registration",
+      "breakpoints": true
     }
   ]
 }

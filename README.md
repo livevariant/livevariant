@@ -138,6 +138,23 @@ can recover it later, including us. Keep it.
   results are unreadable forever: no secret can match a hash that is
   not there.
 
+## Own your tests (optional)
+
+No account is ever required, but on [livevariant.com](https://livevariant.com)
+you can create one (email link or Google) and it buys three things:
+
+- **Claiming.** Open any manage link while signed in and click "Add to
+  my account": the stats key behind it is claimed to you, nobody else
+  can claim it, and every test built from it, past and future, appears
+  under My tests on any browser. Your stats secret keeps working; a
+  per-key lock can additionally require sign-in if it ever leaks.
+- **Verified domains.** Prove a domain with a DNS TXT record or a
+  well-known file and redirects to it skip the "Redirecting you to…"
+  confirmation screen that unverified destinations show to visitors.
+- **SDK auto-registration.** Create a publishable `pk_` key, pass it to
+  the SDK from a verified domain, and inline tests register themselves
+  under My tests, readable without any secret in the loop.
+
 ## Why not a normal A/B test?
 
 The classic email flow sends A to 10%, B to 10%, waits a few hours, and
@@ -165,6 +182,16 @@ with none of those caveats:
 One click clones this repo into your account and deploys the whole
 thing: serving, dashboard, tools API, MCP endpoint. Nothing to
 configure; every URL is built from the origin the request arrived on.
+The self-host build contains no auth framework at all (a test asserts
+it), and three optional env vars cover the trust knobs: comma-separated
+`LV_ALLOWED_ORIGINS` locks the SDK endpoints to your own sites,
+`LV_ALLOWED_DESTINATIONS` + `LV_UNLISTED_DESTINATIONS` decide whether
+redirect destinations off your list are allowed, blocked, or shown
+behind a continue screen, and `LV_API_TOKEN` gates the tools API and
+MCP endpoint behind a bearer token for server-to-server calls. Custom
+logic instead of env vars? Implement the two-method `TrustPolicy` (and
+optionally `AccountsProvider`) ports from `@livevariant/server` and
+pass them to `createApp`.
 
 ```bash
 npm ci && npm run build && npm run deploy

@@ -86,6 +86,15 @@ export interface CreateTestOptions {
   /** Injectable for tests. */
   fetch?: typeof globalThis.fetch;
   window?: Window;
+  /**
+   * Hosted accounts only: a public pk_ key from your account settings.
+   * Paired with a page origin whose domain your account has verified,
+   * it registers this test under "My tests" on first serve, and shares
+   * the config with the deployment so the dashboard can read it (the
+   * explicit opt-in a JS-mode config otherwise never gets). Grants
+   * nothing else; safe in page source.
+   */
+  publishableKey?: string;
 }
 
 export interface Variant {
@@ -319,6 +328,15 @@ export async function createTest(
         testId,
         slotSizes: sizes,
         dim,
+        ...(options.publishableKey
+          ? {
+              publishableKey: options.publishableKey,
+              encoded:
+                typeof config === "string"
+                  ? config
+                  : utf8ToBase64Url(canonicalJson(resolved))
+            }
+          : {}),
         region: resolved.region,
         priorStrengthCap: resolved.priorStrengthCap,
         priors: priors.length > 0 ? priors : undefined,

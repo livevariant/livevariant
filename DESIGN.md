@@ -174,3 +174,6 @@ C 19% · n=12,483 · still testing`.
 | 2026-08-04 | Variant demo = fixed product, changing scenes                            | Truthful to what generation does well; clearer story than 3 lookalikes   |
 | 2026-08-04 | Installer is skills-first with tabs; MCP demoted to "any agent"          | `npx -y @livevariant/mcp` runs a server, it installs nothing             |
 | 2026-08-04 | Streamgraph semantics: lanes = segments, bands = variants                | First draft colored lanes as variants; wrong with 3 variants x 2 dims    |
+| 2026-08-05 | Accounts are optional ownership, never a gate                            | Claim a stats key from the manage link; local storage stays the default  |
+| 2026-08-05 | Unverified redirect destinations get a continue screen, not a block      | Names the destination, kills one-hop phishing, verification removes it   |
+| 2026-08-05 | One stats page in the React app; server manage shell deleted             | Two implementations meant every feature built twice or silently once     |
