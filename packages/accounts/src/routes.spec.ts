@@ -163,3 +163,68 @@ describe("the whole sign-in and claim flow, end to end", () => {
     expect(keys.keys.some(k => k.kh === claimed.kh)).toBe(true);
   });
 });
+
+describe("password register and sign-in, end to end", () => {
+  it("registers, signs in on a fresh client, claims", async () => {
+    const d1 = (proxy.env as { LV_ACCOUNTS_DB: D1Database }).LV_ACCOUNTS_DB;
+    const flow = createAccounts({
+      db: d1,
+      baseUrl: DASHBOARD,
+      secret: "c".repeat(48),
+      sendMagicLink: async () => undefined
+    });
+    const register = await flow.routes.request(
+      `${DASHBOARD}/auth/sign-up/email`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: DASHBOARD },
+        body: JSON.stringify({
+          name: "pw",
+          email: "pw@example.com",
+          password: "correct-horse-battery"
+        })
+      }
+    );
+    expect(register.status).toBe(200);
+
+    // A fresh sign-in, as a new browser would: no cookies carried over.
+    const signIn = await flow.routes.request(
+      `${DASHBOARD}/auth/sign-in/email`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: DASHBOARD },
+        body: JSON.stringify({
+          email: "pw@example.com",
+          password: "correct-horse-battery"
+        })
+      }
+    );
+    expect(signIn.status).toBe(200);
+    const cookie = signIn.headers
+      .get("set-cookie")!
+      .split(",")
+      .map(part => part.split(";")[0].trim())
+      .join("; ");
+
+    const wrong = await flow.routes.request(`${DASHBOARD}/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: DASHBOARD },
+      body: JSON.stringify({
+        email: "pw@example.com",
+        password: "not-the-password"
+      })
+    });
+    expect(wrong.status).toBe(401);
+
+    const claim = await flow.routes.request(`${DASHBOARD}/account/keys`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie,
+        origin: DASHBOARD
+      },
+      body: JSON.stringify({ statsSecret: "pw-flow-secret" })
+    });
+    expect(claim.status).toBe(201);
+  });
+});

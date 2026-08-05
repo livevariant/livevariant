@@ -8,6 +8,7 @@ import {
   hashStatsSecret
 } from "@livevariant/core";
 import { AppLayout } from "./App";
+import { Login } from "./pages/Login";
 import { TestDetail } from "./pages/TestDetail";
 import { saveTest } from "./lib/tests-store";
 
@@ -85,7 +86,7 @@ function render(path: string) {
           { path: "/tests", element: <div /> },
           { path: "/tests/:testId", element: <TestDetail /> },
           { path: "/manage/:encoded", element: <TestDetail /> },
-          { path: "/login", element: <div>login page</div> }
+          { path: "/login", element: <Login /> }
         ]
       }
     ],
@@ -218,5 +219,72 @@ describe("claiming from the test page", () => {
       () => container.textContent?.includes("Add to my account") ?? false
     );
     expect(calls.filter(c => c.startsWith("POST /account"))).toEqual([]);
+  });
+});
+
+describe("the login page", () => {
+  function setValue(input: HTMLInputElement, value: string) {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value"
+    )!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  it("signs in with a password, and surfaces a wrong one", async () => {
+    const calls: string[] = [];
+    stubServer(
+      {
+        "/account/me": () =>
+          Response.json({ error: "sign in required" }, { status: 401 }),
+        "/auth/sign-in/email": () =>
+          Response.json({ error: "invalid email or password" }, { status: 401 })
+      },
+      calls
+    );
+    const container = render("/login?next=/tests");
+    await until(() => container.querySelector("#email") !== null);
+    setValue(container.querySelector("#email")!, "pw@example.com");
+    setValue(container.querySelector("#password")!, "wrong-password");
+    const submit = [...container.querySelectorAll("button")].find(
+      button => button.textContent?.trim() === "Sign in"
+    )!;
+    submit.click();
+    await until(
+      () =>
+        container.textContent?.includes("invalid email or password") ?? false
+    );
+    expect(calls).toContain("POST /auth/sign-in/email");
+  });
+
+  it("registers through the toggle", async () => {
+    const calls: string[] = [];
+    stubServer(
+      {
+        "/account/me": () =>
+          Response.json({ error: "sign in required" }, { status: 401 }),
+        "/auth/sign-up/email": () =>
+          // A failing answer on purpose: success would navigate the
+          // whole test page away. The POST itself is the assertion.
+          Response.json({ error: "email taken" }, { status: 422 })
+      },
+      calls
+    );
+    const container = render("/login");
+    await until(() => container.querySelector("#email") !== null);
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.includes("No account yet"))!
+      .click();
+    await until(
+      () => container.textContent?.includes("Create an account") ?? false
+    );
+    setValue(container.querySelector("#email")!, "new@example.com");
+    setValue(container.querySelector("#password")!, "long-enough-pw");
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.trim() === "Create account")!
+      .click();
+    await until(() => container.textContent?.includes("email taken") ?? false);
+    expect(calls).toContain("POST /auth/sign-up/email");
   });
 });

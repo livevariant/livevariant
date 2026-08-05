@@ -29,8 +29,6 @@ export interface HostedEnv extends Env {
   LV_RESEND_API_KEY?: string;
   /** From address; defaults to the LiveVariant login sender. */
   LV_EMAIL_FROM?: string;
-  LV_GOOGLE_CLIENT_ID?: string;
-  LV_GOOGLE_CLIENT_SECRET?: string;
 }
 
 const apps = new WeakMap<HostedEnv, ReturnType<typeof createApp>>();
@@ -45,13 +43,6 @@ export default {
           db: env.LV_ACCOUNTS_DB,
           baseUrl: env.LV_APP_URL,
           secret: env.LV_AUTH_SECRET,
-          google:
-            env.LV_GOOGLE_CLIENT_ID && env.LV_GOOGLE_CLIENT_SECRET
-              ? {
-                  clientId: env.LV_GOOGLE_CLIENT_ID,
-                  clientSecret: env.LV_GOOGLE_CLIENT_SECRET
-                }
-              : undefined,
           // Without a Resend key the link goes to the worker log, which
           // is the local dev loop (wrangler dev prints it); production
           // sets the key so links actually arrive.
@@ -63,7 +54,11 @@ export default {
                   "LiveVariant <login@mail.livevariant.com>"
               })
             : async (to, url) => {
-                console.log(`[livevariant] magic link for ${to}: ${url}`);
+                console.log(
+                  `\n========================================\n` +
+                    `[livevariant] magic sign-in link for ${to}\n${url}\n` +
+                    `========================================\n`
+                );
               }
         });
         options.accounts = accounts.routes;

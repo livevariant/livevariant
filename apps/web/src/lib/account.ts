@@ -37,10 +37,15 @@ export interface ServerTest {
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
+    // Two error shapes reach here: ours ({error}) and Better Auth's
+    // ({message}). Surfacing either beats a bare status code.
     const body = (await res.json().catch(() => null)) as {
       error?: string;
+      message?: string;
     } | null;
-    throw new Error(body?.error ?? `request failed (${res.status})`);
+    throw new Error(
+      body?.error ?? body?.message ?? `request failed (${res.status})`
+    );
   }
   return (await res.json()) as T;
 }
@@ -98,22 +103,40 @@ export async function requestMagicLink(
   );
 }
 
-/** Starts the Google flow; navigates away on success. */
-export async function signInWithGoogle(next: string): Promise<void> {
-  const res = await json<{ url?: string }>(
-    await fetch("/auth/sign-in/social", {
+/** Creates the account and signs this browser in. */
+export async function registerWithPassword(input: {
+  email: string;
+  password: string;
+  name?: string;
+}): Promise<void> {
+  await json(
+    await fetch("/auth/sign-up/email", {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        provider: "google",
-        callbackURL: new URL(next, window.location.origin).toString()
+        email: input.email,
+        password: input.password,
+        // Better Auth requires a name; the email prefix is an honest
+        // default nobody has to think about.
+        name: input.name?.trim() || input.email.split("@")[0]
       })
     })
   );
-  if (res.url) {
-    window.location.href = res.url;
-  }
+}
+
+export async function signInWithPassword(input: {
+  email: string;
+  password: string;
+}): Promise<void> {
+  await json(
+    await fetch("/auth/sign-in/email", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: input.email, password: input.password })
+    })
+  );
 }
 
 export async function signOut(): Promise<void> {

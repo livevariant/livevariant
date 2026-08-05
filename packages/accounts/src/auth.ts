@@ -21,14 +21,13 @@ import type { SendMagicLink } from "./email.js";
 export interface AccountsConfig {
   db: D1Database;
   /**
-   * Absolute origin of the dashboard (https://livevariant.com). Cookies,
-   * OAuth callbacks and magic-link URLs all key off it, which is why it
-   * comes from config and never from the request.
+   * Absolute origin of the dashboard (https://livevariant.com). Cookies
+   * and magic-link URLs key off it, which is why it comes from config
+   * and never from the request.
    */
   baseUrl: string;
   /** Signing secret for sessions and tokens (LV_AUTH_SECRET). */
   secret: string;
-  google?: { clientId: string; clientSecret: string };
   sendMagicLink: SendMagicLink;
 }
 
@@ -47,15 +46,9 @@ export function createAuth(config: AccountsConfig, db: Db) {
     basePath: "/auth",
     secret: config.secret,
     trustedOrigins: [config.baseUrl],
-    emailAndPassword: { enabled: false },
-    socialProviders: config.google
-      ? {
-          google: {
-            clientId: config.google.clientId,
-            clientSecret: config.google.clientSecret
-          }
-        }
-      : {},
+    // Password AND magic link: the password pair is the register/sign-in
+    // people expect, the link stays as the no-password alternative.
+    emailAndPassword: { enabled: true },
     session: {
       cookieCache: {
         // Signed cookie carries the session for this long between

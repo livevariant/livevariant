@@ -11,81 +11,134 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { requestMagicLink, signInWithGoogle } from "@/lib/account";
+import {
+  registerWithPassword,
+  requestMagicLink,
+  signInWithPassword
+} from "@/lib/account";
 
 /**
- * Sign-in: a magic link or Google, nothing else. No passwords exist
- * anywhere in the product, which is one less thing to leak.
+ * Sign-in and registration: email plus password, with a magic link as
+ * the no-password alternative. One page, one toggle, no separate
+ * register route to get lost on.
  */
 export function Login() {
   const [params] = useSearchParams();
   const next = params.get("next") ?? "/tests";
+  const [mode, setMode] = useState<"signin" | "register">("signin");
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState("");
+  const [linkSent, setLinkSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const submit = () => {
+    setBusy(true);
+    setError(null);
+    const action =
+      mode === "register"
+        ? registerWithPassword({ email, password })
+        : signInWithPassword({ email, password });
+    action
+      .then(() => {
+        // A full navigation, not a client-side one: AppLayout's account
+        // state must re-read the fresh session cookie.
+        window.location.href = next;
+      })
+      .catch(err => {
+        setError(err instanceof Error ? err.message : String(err));
+        setBusy(false);
+      });
+  };
+
   return (
     <div className="mx-auto max-w-md space-y-6 py-12">
-      <h1 className="font-display text-3xl">Sign in</h1>
+      <h1 className="font-display text-3xl">
+        {mode === "register" ? "Create an account" : "Sign in"}
+      </h1>
       <Card>
         <CardHeader>
-          <CardTitle>Email me a sign-in link</CardTitle>
+          <CardTitle>
+            {mode === "register" ? "Register with email" : "Email and password"}
+          </CardTitle>
           <CardDescription>
-            No password to invent or remember: the link in your inbox is the
-            whole sign-in.
+            {mode === "register"
+              ? "Your tests follow your account across browsers, and nobody else can claim them."
+              : "Welcome back."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {sent ? (
-            <p className="text-sm">
-              <Mail className="mr-1 inline size-4" /> Check your inbox. The link
-              signs this browser in and brings you back here.
-            </p>
-          ) : (
-            <form
-              className="space-y-4"
-              onSubmit={event => {
-                event.preventDefault();
-                setBusy(true);
-                setError(null);
-                requestMagicLink(email, next)
-                  .then(() => setSent(true))
-                  .catch(err =>
-                    setError(err instanceof Error ? err.message : String(err))
-                  )
-                  .finally(() => setBusy(false));
-              }}
-            >
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  required
-                  value={email}
-                  onChange={event => setEmail(event.target.value)}
-                  placeholder="you@example.com"
-                />
-              </div>
-              <Button type="submit" disabled={busy || !email}>
-                Send sign-in link
-              </Button>
-            </form>
-          )}
-          <div className="border-t pt-4">
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={() => {
-                setError(null);
-                void signInWithGoogle(next).catch(err =>
-                  setError(err instanceof Error ? err.message : String(err))
-                );
-              }}
-            >
-              Continue with Google
+          <form
+            className="space-y-4"
+            onSubmit={event => {
+              event.preventDefault();
+              submit();
+            }}
+          >
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                required
+                value={email}
+                onChange={event => setEmail(event.target.value)}
+                placeholder="you@example.com"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                required
+                minLength={8}
+                value={password}
+                onChange={event => setPassword(event.target.value)}
+                placeholder={
+                  mode === "register" ? "at least 8 characters" : "password"
+                }
+              />
+            </div>
+            <Button type="submit" disabled={busy || !email || !password}>
+              {mode === "register" ? "Create account" : "Sign in"}
             </Button>
+          </form>
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-foreground text-sm underline"
+            onClick={() => {
+              setMode(mode === "register" ? "signin" : "register");
+              setError(null);
+            }}
+          >
+            {mode === "register"
+              ? "Already have an account? Sign in"
+              : "No account yet? Create one"}
+          </button>
+          <div className="border-t pt-4">
+            {linkSent ? (
+              <p className="text-sm">
+                <Mail className="mr-1 inline size-4" /> Check your inbox. The
+                link signs this browser in and brings you back here.
+              </p>
+            ) : (
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={!email}
+                onClick={() => {
+                  setError(null);
+                  requestMagicLink(email, next)
+                    .then(() => setLinkSent(true))
+                    .catch(err =>
+                      setError(err instanceof Error ? err.message : String(err))
+                    );
+                }}
+              >
+                <Mail /> Email me a sign-in link instead
+              </Button>
+            )}
           </div>
           {error && <p className="text-destructive text-sm">{error}</p>}
         </CardContent>
