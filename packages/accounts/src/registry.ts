@@ -5,7 +5,7 @@
  * upserts with a read-back, so concurrency yields exactly one winner
  * instead of a double claim.
  */
-import { and, desc, eq, inArray, like, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { domains, keys, publishableKeys, tests } from "./schema.js";
 import type { Db } from "./auth.js";
 
@@ -162,8 +162,12 @@ export async function listTests(
   const conditions = [inArray(tests.orgId, orgIds)];
   if (options.q) {
     // Escape LIKE wildcards so a literal % in a name stays literal.
+    // SQLite has NO default escape character, so the ESCAPE clause is
+    // load-bearing: without it the backslashes below are pattern
+    // literals and searching "100%" matches nothing. drizzle's like()
+    // cannot express ESCAPE, hence the sql template.
     const escaped = options.q.replace(/[\\%_]/g, ch => `\\${ch}`);
-    conditions.push(like(tests.name, `%${escaped}%`));
+    conditions.push(sql`${tests.name} LIKE ${`%${escaped}%`} ESCAPE '\\'`);
   }
   const cursor = decodeCursor(options.cursor);
   if (cursor) {

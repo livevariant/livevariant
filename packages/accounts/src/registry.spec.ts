@@ -362,3 +362,29 @@ describe("cache invalidation after verification", () => {
     expect(page.tests.find(t => t.testId === testId)?.encoded).toBeNull();
   });
 });
+
+describe("name search with LIKE metacharacters", () => {
+  it("finds literal % and _ and stays case-insensitive", async () => {
+    const org = await makeOrg();
+    const kh = freshKh();
+    await claimKey(db, { kh, ...org });
+    const names = ["100% hero", "a_b test", "Plain Newsletter"];
+    for (const [i, name] of names.entries()) {
+      await registerTest(db, {
+        testId: `meta-${seq}-${i}`.padEnd(64, "c"),
+        orgId: org.orgId,
+        kh,
+        name,
+        encoded: "enc"
+      });
+    }
+    const percent = await listTests(db, org.orgId, { q: "100%" });
+    expect(percent.tests.map(t => t.name)).toEqual(["100% hero"]);
+    // A literal underscore must not act as the any-character wildcard
+    // (which would also match "a b" style names).
+    const underscore = await listTests(db, org.orgId, { q: "a_b" });
+    expect(underscore.tests.map(t => t.name)).toEqual(["a_b test"]);
+    const ci = await listTests(db, org.orgId, { q: "plain news" });
+    expect(ci.tests.map(t => t.name)).toEqual(["Plain Newsletter"]);
+  });
+});
