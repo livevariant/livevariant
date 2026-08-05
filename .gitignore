@@ -48,3 +48,4 @@ __screenshots__
 .vitest-attachments
 .gstack/
 .dev.vars
+apps/web/public/sdk.js

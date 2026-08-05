@@ -1,10 +1,38 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { build as esbuild } from "esbuild";
 import { fileURLToPath } from "node:url";
 
+/**
+ * Bundles the LiveVariant tag (packages/sdk/src/tag-entry.ts) into
+ * public/sdk.js, so every deployment serves its own tag at /sdk.js and
+ * a <script src> from the deployment origin is the whole install. Runs
+ * for dev and build alike; the output is gitignored.
+ */
+function livevariantTag(): Plugin {
+  return {
+    name: "livevariant-tag",
+    async buildStart() {
+      await esbuild({
+        entryPoints: [
+          fileURLToPath(
+            new URL("../../packages/sdk/src/tag-entry.ts", import.meta.url)
+          )
+        ],
+        bundle: true,
+        minify: true,
+        format: "iife",
+        platform: "browser",
+        conditions: ["@livevariant/source"],
+        outfile: fileURLToPath(new URL("./public/sdk.js", import.meta.url))
+      });
+    }
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [livevariantTag(), react(), tailwindcss()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url))

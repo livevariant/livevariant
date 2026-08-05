@@ -38,11 +38,12 @@ export function createAccounts(config: AccountsConfig): Accounts {
     db,
     auth: lazyAuth,
     provider,
-    baseUrl: config.baseUrl
+    baseUrl: config.baseUrl,
+    renderPage: config.renderPage
   });
   return { routes, provider };
 }
 
-export { resendMagicLink } from "./email.js";
+export { resendMailer, type OutgoingEmail, type SendEmail } from "./email.js";
 export type { AccountsConfig } from "./auth.js";
 export { RegistryProvider } from "./provider.js";

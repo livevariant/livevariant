@@ -66,9 +66,26 @@ export {
  *   )
  */
 
+/**
+ * Deployment-wide configuration a page can set once, usually by the
+ * LiveVariant tag in <head> (which also enables reward-only tracking).
+ * createTest reads it as the fallback for its options, so page code
+ * can call `createTest({ slots: ... })` with nothing else.
+ */
+export interface LiveVariantGlobal {
+  serverUrl?: string;
+  publishableKey?: string;
+  /** GA4 event names the tag treats as conversions. */
+  rewardEvents?: string[];
+}
+
 export interface CreateTestOptions {
-  /** Serving origin, e.g. "https://livevariant.link" or your self-host. */
-  serverUrl: string;
+  /**
+   * Serving origin, e.g. "https://livevariant.link" or your self-host.
+   * Optional when the page carries a global config (the tag sets one);
+   * required otherwise.
+   */
+  serverUrl?: string;
   /** Overrides the id resolution chain (GA cookie, ?id=, generated). */
   externalId?: string;
   /** Raw context values; hashed locally, never sent raw. */
@@ -150,9 +167,21 @@ const ASSET_REFRESH_MARGIN_MS = 60_000;
 
 export async function createTest(
   config: TestConfig | TestConfigInput | string,
-  options: CreateTestOptions
+  options: CreateTestOptions = {}
 ): Promise<LiveTest> {
   const win = options.window ?? window;
+  // Explicit options win; the page-wide global (set by the tag) fills
+  // the gaps, which is what lets page code pass no options at all.
+  const pageGlobal = (win as Window & { livevariant?: LiveVariantGlobal })
+    .livevariant;
+  const serverUrl = options.serverUrl ?? pageGlobal?.serverUrl;
+  if (!serverUrl) {
+    throw new Error(
+      "createTest needs a serverUrl: pass it in options, or install the " +
+        "LiveVariant tag so the page carries a global config"
+    );
+  }
+  const publishableKey = options.publishableKey ?? pageGlobal?.publishableKey;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const storage =
     options.storage === undefined ? win.localStorage : options.storage;
@@ -320,7 +349,7 @@ export async function createTest(
     fallback: boolean;
     assetSignatures?: Record<string, string>;
   }> {
-    const response = await fetchImpl(`${options.serverUrl}/choose`, {
+    const response = await fetchImpl(`${serverUrl}/choose`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
@@ -328,9 +357,9 @@ export async function createTest(
         testId,
         slotSizes: sizes,
         dim,
-        ...(options.publishableKey
+        ...(publishableKey
           ? {
-              publishableKey: options.publishableKey,
+              publishableKey,
               encoded:
                 typeof config === "string"
                   ? config
@@ -353,7 +382,7 @@ export async function createTest(
         // Origin gate: silent-degrade would make this undiagnosable, so
         // name the cause. Serving still falls back to control below.
         console.warn(
-          `[livevariant] ${options.serverUrl} refused this origin ` +
+          `[livevariant] ${serverUrl} refused this origin ` +
             `(${win.location.origin}); add it to the deployment's ` +
             `LV_ALLOWED_ORIGINS to run tests from this site. Serving control.`
         );
@@ -394,7 +423,7 @@ export async function createTest(
    */
   async function trackConversion(amount = 1): Promise<void> {
     try {
-      await fetchImpl(`${options.serverUrl}/reward`, {
+      await fetchImpl(`${serverUrl}/reward`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
@@ -449,7 +478,7 @@ export async function createTest(
     // A string input IS the encoded config; objects go through the same
     // canonical serialization the encoder uses.
     urls: buildTestUrls(
-      options.serverUrl,
+      serverUrl,
       typeof config === "string"
         ? config
         : utf8ToBase64Url(canonicalJson(resolved))

@@ -17,10 +17,12 @@ export const WELL_KNOWN_PATH = "/.well-known/livevariant-verification.txt";
 const DOH_ENDPOINT = "https://cloudflare-dns.com/dns-query";
 const TIMEOUT_MS = 5_000;
 const MAX_BODY_BYTES = 1_024;
+/** Homepage scan cap for SDK detection. */
+const MAX_PAGE_BYTES = 512_000;
 
 export interface VerifyResult {
   ok: boolean;
-  method?: "dns-txt" | "well-known";
+  method?: "dns-txt" | "well-known" | "sdk";
   reason?: string;
 }
 
@@ -109,10 +111,21 @@ export function verificationInstructions(domain: string, token: string) {
   };
 }
 
+/**
+ * Renders a page with JavaScript executed and returns its HTML, or null
+ * when rendering is unavailable or fails. The hosted deployment backs
+ * this with Cloudflare Browser Rendering, which is what makes an SDK
+ * snippet injected through a tag manager (invisible to a raw fetch)
+ * count for verification.
+ */
+export type RenderPage = (url: string) => Promise<string | null>;
+
 export async function verifyDomain(
   domain: string,
   token: string,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  publishableKeys: string[] = [],
+  renderPage?: RenderPage
 ): Promise<VerifyResult> {
   const viaDns = await checkDnsTxt(domain, token, fetchImpl);
   if (viaDns) {
@@ -122,12 +135,113 @@ export async function verifyDomain(
   if (viaFile) {
     return { ok: true, method: "well-known" };
   }
+  // The SDK path: the homepage is resolved ONCE (refusing any offsite
+  // redirect), scanned raw, and only then, still on the same-site URL,
+  // rendered. Rendering the original address instead would follow
+  // redirects freely and hand verification to whatever page a domain
+  // happens to bounce to.
+  if (publishableKeys.length > 0) {
+    const homepage = await fetchHomepage(domain, fetchImpl);
+    if (homepage && keyInScripts(homepage.html, publishableKeys)) {
+      return { ok: true, method: "sdk" };
+    }
+    // The rendered pass runs last: it is the expensive one, and the raw
+    // scan already caught every directly-embedded snippet.
+    if (renderPage && homepage) {
+      const html = await renderPage(homepage.finalUrl);
+      if (html && keyInScripts(html, publishableKeys)) {
+        return { ok: true, method: "sdk" };
+      }
+    }
+  }
   return {
     ok: false,
     reason:
-      `no ${TXT_PREFIX} TXT record and no ${WELL_KNOWN_PATH} file ` +
-      `matched the verification token`
+      `no ${TXT_PREFIX} TXT record, no ${WELL_KNOWN_PATH} file, and no ` +
+      `publishable key found on the homepage. Publish one of the ` +
+      `verification records, or install the SDK with your publishable ` +
+      `key and check again`
   };
+}
+
+/**
+ * Keys count only inside <script> elements (tag body or attributes).
+ * Anywhere else is displayable content, and a homepage that renders
+ * user-generated text (comments, reviews) must not let a stranger
+ * "install" a key by typing it. Script context requires script
+ * injection, which is page control by definition. The same rule bounds
+ * the rendered pass's residual: a page that JS-navigates offsite could
+ * present foreign HTML, but a key in a script there means the attacker
+ * already controls script on that destination.
+ */
+export function keyInScripts(html: string, keys: string[]): boolean {
+  const scripts = html.match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) ?? [];
+  return scripts.some(block => keys.some(key => block.includes(key)));
+}
+
+/**
+ * The zero-setup path's data source: the homepage, resolved with at
+ * most one redirect and only within the same site (apex to www is
+ * routine); anywhere else would let a domain that merely redirects
+ * somewhere attacker-controlled verify. Deliberately NOT "we saw SDK
+ * traffic claiming this Origin": the Origin header and the key are both
+ * public and forgeable by any non-browser client, so observed traffic
+ * could squat a stranger's domain.
+ */
+async function fetchHomepage(
+  domain: string,
+  fetchImpl: typeof fetch
+): Promise<{ finalUrl: string; html: string } | null> {
+  try {
+    let url = `https://${domain}/`;
+    for (let hop = 0; hop < 2; hop++) {
+      const res = await fetchImpl(url, {
+        redirect: "manual",
+        headers: { accept: "text/html" },
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      });
+      if (res.status >= 300 && res.status < 400 && hop === 0) {
+        const location = res.headers.get("location");
+        if (!location) {
+          return null;
+        }
+        const target = new URL(location, url);
+        const sameSite =
+          target.protocol === "https:" &&
+          (target.hostname === domain ||
+            target.hostname === `www.${domain}` ||
+            domain === target.hostname.replace(/^www\./, ""));
+        if (!sameSite) {
+          return null;
+        }
+        url = target.toString();
+        continue;
+      }
+      if (res.status !== 200 || !res.body) {
+        return null;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let received = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        received += decoder.decode(value, { stream: true });
+        // Homepages are big but keys sit in the first script tags; a
+        // cap keeps a hostile endless stream from pinning the worker.
+        if (received.length > MAX_PAGE_BYTES) {
+          await reader.cancel();
+          break;
+        }
+      }
+      return { finalUrl: url, html: received };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 async function checkDnsTxt(

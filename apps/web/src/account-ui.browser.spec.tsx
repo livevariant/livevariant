@@ -8,7 +8,9 @@ import {
   hashStatsSecret
 } from "@livevariant/core";
 import { AppLayout } from "./App";
+import { OrgSwitcher } from "./components/OrgSwitcher";
 import { Login } from "./pages/Login";
+import { Settings } from "./pages/Settings";
 import { TestDetail } from "./pages/TestDetail";
 import { saveTest } from "./lib/tests-store";
 
@@ -86,7 +88,8 @@ function render(path: string) {
           { path: "/tests", element: <div /> },
           { path: "/tests/:testId", element: <TestDetail /> },
           { path: "/manage/:encoded", element: <TestDetail /> },
-          { path: "/login", element: <Login /> }
+          { path: "/login", element: <Login /> },
+          { path: "/settings", element: <Settings /> }
         ]
       }
     ],
@@ -172,14 +175,22 @@ describe("claiming from the test page", () => {
     expect(link).not.toBeNull();
   });
 
-  it("auto-claims a manage link opened while signed in", async () => {
+  it("claims a manage link explicitly, into a chosen org", async () => {
     const { encoded, statsSecret } = await makeSavedTest();
     window.location.hash = `#${statsSecret}`;
     const calls: string[] = [];
     stubServer(
       {
         "/account/me": () =>
-          Response.json({ userId: "u1", activeOrgId: "org-1", orgs: [] }),
+          Response.json({
+            userId: "u1",
+            activeOrgId: "org-1",
+            orgs: [
+              { id: "org-1", name: "Personal" },
+              { id: "org-2", name: "Agency" }
+            ]
+          }),
+        "/auth/organization/set-active": () => Response.json({ ok: true }),
         "/account/keys": () =>
           Response.json({ kh: "k".repeat(64) }, { status: 201 }),
         "/account/tests": () => Response.json({ testId: "t" }, { status: 201 }),
@@ -188,9 +199,31 @@ describe("claiming from the test page", () => {
       calls
     );
     const container = render(`/manage/${encoded}`);
+    // Nothing claims on its own: with several orgs an automatic claim
+    // would silently pick one.
+    await until(() => container.textContent?.includes("Add to") ?? false);
+    expect(calls.filter(c => c.startsWith("POST /account"))).toEqual([]);
+    // Choose the second org, then claim: the switch happens first.
+    const select = container.querySelector(
+      'select[aria-label="Organization to add this test to"]'
+    ) as HTMLSelectElement;
+    expect(select).not.toBeNull();
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLSelectElement.prototype,
+      "value"
+    )!.set!;
+    setter.call(select, "org-2");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
     await until(
-      () => container.textContent?.includes("Saved to your account") ?? false
+      () => container.textContent?.includes("Add to Agency") ?? false
     );
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.includes("Add to Agency"))!
+      .click();
+    await until(
+      () => container.textContent?.includes("Saved to Agency") ?? false
+    );
+    expect(calls).toContain("POST /auth/organization/set-active");
     expect(calls).toContain("POST /account/keys");
     expect(calls).toContain("POST /account/tests");
   });
@@ -258,16 +291,13 @@ describe("the login page", () => {
     expect(calls).toContain("POST /auth/sign-in/email");
   });
 
-  it("registers through the toggle", async () => {
+  it("registers through the toggle and lands on the verify notice", async () => {
     const calls: string[] = [];
     stubServer(
       {
         "/account/me": () =>
           Response.json({ error: "sign in required" }, { status: 401 }),
-        "/auth/sign-up/email": () =>
-          // A failing answer on purpose: success would navigate the
-          // whole test page away. The POST itself is the assertion.
-          Response.json({ error: "email taken" }, { status: 422 })
+        "/auth/sign-up/email": () => Response.json({ user: { id: "u1" } })
       },
       calls
     );
@@ -284,7 +314,115 @@ describe("the login page", () => {
     [...container.querySelectorAll("button")]
       .find(button => button.textContent?.trim() === "Create account")!
       .click();
-    await until(() => container.textContent?.includes("email taken") ?? false);
+    // No redirect: registration finishes in the inbox.
+    await until(
+      () => container.textContent?.includes("verification link") ?? false
+    );
     expect(calls).toContain("POST /auth/sign-up/email");
+  });
+});
+
+describe("the settings page", () => {
+  it("shows the SDK snippet with the real key and serve origin", async () => {
+    const PK = "pk_uitestkeyabcdefghijklmno";
+    stubServer({
+      "/account/me": () =>
+        Response.json({ userId: "u1", activeOrgId: "org-1", orgs: [] }),
+      "/account/domains": () => Response.json({ domains: [] }),
+      "/account/publishable-keys": () =>
+        Response.json({
+          keys: [{ key: PK, label: null, createdAt: Date.now() }]
+        }),
+      "/config": () =>
+        Response.json({ serveUrl: "https://serve.example", region: null })
+    });
+    const container = render("/settings");
+    // The serve origin arrives async from /config; wait for the final
+    // render, not the first (this exact race failed once on CI).
+    await until(
+      () =>
+        [...container.querySelectorAll("pre")].some(pre =>
+          pre.textContent?.includes("https://serve.example/sdk.js")
+        ) ?? false
+    );
+    const snippets = [...container.querySelectorAll("pre")]
+      .map(pre => pre.textContent ?? "")
+      .join("\n");
+    expect(snippets).toContain(`data-publishable-key="${PK}"`);
+    expect(snippets).toContain("window.livevariant.createTest");
+  });
+});
+
+describe("the org switcher", () => {
+  it("lists memberships and sets the active org on change", async () => {
+    const calls: string[] = [];
+    stubServer(
+      {
+        "/auth/organization/set-active": () => Response.json({ ok: true })
+      },
+      calls
+    );
+    // Driven directly so the post-switch reload is injectable: a real
+    // location.reload would blow away the test page itself.
+    const switched: string[] = [];
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    containers.push(container);
+    const root = createRoot(container);
+    roots.push(root);
+    root.render(
+      <OrgSwitcher
+        account={{
+          ready: true,
+          available: true,
+          me: {
+            userId: "u1",
+            activeOrgId: "org-1",
+            orgs: [
+              { id: "org-1", name: "Personal" },
+              { id: "org-2", name: "Agency" }
+            ]
+          },
+          refresh: () => undefined
+        }}
+        onSwitched={() => switched.push("reloaded")}
+      />
+    );
+    await until(
+      () =>
+        container.querySelector('select[aria-label="Switch organization"]') !==
+        null
+    );
+    const select = container.querySelector(
+      'select[aria-label="Switch organization"]'
+    ) as HTMLSelectElement;
+    expect([...select.options].map(option => option.text)).toEqual([
+      "Personal",
+      "Agency"
+    ]);
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLSelectElement.prototype,
+      "value"
+    )!.set!;
+    setter.call(select, "org-2");
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    await until(() => switched.length === 1);
+    expect(calls).toContain("POST /auth/organization/set-active");
+  });
+
+  it("renders one membership as plain text", async () => {
+    stubServer({
+      "/account/me": () =>
+        Response.json({
+          userId: "u1",
+          activeOrgId: "org-1",
+          orgs: [{ id: "org-1", name: "Personal" }]
+        })
+    });
+    const container = render("/");
+    await until(() => container.textContent?.includes("Personal") ?? false);
+    expect(
+      container.querySelector('select[aria-label="Switch organization"]')
+    ).toBeNull();
   });
 });

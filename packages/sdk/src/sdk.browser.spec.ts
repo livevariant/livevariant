@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   bucketKey,
   computeTestId,
@@ -602,5 +602,61 @@ describe("manual conversion", () => {
     expect(server.rewardCalls[0].amount).toBe(12.5);
     expect(server.rewardCalls[0].idHash).toBe(server.chooseCalls[0].idHash);
     test.dispose();
+  });
+});
+
+describe("the page-wide global config", () => {
+  afterEach(() => {
+    delete (window as { livevariant?: unknown }).livevariant;
+  });
+
+  it("lets createTest run with no options at all", async () => {
+    const server = fakeServer(1);
+    (window as { livevariant?: unknown }).livevariant = {
+      serverUrl: "https://global.example",
+      publishableKey: "pk_globalglobalglobalglobal"
+    };
+    // fetch has to come from somewhere injectable: stash it on the
+    // global too? No: the global carries config only. Patch fetch.
+    const original = window.fetch;
+    window.fetch = server.fetch;
+    try {
+      const test = await createTest({ ...CONFIG, name: "global config" });
+      expect(test.fallback).toBe(false);
+      expect(server.chooseCalls[0].publishableKey).toBe(
+        "pk_globalglobalglobalglobal"
+      );
+      expect(test.urls.serve).toContain("https://global.example/s/");
+      test.dispose();
+    } finally {
+      window.fetch = original;
+    }
+  });
+
+  it("explicit options beat the global", async () => {
+    const server = fakeServer(1);
+    (window as { livevariant?: unknown }).livevariant = {
+      serverUrl: "https://global.example",
+      publishableKey: "pk_globalglobalglobalglobal"
+    };
+    const test = await createTest(
+      { ...CONFIG, name: "explicit wins" },
+      {
+        serverUrl: "https://explicit.example",
+        publishableKey: "pk_explicitexplicitexplici",
+        fetch: server.fetch
+      }
+    );
+    expect(server.chooseCalls[0].publishableKey).toBe(
+      "pk_explicitexplicitexplici"
+    );
+    expect(test.urls.serve).toContain("https://explicit.example/s/");
+    test.dispose();
+  });
+
+  it("throws a naming error without any server at all", async () => {
+    await expect(createTest({ ...CONFIG, name: "no server" })).rejects.toThrow(
+      /serverUrl/
+    );
   });
 });

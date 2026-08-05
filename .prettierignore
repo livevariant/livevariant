@@ -11,3 +11,4 @@
 /plugins
 /.claude-plugin
 /.agents
+apps/web/public/sdk.js

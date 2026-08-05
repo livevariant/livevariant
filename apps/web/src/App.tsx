@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router";
 import { LogOut, Moon, Sun, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { OrgSwitcher } from "@/components/OrgSwitcher";
 import { signOut, useAccount } from "@/lib/account";
 import { cn } from "@/lib/utils";
 
@@ -110,6 +111,7 @@ export function AppLayout() {
           >
             {theme === "dark" ? <Sun /> : <Moon />}
           </Button>
+          <OrgSwitcher account={account} />
           {/* Account controls exist only on deployments that have the
               module; a plain self-host renders neither button. */}
           {account.ready &&

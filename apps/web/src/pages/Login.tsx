@@ -29,17 +29,26 @@ export function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [linkSent, setLinkSent] = useState(false);
+  const [verifySent, setVerifySent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = () => {
     setBusy(true);
     setError(null);
-    const action =
-      mode === "register"
-        ? registerWithPassword({ email, password })
-        : signInWithPassword({ email, password });
-    action
+    if (mode === "register") {
+      // Registration is not done until the address is verified, so
+      // there is no session to redirect with yet: the next step is the
+      // inbox.
+      registerWithPassword({ email, password })
+        .then(() => setVerifySent(true))
+        .catch(err => {
+          setError(err instanceof Error ? err.message : String(err));
+        })
+        .finally(() => setBusy(false));
+      return;
+    }
+    signInWithPassword({ email, password })
       .then(() => {
         // A full navigation, not a client-side one: AppLayout's account
         // state must re-read the fresh session cookie.
@@ -68,54 +77,63 @@ export function Login() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <form
-            className="space-y-4"
-            onSubmit={event => {
-              event.preventDefault();
-              submit();
-            }}
-          >
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={event => setEmail(event.target.value)}
-                placeholder="you@example.com"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                required
-                minLength={8}
-                value={password}
-                onChange={event => setPassword(event.target.value)}
-                placeholder={
-                  mode === "register" ? "at least 8 characters" : "password"
-                }
-              />
-            </div>
-            <Button type="submit" disabled={busy || !email || !password}>
-              {mode === "register" ? "Create account" : "Sign in"}
-            </Button>
-          </form>
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-foreground text-sm underline"
-            onClick={() => {
-              setMode(mode === "register" ? "signin" : "register");
-              setError(null);
-            }}
-          >
-            {mode === "register"
-              ? "Already have an account? Sign in"
-              : "No account yet? Create one"}
-          </button>
+          {verifySent ? (
+            <p className="text-sm">
+              <Mail className="mr-1 inline size-4" /> Almost there: we sent a
+              verification link to {email}. Click it, then sign in.
+            </p>
+          ) : (
+            <>
+              <form
+                className="space-y-4"
+                onSubmit={event => {
+                  event.preventDefault();
+                  submit();
+                }}
+              >
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    required
+                    value={email}
+                    onChange={event => setEmail(event.target.value)}
+                    placeholder="you@example.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    required
+                    minLength={8}
+                    value={password}
+                    onChange={event => setPassword(event.target.value)}
+                    placeholder={
+                      mode === "register" ? "at least 8 characters" : "password"
+                    }
+                  />
+                </div>
+                <Button type="submit" disabled={busy || !email || !password}>
+                  {mode === "register" ? "Create account" : "Sign in"}
+                </Button>
+              </form>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground text-sm underline"
+                onClick={() => {
+                  setMode(mode === "register" ? "signin" : "register");
+                  setError(null);
+                }}
+              >
+                {mode === "register"
+                  ? "Already have an account? Sign in"
+                  : "No account yet? Create one"}
+              </button>
+            </>
+          )}
           <div className="border-t pt-4">
             {linkSent ? (
               <p className="text-sm">

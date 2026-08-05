@@ -115,3 +115,272 @@ describe("effective TLD guard", () => {
     });
   });
 });
+
+describe("verification by installed SDK", () => {
+  const token = generateVerificationToken();
+  const PK = "pk_abcdefghijklmnopqrstuvwx";
+
+  function noDnsNoFile(page: (url: string) => Response | null) {
+    return (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("dns-query")) {
+        return new Response(JSON.stringify({ Answer: [] }), {
+          headers: { "content-type": "application/dns-json" }
+        });
+      }
+      if (u.includes("/.well-known/")) {
+        return new Response("nope", { status: 404 });
+      }
+      void init;
+      return page(u) ?? new Response("nope", { status: 404 });
+    }) as typeof fetch;
+  }
+
+  it("verifies when the publishable key sits in the homepage source", async () => {
+    const result = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFile(url =>
+        url === "https://example.com/"
+          ? new Response(
+              `<html><script>createTest({}, {publishableKey: "${PK}"})</script></html>`
+            )
+          : null
+      ),
+      [PK]
+    );
+    expect(result).toEqual({ ok: true, method: "sdk" });
+  });
+
+  it("follows one same-site redirect (apex to www), nothing foreign", async () => {
+    const sameSite = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFile(url => {
+        if (url === "https://example.com/") {
+          return new Response(null, {
+            status: 301,
+            headers: { location: "https://www.example.com/" }
+          });
+        }
+        if (url === "https://www.example.com/") {
+          return new Response(`<script>{publishableKey:"${PK}"}</script>`);
+        }
+        return null;
+      }),
+      [PK]
+    );
+    expect(sameSite.method).toBe("sdk");
+    const foreign = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFile(url =>
+        url === "https://example.com/"
+          ? new Response(null, {
+              status: 301,
+              headers: { location: "https://evil.test/" }
+            })
+          : new Response(`key ${PK} here`)
+      ),
+      [PK]
+    );
+    expect(foreign.ok).toBe(false);
+  });
+
+  it("fails without keys, or when the page lacks the key", async () => {
+    const noKeys = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFile(() => new Response(`whatever ${PK}`)),
+      []
+    );
+    expect(noKeys.ok).toBe(false);
+    const wrongPage = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFile(() => new Response("<html>no key here</html>")),
+      [PK]
+    );
+    expect(wrongPage.ok).toBe(false);
+  });
+});
+
+describe("rendered verification (tag-manager installs)", () => {
+  const token = generateVerificationToken();
+  const PK = "pk_abcdefghijklmnopqrstuvwx";
+
+  const rawPageWithoutKey = (async (url: RequestInfo | URL) => {
+    const u = String(url);
+    if (u.includes("dns-query")) {
+      return new Response(JSON.stringify({ Answer: [] }), {
+        headers: { "content-type": "application/dns-json" }
+      });
+    }
+    if (u.includes("/.well-known/")) {
+      return new Response("nope", { status: 404 });
+    }
+    // The raw homepage: GTM loader present, SDK key absent.
+    return new Response("<html><script src='gtm.js'></script></html>");
+  }) as typeof fetch;
+
+  it("finds a key that only exists after JavaScript ran", async () => {
+    const rendered: string[] = [];
+    const result = await verifyDomain(
+      "example.com",
+      token,
+      rawPageWithoutKey,
+      [PK],
+      async url => {
+        rendered.push(url);
+        return `<html><script>createTest({},{publishableKey:"${PK}"})</script></html>`;
+      }
+    );
+    expect(result).toEqual({ ok: true, method: "sdk" });
+    expect(rendered).toEqual(["https://example.com/"]);
+  });
+
+  it("fails open when rendering is unavailable or empty", async () => {
+    const unavailable = await verifyDomain(
+      "example.com",
+      token,
+      rawPageWithoutKey,
+      [PK],
+      async () => null
+    );
+    expect(unavailable.ok).toBe(false);
+    const noRenderer = await verifyDomain(
+      "example.com",
+      token,
+      rawPageWithoutKey,
+      [PK]
+    );
+    expect(noRenderer.ok).toBe(false);
+  });
+
+  it("never renders when the raw page already had the key", async () => {
+    const rendered: string[] = [];
+    const result = await verifyDomain(
+      "example.com",
+      token,
+      (async (url: RequestInfo | URL) => {
+        const u = String(url);
+        if (u.includes("dns-query")) {
+          return new Response(JSON.stringify({ Answer: [] }), {
+            headers: { "content-type": "application/dns-json" }
+          });
+        }
+        if (u.includes("/.well-known/")) {
+          return new Response("nope", { status: 404 });
+        }
+        return new Response(`<script>{publishableKey:"${PK}"}</script>`);
+      }) as typeof fetch,
+      [PK],
+      async url => {
+        rendered.push(url);
+        return null;
+      }
+    );
+    expect(result.method).toBe("sdk");
+    expect(rendered).toEqual([]);
+  });
+});
+
+describe("scan hardening", () => {
+  const token = generateVerificationToken();
+  const PK = "pk_abcdefghijklmnopqrstuvwx";
+
+  const noDnsNoFileWith = (page: (url: string) => Response | null) =>
+    (async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes("dns-query")) {
+        return new Response(JSON.stringify({ Answer: [] }), {
+          headers: { "content-type": "application/dns-json" }
+        });
+      }
+      if (u.includes("/.well-known/")) {
+        return new Response("nope", { status: 404 });
+      }
+      return page(u) ?? new Response("nope", { status: 404 });
+    }) as typeof fetch;
+
+  it("a key in displayable text (a comment) never verifies", async () => {
+    const page = `<html><body><div class="comment">try ${PK} lol</div></body></html>`;
+    const raw = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFileWith(() => new Response(page)),
+      [PK]
+    );
+    expect(raw.ok).toBe(false);
+    const rendered = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFileWith(() => new Response("<html>bare</html>")),
+      [PK],
+      async () => page
+    );
+    expect(rendered.ok).toBe(false);
+  });
+
+  it("keys in script attributes and bodies both count", async () => {
+    const viaAttribute = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFileWith(
+        () =>
+          new Response(
+            `<script defer src="/sdk.js" data-publishable-key="${PK}"></script>`
+          )
+      ),
+      [PK]
+    );
+    expect(viaAttribute.method).toBe("sdk");
+  });
+
+  it("a foreign redirect blocks the rendered pass entirely", async () => {
+    const rendered: string[] = [];
+    const result = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFileWith(url =>
+        url === "https://example.com/"
+          ? new Response(null, {
+              status: 301,
+              headers: { location: "https://evil.test/" }
+            })
+          : null
+      ),
+      [PK],
+      async url => {
+        rendered.push(url);
+        return `<script>${PK}</script>`;
+      }
+    );
+    expect(result.ok).toBe(false);
+    expect(rendered).toEqual([]);
+  });
+
+  it("the rendered pass receives the same-site FINAL url", async () => {
+    const rendered: string[] = [];
+    const result = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFileWith(url => {
+        if (url === "https://example.com/") {
+          return new Response(null, {
+            status: 301,
+            headers: { location: "https://www.example.com/" }
+          });
+        }
+        return new Response("<html>gtm only</html>");
+      }),
+      [PK],
+      async url => {
+        rendered.push(url);
+        return `<script>createTest({},{publishableKey:"${PK}"})</script>`;
+      }
+    );
+    expect(result.method).toBe("sdk");
+    expect(rendered).toEqual(["https://www.example.com/"]);
+  });
+});

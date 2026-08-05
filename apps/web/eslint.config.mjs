@@ -1,6 +1,8 @@
 import baseConfig from "../../eslint.config.mjs";
 
 export default [
+  // Generated tag bundle (vite plugin output), not source.
+  { ignores: ["public/sdk.js"] },
   ...baseConfig,
   {
     files: ["**/*.json"],

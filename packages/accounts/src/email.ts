@@ -1,12 +1,19 @@
 /**
- * Outbound email, which for this module means exactly one thing: the
- * magic sign-in link. Resend is called over plain fetch (their SDK is a
- * fetch wrapper; the dependency buys nothing a Worker needs), and the
- * vendor stays contained in this file so tests inject a recorder and a
- * future switch is a one-file change.
+ * Outbound email: magic sign-in links and address verification. Resend
+ * is called over plain fetch (their SDK is a fetch wrapper; the
+ * dependency buys nothing a Worker needs), and the vendor stays
+ * contained in this file so tests inject a recorder and a future
+ * switch is a one-file change.
  */
 
-export type SendMagicLink = (to: string, url: string) => Promise<void>;
+export interface OutgoingEmail {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+}
+
+export type SendEmail = (email: OutgoingEmail) => Promise<void>;
 
 export interface ResendOptions {
   apiKey: string;
@@ -22,9 +29,70 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
-export function resendMagicLink(options: ResendOptions): SendMagicLink {
-  return async (to, url) => {
-    const href = escapeHtml(url);
+function linkEmail(input: {
+  lead: string;
+  action: string;
+  url: string;
+}): Omit<OutgoingEmail, "to" | "subject"> {
+  const href = escapeHtml(input.url);
+  return {
+    html:
+      `<p>${input.lead}</p>` +
+      `<p><a href="${href}">${input.action}</a></p>` +
+      `<p>Or paste this link into your browser:<br>${href}</p>` +
+      `<p>If you did not request this, ignore this email.</p>`,
+    text:
+      `${input.lead}\n\n${input.url}\n\n` +
+      `If you did not request this, ignore this email.`
+  };
+}
+
+export function magicLinkEmail(to: string, url: string): OutgoingEmail {
+  return {
+    to,
+    subject: "Sign in to LiveVariant",
+    ...linkEmail({
+      lead: "Click to sign in to LiveVariant:",
+      action: "Sign in",
+      url
+    })
+  };
+}
+
+export function verificationEmail(to: string, url: string): OutgoingEmail {
+  return {
+    to,
+    subject: "Verify your email for LiveVariant",
+    ...linkEmail({
+      lead: "Confirm this address to finish creating your LiveVariant account:",
+      action: "Verify email",
+      url
+    })
+  };
+}
+
+export function invitationEmail(input: {
+  to: string;
+  orgName: string;
+  inviterName: string;
+  url: string;
+}): OutgoingEmail {
+  return {
+    to: input.to,
+    subject: `${input.inviterName} invited you to ${input.orgName} on LiveVariant`,
+    ...linkEmail({
+      lead:
+        `${input.inviterName} invited you to join the ${input.orgName} ` +
+        `organization on LiveVariant. Accepting shares its tests, keys ` +
+        `and verified domains with you:`,
+      action: "Accept invitation",
+      url: input.url
+    })
+  };
+}
+
+export function resendMailer(options: ResendOptions): SendEmail {
+  return async email => {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -33,22 +101,16 @@ export function resendMagicLink(options: ResendOptions): SendMagicLink {
       },
       body: JSON.stringify({
         from: options.from,
-        to: [to],
-        subject: "Sign in to LiveVariant",
-        html:
-          `<p>Click to sign in to LiveVariant:</p>` +
-          `<p><a href="${href}">Sign in</a></p>` +
-          `<p>Or paste this link into your browser:<br>${href}</p>` +
-          `<p>If you did not request this, ignore this email.</p>`,
-        text:
-          `Sign in to LiveVariant:\n\n${url}\n\n` +
-          `If you did not request this, ignore this email.`
+        to: [email.to],
+        subject: email.subject,
+        html: email.html,
+        text: email.text
       })
     });
     if (!res.ok) {
       // Surfaced to Better Auth, which reports a send failure rather
       // than a silent "check your inbox" for a mail that never left.
-      throw new Error(`magic link email failed (${res.status})`);
+      throw new Error(`email send failed (${res.status})`);
     }
   };
 }
