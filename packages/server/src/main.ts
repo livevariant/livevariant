@@ -33,6 +33,7 @@ const app = createApp({
   store: new MemoryStore(),
   serveUrl: process.env.LV_SERVE_URL || undefined,
   apiToken: process.env.LV_API_TOKEN || undefined,
+  gtmId: process.env.LV_GOOGLE_TAG_MANAGER || undefined,
   allowedDestinations: listVar(process.env.LV_ALLOWED_DESTINATIONS),
   allowedOrigins: listVar(process.env.LV_ALLOWED_ORIGINS),
   unlistedDestinations: unlistedDestinationMode(

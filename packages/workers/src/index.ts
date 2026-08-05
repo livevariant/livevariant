@@ -236,6 +236,8 @@ export interface Env {
    * set it ("operator" is the wrong granularity for multi-tenant).
    */
   LV_API_TOKEN?: string;
+  /** GTM container id (GTM-XXXXXXX) for the dashboard pages. */
+  LV_GOOGLE_TAG_MANAGER?: string;
 }
 
 /** Counter keys arrive as c:{testId}:{scope}; the DO stores scopes. */
@@ -328,6 +330,7 @@ export function baseAppOptions(env: Env): AppOptions {
     unlistedDestinations: unlistedDestinationMode(env.LV_UNLISTED_DESTINATIONS),
     serveUrl: env.LV_SERVE_URL,
     apiToken: env.LV_API_TOKEN,
+    gtmId: env.LV_GOOGLE_TAG_MANAGER,
     assets:
       env.ASSET_STORE && env.LV_ASSET_SECRET
         ? {

@@ -59,6 +59,13 @@ export interface ApiOptions {
    * shows an agent a tool it cannot serve.
    */
   provider?: AccountsProvider;
+  /**
+   * Google Tag Manager container id (GTM-XXXXXXX) for the DASHBOARD
+   * pages themselves (LV_GOOGLE_TAG_MANAGER). Served through /config;
+   * the SPA injects the container when present. Unset means no GTM,
+   * which is the default and the self-host norm.
+   */
+  gtmId?: string;
 }
 
 export function createApi(options: ApiOptions): Hono {
@@ -178,7 +185,8 @@ export function createApi(options: ApiOptions): Hono {
       // The dashboard defaults a new test's region to its creator's.
       region: regionHint(
         (c.req.raw as Request & { cf?: CloudflareGeo }).cf ?? null
-      )
+      ),
+      gtmId: options.gtmId?.trim() || null
     })
   );
 

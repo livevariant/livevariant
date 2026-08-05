@@ -130,6 +130,8 @@ export interface AppOptions {
    * /mcp require it as a Bearer token. See ApiOptions.apiToken.
    */
   apiToken?: string;
+  /** GTM container id for the dashboard pages. See ApiOptions.gtmId. */
+  gtmId?: string;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -656,6 +658,7 @@ export function createApp(options: AppOptions): Hono {
       serveUrl: options.serveUrl,
       apiToken: options.apiToken,
       provider: options.provider,
+      gtmId: options.gtmId,
       fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
         app.fetch(new Request(input as RequestInfo, init))) as typeof fetch
     })
