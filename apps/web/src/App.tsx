@@ -127,13 +127,11 @@ export function AppLayout() {
                 <LogOut />
               </Button>
             ) : (
-              <Link
-                to="/login"
-                aria-label="Sign in"
-                className="text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <User className="size-5" />
-              </Link>
+              <Button variant="ghost" asChild>
+                <Link to="/login">
+                  <User /> Sign in
+                </Link>
+              </Button>
             ))}
           <Button variant="outline" asChild>
             <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/livevariant/livevariant">

@@ -131,7 +131,7 @@
         "LV_UNLISTED_DESTINATIONS": "",
         // The vite origin: the dashboard is developed through its proxy,
         // so cookies, CORS and magic-link callbacks all key off it.
-        "LV_APP_URL": "http://localhost:4273"
+        "LV_APP_URL": "http://localhost:5173"
       }
     },
     "production": {
