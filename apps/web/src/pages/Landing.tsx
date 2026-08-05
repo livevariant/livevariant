@@ -100,6 +100,9 @@ interface PageTestState {
   sub: number;
   fallback: boolean;
   test: LiveTest | null;
+  /** False until a decision (or the fallback) is in; the hero hides
+   *  itself meanwhile so nobody watches the headline switch. */
+  ready: boolean;
 }
 
 function usePageTest(): PageTestState {
@@ -107,16 +110,34 @@ function usePageTest(): PageTestState {
     headline: 0,
     sub: 0,
     fallback: true,
-    test: null
+    test: null,
+    ready: false
   });
   useEffect(() => {
     let live = true;
     let created: LiveTest | null = null;
+    const reveal = () => {
+      if (live) {
+        setState(prev => ({ ...prev, ready: true }));
+      }
+    };
     void (async () => {
       try {
         const deployment = await fetchDeploymentConfig();
+        // The deployment's own key makes this test OURS in the
+        // dashboard. Prefer the /config copy; without one, pass no
+        // serverUrl at all: createTest then waits for a tag-manager
+        // loaded tag's global (which carries a key) and throws past
+        // its timeout, caught below, so the control renders rather
+        // than a key-less, unowned test running.
+        const options = deployment.publishableKey
+          ? {
+              serverUrl: deployment.serveUrl,
+              publishableKey: deployment.publishableKey
+            }
+          : {};
         created = await createTest(PAGE_TEST, {
-          serverUrl: deployment.serveUrl,
+          ...options,
           // Conversions are tracked manually on the CTA click; no GA
           // interception on our own page.
           rewardEvents: false
@@ -131,11 +152,13 @@ function usePageTest(): PageTestState {
           headline: created.slots.headline.index,
           sub: created.slots.sub.index,
           fallback: created.fallback,
-          test: created
+          test: created,
+          ready: true
         });
       } catch {
         // The SDK already degrades to control; this catch only guards
         // the config fetch. The page must render regardless.
+        reveal();
       }
     })();
     return () => {
@@ -716,12 +739,21 @@ export function Landing() {
   return (
     <>
       <section className="pb-16 pt-14 text-center sm:pt-20">
-        <h1 className="font-display text-[clamp(3rem,8.5vw,6.75rem)] leading-[1.02] tracking-tight">
-          {HEADLINES[pageTest.headline].jsx}
-        </h1>
-        <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
-          {SUBS[pageTest.sub]}
-        </p>
+        {/* Invisible (not unmounted) until the test decides: the space
+            is reserved, and nobody sees the control flip to the chosen
+            variant. */}
+        <div
+          className={`transition-opacity duration-300 ${
+            pageTest.ready ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          <h1 className="font-display text-[clamp(3rem,8.5vw,6.75rem)] leading-[1.02] tracking-tight">
+            {HEADLINES[pageTest.headline].jsx}
+          </h1>
+          <p className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground">
+            {SUBS[pageTest.sub]}
+          </p>
+        </div>
       </section>
 
       <section className="border-t border-border py-14">

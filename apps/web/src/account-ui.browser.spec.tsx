@@ -8,6 +8,7 @@ import {
   hashStatsSecret
 } from "@livevariant/core";
 import { AppLayout } from "./App";
+import { AcceptInvitation } from "./pages/AcceptInvitation";
 import { OrgSwitcher } from "./components/OrgSwitcher";
 import { Login } from "./pages/Login";
 import { Settings } from "./pages/Settings";
@@ -90,7 +91,8 @@ function render(path: string) {
           { path: "/tests/:testId", element: <TestDetail /> },
           { path: "/manage/:encoded", element: <TestDetail /> },
           { path: "/login", element: <Login /> },
-          { path: "/settings", element: <Settings /> }
+          { path: "/settings", element: <Settings /> },
+          { path: "/accept-invitation/:id", element: <AcceptInvitation /> }
         ]
       }
     ],
@@ -478,5 +480,241 @@ describe("google tag manager", () => {
     render("/");
     await new Promise(resolve => setTimeout(resolve, 300));
     expect(document.getElementById("lv-gtm")).toBeNull();
+  });
+});
+
+describe("the magic-link alternative", () => {
+  it("is always clickable: empty email explains and focuses the field", async () => {
+    const calls: string[] = [];
+    stubServer(
+      {
+        "/account/me": () =>
+          Response.json({ error: "sign in required" }, { status: 401 })
+      },
+      calls
+    );
+    const container = render("/login");
+    await until(() => container.querySelector("#email") !== null);
+    const magic = [...container.querySelectorAll("button")].find(button =>
+      button.textContent?.includes("sign-in link")
+    )!;
+    expect(magic.hasAttribute("disabled")).toBe(false);
+    magic.click();
+    await until(
+      () =>
+        container.textContent?.includes("Enter your email above first") ?? false
+    );
+    expect(calls).not.toContain("POST /auth/sign-in/magic-link");
+    expect(document.activeElement?.id).toBe("email");
+  });
+
+  it("sends the link once the email is there", async () => {
+    const calls: string[] = [];
+    stubServer(
+      {
+        "/account/me": () =>
+          Response.json({ error: "sign in required" }, { status: 401 }),
+        "/auth/sign-in/magic-link": () => Response.json({ status: true })
+      },
+      calls
+    );
+    const container = render("/login");
+    await until(() => container.querySelector("#email") !== null);
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value"
+    )!.set!;
+    const email = container.querySelector("#email") as HTMLInputElement;
+    setter.call(email, "magic@example.com");
+    email.dispatchEvent(new Event("input", { bubbles: true }));
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.includes("sign-in link"))!
+      .click();
+    await until(
+      () => container.textContent?.includes("Check your inbox") ?? false
+    );
+    expect(calls).toContain("POST /auth/sign-in/magic-link");
+  });
+});
+
+describe("accepting an invitation", () => {
+  it("never paints 'not found' over a join that succeeded", async () => {
+    // The consumed-invitation trap: after acceptance the invitation no
+    // longer loads, and a loader refire used to surface that as an
+    // error next to the success message.
+    let acceptedOnServer = false;
+    stubServer({
+      "/account/me": () =>
+        Response.json({
+          userId: "u1",
+          activeOrgId: "org-1",
+          orgs: [{ id: "org-1", name: "Personal" }]
+        }),
+      "/auth/organization/get-invitation": () =>
+        acceptedOnServer
+          ? Response.json({ message: "Invitation not found" }, { status: 404 })
+          : Response.json({
+              id: "inv-1",
+              email: "u1@example.com",
+              role: "member",
+              organizationId: "org-2",
+              organizationName: "Agency",
+              status: "pending"
+            }),
+      "/auth/organization/accept-invitation": () => {
+        acceptedOnServer = true;
+        return Response.json({ ok: true });
+      },
+      "/auth/organization/set-active": () => Response.json({ ok: true })
+    });
+    const container = render("/accept-invitation/inv-1");
+    await until(() => container.textContent?.includes("Join Agency") ?? false);
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.includes("Join Agency"))!
+      .click();
+    await until(() => container.textContent?.includes("You joined") ?? false);
+    // Give any stray refetch time to land before asserting its absence.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(container.textContent).not.toContain("not found");
+    expect(container.textContent).not.toContain("could not be loaded");
+  });
+
+  it("loads a second invitation after the first was accepted", async () => {
+    // Acceptance is keyed to the invitation id: pointing the same
+    // mounted page at another invite link must load it, not keep
+    // showing the first one's success state.
+    const joined = new Set<string>();
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url,
+          window.location.origin
+        );
+        void init;
+        if (url.pathname === "/account/me") {
+          return Response.json({
+            userId: "u1",
+            activeOrgId: "org-1",
+            orgs: [{ id: "org-1", name: "Personal" }]
+          });
+        }
+        if (url.pathname === "/auth/organization/get-invitation") {
+          const id = url.searchParams.get("id") ?? "";
+          if (joined.has(id)) {
+            return Response.json(
+              { message: "Invitation not found" },
+              { status: 404 }
+            );
+          }
+          return Response.json({
+            id,
+            email: "u1@example.com",
+            role: "member",
+            organizationId: id === "inv-1" ? "org-2" : "org-3",
+            organizationName: id === "inv-1" ? "Agency" : "Beta",
+            status: "pending"
+          });
+        }
+        if (url.pathname === "/auth/organization/accept-invitation") {
+          joined.add("inv-1");
+          return Response.json({ ok: true });
+        }
+        if (url.pathname === "/auth/organization/set-active") {
+          return Response.json({ ok: true });
+        }
+        return new Response("404", { status: 404 });
+      }
+    );
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    containers.push(container);
+    const router = createMemoryRouter(
+      [
+        {
+          element: <AppLayout />,
+          children: [
+            { path: "/accept-invitation/:id", element: <AcceptInvitation /> },
+            { path: "/tests", element: <div /> }
+          ]
+        }
+      ],
+      { initialEntries: ["/accept-invitation/inv-1"] }
+    );
+    const root = createRoot(container);
+    roots.push(root);
+    root.render(
+      <StrictMode>
+        <RouterProvider router={router} />
+      </StrictMode>
+    );
+    await until(() => container.textContent?.includes("Join Agency") ?? false);
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.includes("Join Agency"))!
+      .click();
+    await until(() => container.textContent?.includes("You joined") ?? false);
+    await router.navigate("/accept-invitation/inv-2");
+    await until(() => container.textContent?.includes("Join Beta") ?? false);
+  });
+});
+
+describe("domain verification feedback", () => {
+  it("shows the server's reason when a check finds nothing", async () => {
+    stubServer({
+      "/account/me": () =>
+        Response.json({
+          userId: "u1",
+          activeOrgId: "org-1",
+          orgs: [{ id: "org-1", name: "Personal" }]
+        }),
+      "/account/domains/example.com/verify": () =>
+        Response.json({
+          domain: "example.com",
+          verified: false,
+          reason: "no TXT record matched the verification token"
+        }),
+      "/account/domains": () =>
+        Response.json({
+          domains: [
+            {
+              domain: "example.com",
+              verifiedAt: null,
+              checkedAt: null,
+              createdAt: 1,
+              method: "dns-txt",
+              token: "tok",
+              instructions: {
+                dnsTxt: {
+                  name: "_livevariant.example.com",
+                  type: "TXT",
+                  value: "livevariant-site-verification=tok"
+                },
+                wellKnown: {
+                  url: "https://example.com/.well-known/livevariant-verification.txt",
+                  body: "tok"
+                }
+              }
+            }
+          ]
+        }),
+      "/account/publishable-keys": () => Response.json({ keys: [] }),
+      "/config": () =>
+        Response.json({ serveUrl: "https://serve.example", region: null })
+    });
+    const container = render("/settings");
+    await until(() => container.textContent?.includes("Check now") ?? false);
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.trim() === "Check now")!
+      .click();
+    await until(
+      () =>
+        container.textContent?.includes(
+          "no TXT record matched the verification token"
+        ) ?? false
+    );
   });
 });

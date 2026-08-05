@@ -15,6 +15,8 @@ export interface DeploymentConfig {
   region: string | null;
   /** GTM container id when the deployment enables it; null otherwise. */
   gtmId: string | null;
+  /** The deployment's own publishable key, for the landing's test. */
+  publishableKey: string | null;
 }
 
 export async function fetchDeploymentConfig(
@@ -23,7 +25,8 @@ export async function fetchDeploymentConfig(
   const fallback = {
     serveUrl: window.location.origin,
     region: null,
-    gtmId: null
+    gtmId: null,
+    publishableKey: null
   };
   try {
     const res = await fetchImpl("/config");
@@ -34,6 +37,8 @@ export async function fetchDeploymentConfig(
     const serveUrl = (body as { serveUrl?: unknown }).serveUrl;
     const region = (body as { region?: unknown }).region;
     const gtmId = (body as { gtmId?: unknown }).gtmId;
+    const publishableKey = (body as { publishableKey?: unknown })
+      .publishableKey;
     return {
       serveUrl:
         typeof serveUrl === "string" && serveUrl.length > 0
@@ -45,6 +50,10 @@ export async function fetchDeploymentConfig(
       gtmId:
         typeof gtmId === "string" && /^GTM-[A-Z0-9]+$/.test(gtmId)
           ? gtmId
+          : null,
+      publishableKey:
+        typeof publishableKey === "string" && publishableKey.length > 0
+          ? publishableKey
           : null
     };
   } catch {
@@ -68,7 +77,8 @@ export function useDeploymentConfig(): DeploymentConfig {
   const [config, setConfig] = useState<DeploymentConfig>(() => ({
     serveUrl: window.location.origin,
     region: null,
-    gtmId: null
+    gtmId: null,
+    publishableKey: null
   }));
   useEffect(() => {
     let live = true;

@@ -660,3 +660,33 @@ describe("the page-wide global config", () => {
     );
   });
 });
+
+describe("createTest waits for a late tag", () => {
+  afterEach(() => {
+    delete (window as { livevariant?: unknown }).livevariant;
+  });
+
+  it("uses the global a tag manager sets after page code already ran", async () => {
+    // Tag managers inject the tag late; page code calling createTest
+    // first must not lose the race.
+    setTimeout(() => {
+      (window as { livevariant?: unknown }).livevariant = {
+        serverUrl: "https://late.example"
+      };
+    }, 50);
+    const test = await createTest(CONFIG, {
+      storage: null,
+      fetch: (async () =>
+        new Response("nope", { status: 404 })) as unknown as typeof fetch
+    });
+    // The stubbed server answered (badly), which proves the serverUrl
+    // was resolved from the late global rather than throwing.
+    expect(test.fallback).toBe(true);
+  });
+
+  it("throws past the timeout when no tag ever arrives", async () => {
+    await expect(
+      createTest(CONFIG, { storage: null, tagWaitMs: 80 })
+    ).rejects.toThrow(/serverUrl/);
+  });
+});

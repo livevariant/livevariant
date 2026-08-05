@@ -28,11 +28,21 @@ export function AcceptInvitation() {
   const account = useAccount();
   const [invitation, setInvitation] = useState<InvitationDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [accepted, setAccepted] = useState(false);
+  // Keyed to the invitation id, not a plain boolean: the same mounted
+  // page can be pointed at a SECOND invitation link, and a bare
+  // "accepted" would keep showing the first one's success state
+  // instead of loading the new invite.
+  const [acceptedId, setAcceptedId] = useState<string | null>(null);
+  const accepted = id != null && acceptedId === id;
   const [busy, setBusy] = useState(false);
 
+  // Depends on the userId PRIMITIVE, not the account.me object: refresh()
+  // recreates the object, and an object dependency made this loader
+  // refire after acceptance, refetching the consumed invitation and
+  // painting "not found" over a join that had just succeeded.
+  const userId = account.me?.userId ?? null;
   useEffect(() => {
-    if (!id || !account.ready || !account.available || !account.me) {
+    if (!id || !account.ready || !account.available || !userId || accepted) {
       return;
     }
     let live = true;
@@ -50,7 +60,7 @@ export function AcceptInvitation() {
     return () => {
       live = false;
     };
-  }, [id, account.ready, account.available, account.me]);
+  }, [id, account.ready, account.available, userId, accepted]);
 
   if (!account.ready) {
     return null;
@@ -118,7 +128,7 @@ export function AcceptInvitation() {
                         : Promise.resolve()
                     )
                     .then(() => {
-                      setAccepted(true);
+                      setAcceptedId(id);
                       account.refresh();
                     })
                     .catch(err => {

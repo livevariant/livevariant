@@ -4,6 +4,18 @@
     {
       "name": "web",
       "url": "http://localhost:5173"
+    },
+    {
+      "name": "worker",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:worker"],
+      "port": 8787
+    },
+    {
+      "name": "vite",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173
     }
   ]
 }

@@ -34,6 +34,7 @@ const app = createApp({
   serveUrl: process.env.LV_SERVE_URL || undefined,
   apiToken: process.env.LV_API_TOKEN || undefined,
   gtmId: process.env.LV_GOOGLE_TAG_MANAGER || undefined,
+  publishableKey: process.env.LV_PUBLISHABLE_KEY || undefined,
   allowedDestinations: listVar(process.env.LV_ALLOWED_DESTINATIONS),
   allowedOrigins: listVar(process.env.LV_ALLOWED_ORIGINS),
   unlistedDestinations: unlistedDestinationMode(

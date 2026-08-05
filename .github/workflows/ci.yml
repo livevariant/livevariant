@@ -41,7 +41,7 @@ jobs:
           echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
           tar -xz -C /usr/local/bin -f /tmp/gitleaks.tar.gz gitleaks
           gitleaks version
-          gitleaks git . --no-banner --redact
+          gitleaks git . --no-banner --redact -v
 
       - run: npm ci
 

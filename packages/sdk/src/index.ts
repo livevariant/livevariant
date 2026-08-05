@@ -79,6 +79,37 @@ export interface LiveVariantGlobal {
   rewardEvents?: string[];
 }
 
+/**
+ * Resolves with the page's global config (window.livevariant) as soon
+ * as it exists, or null once timeoutMs passes without it. For SPAs
+ * whose LiveVariant tag arrives late through a tag manager: wait a
+ * moment for the tag instead of racing it, then render the control
+ * rather than hold the page.
+ */
+export function whenTagReady(
+  options: { win?: Window; timeoutMs?: number; pollMs?: number } = {}
+): Promise<LiveVariantGlobal | null> {
+  const win = options.win ?? window;
+  const timeoutMs = options.timeoutMs ?? 3000;
+  const pollMs = options.pollMs ?? 50;
+  const read = () =>
+    (win as Window & { livevariant?: LiveVariantGlobal }).livevariant ?? null;
+  const first = read();
+  if (first) {
+    return Promise.resolve(first);
+  }
+  return new Promise(resolve => {
+    const deadline = Date.now() + timeoutMs;
+    const timer = setInterval(() => {
+      const tag = read();
+      if (tag || Date.now() >= deadline) {
+        clearInterval(timer);
+        resolve(tag);
+      }
+    }, pollMs);
+  });
+}
+
 export interface CreateTestOptions {
   /**
    * Serving origin, e.g. "https://livevariant.link" or your self-host.
@@ -94,6 +125,14 @@ export interface CreateTestOptions {
   rewardEvents?: string[] | false;
   /** Defaults to window.localStorage; pass null to disable caching. */
   storage?: Storage | null;
+  /**
+   * How long to wait for a tag-manager-loaded tag's global config when
+   * no serverUrl is otherwise known. Tag managers inject the tag late,
+   * so a page script racing it would throw where waiting a moment
+   * succeeds; a page that provides serverUrl itself never waits. False
+   * disables waiting. Default 3000.
+   */
+  tagWaitMs?: number | false;
   /**
    * How long to wait for the assignment before rendering the control
    * combination. An A/B tool must never hold up a page, so a slow or
@@ -172,8 +211,19 @@ export async function createTest(
   const win = options.window ?? window;
   // Explicit options win; the page-wide global (set by the tag) fills
   // the gaps, which is what lets page code pass no options at all.
-  const pageGlobal = (win as Window & { livevariant?: LiveVariantGlobal })
+  let pageGlobal = (win as Window & { livevariant?: LiveVariantGlobal })
     .livevariant;
+  if (!options.serverUrl && !pageGlobal && options.tagWaitMs !== false) {
+    // No way to reach a server yet: the tag may simply not have loaded
+    // (tag managers inject it late). Waiting here, not in page code,
+    // is what lets every SDK user stay oblivious to that race.
+    pageGlobal =
+      (await whenTagReady({
+        win,
+        timeoutMs:
+          typeof options.tagWaitMs === "number" ? options.tagWaitMs : 3000
+      })) ?? undefined;
+  }
   const serverUrl = options.serverUrl ?? pageGlobal?.serverUrl;
   if (!serverUrl) {
     throw new Error(

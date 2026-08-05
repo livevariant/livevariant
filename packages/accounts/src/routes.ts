@@ -458,8 +458,11 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
       result.ok
     );
     deps.provider.invalidateDomain(domain);
+    // A completed check that found nothing is a RESULT, not an HTTP
+    // error: 200 with verified:false and the reason, so the dashboard
+    // can say what to do next instead of "request failed".
     if (!result.ok) {
-      return c.json({ domain, verified: false, reason: result.reason }, 422);
+      return c.json({ domain, verified: false, reason: result.reason });
     }
     return c.json({ domain, verified: true, method: result.method });
   });

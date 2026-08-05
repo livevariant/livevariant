@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { bootTag } from "./tag.js";
+import { whenTagReady } from "./index.js";
 import { resetDataLayerInterception } from "./ga.js";
 
 /**
@@ -85,5 +86,36 @@ describe("the tag", () => {
     });
     const tag = bootTag(window, script);
     expect(tag?.serverUrl).toBe("https://preset.example");
+  });
+});
+
+describe("whenTagReady", () => {
+  it("returns an already-present global without waiting", async () => {
+    const win = {
+      livevariant: { serverUrl: "https://now.example" }
+    } as unknown as Window;
+    const tag = await whenTagReady({ win, timeoutMs: 1000 });
+    expect(tag?.serverUrl).toBe("https://now.example");
+  });
+
+  it("resolves as soon as the tag's global appears", async () => {
+    const win = {} as Window & {
+      livevariant?: { serverUrl?: string };
+    };
+    const pending = whenTagReady({ win, timeoutMs: 2000, pollMs: 10 });
+    setTimeout(() => {
+      win.livevariant = { serverUrl: "https://late.example" };
+    }, 60);
+    const tag = await pending;
+    expect(tag?.serverUrl).toBe("https://late.example");
+  });
+
+  it("gives up with null once the timeout passes", async () => {
+    const tag = await whenTagReady({
+      win: {} as Window,
+      timeoutMs: 80,
+      pollMs: 10
+    });
+    expect(tag).toBeNull();
   });
 });
