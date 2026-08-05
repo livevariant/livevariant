@@ -94,3 +94,72 @@ describe("cookie boundary", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("the whole sign-in and claim flow, end to end", () => {
+  it("magic link to session to claim to list", async () => {
+    // A second Accounts instance with a recording mailer, same local D1.
+    const links: string[] = [];
+    const d1 = (proxy.env as { LV_ACCOUNTS_DB: D1Database }).LV_ACCOUNTS_DB;
+    const flow = createAccounts({
+      db: d1,
+      baseUrl: DASHBOARD,
+      secret: "b".repeat(48),
+      sendMagicLink: async (_to, url) => {
+        links.push(url);
+      }
+    });
+
+    const send = await flow.routes.request(
+      `${DASHBOARD}/auth/sign-in/magic-link`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: DASHBOARD
+        },
+        body: JSON.stringify({
+          email: "e2e@example.com",
+          callbackURL: `${DASHBOARD}/tests`
+        })
+      }
+    );
+    expect(send.status).toBe(200);
+    expect(links).toHaveLength(1);
+
+    // The link the mail would carry, followed as the browser would.
+    const verifyUrl = new URL(links[0]);
+    const verify = await flow.routes.request(
+      `${DASHBOARD}${verifyUrl.pathname}${verifyUrl.search}`,
+      { headers: { origin: DASHBOARD } }
+    );
+    expect([200, 302]).toContain(verify.status);
+    const setCookie = verify.headers.get("set-cookie");
+    expect(setCookie).toBeTruthy();
+    const cookie = setCookie!
+      .split(",")
+      .map(part => part.split(";")[0].trim())
+      .join("; ");
+
+    // Session-authenticated claim: personal org auto-created on first
+    // write, key bound, list answers.
+    const claim = await flow.routes.request(`${DASHBOARD}/account/keys`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie,
+        origin: DASHBOARD
+      },
+      body: JSON.stringify({ statsSecret: "e2e-flow-secret", label: "e2e" })
+    });
+    expect(claim.status).toBe(201);
+    const claimed = (await claim.json()) as { kh: string; orgId: string };
+    expect(claimed.kh).toMatch(/^[0-9a-f]{64}$/);
+
+    const list = await flow.routes.request(`${DASHBOARD}/account/keys`, {
+      headers: { cookie }
+    });
+    expect(list.status).toBe(200);
+    const keys = (await list.json()) as { keys: Array<{ kh: string }> };
+    expect(keys.keys.some(k => k.kh === claimed.kh)).toBe(true);
+  });
+});

@@ -15,3 +15,8 @@ LV_UNLISTED_DESTINATIONS=
 # When set, the tools API (/api/v1) and /mcp require this Bearer token.
 # Generate one with: openssl rand -hex 32. Unset keeps them open.
 LV_API_TOKEN=
+
+# Local accounts (npm run dev:worker uses the hosted entry with a local
+# D1). Any long random string works; without LV_RESEND_API_KEY the magic
+# sign-in link is printed to the wrangler terminal instead of emailed.
+LV_AUTH_SECRET=

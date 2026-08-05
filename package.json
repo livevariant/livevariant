@@ -18,12 +18,13 @@
     "generate": "node scripts/generate-agent-assets.mjs",
     "release": "node scripts/release.mjs",
     "release:dry": "node scripts/release.mjs --dry-run",
-    "dev:worker": "wrangler dev",
+    "dev": "nx run-many -t dev",
+    "dev:worker": "wrangler dev --env dev",
     "deploy": "wrangler deploy --env=\"\"",
     "deploy:livevariant": "wrangler deploy --env production",
     "versions:livevariant": "wrangler versions upload --env production",
     "migrate:livevariant": "wrangler d1 migrations apply livevariant-accounts --env production --remote",
-    "migrate:local": "wrangler d1 migrations apply livevariant-accounts --env production --local"
+    "migrate:local": "wrangler d1 migrations apply livevariant-accounts --env dev --local"
   },
   "lint-staged": {
     "*": "prettier --ignore-unknown --write"

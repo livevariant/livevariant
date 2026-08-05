@@ -166,6 +166,10 @@ npm test                   # all, incl. Playwright browser tests (sdk, web)
 npm run test:no-browser    # CI-safe subset
 npm run lint && npm run typecheck
 npm run generate           # regenerate skills/livevariant/SKILL.md + plugins; CI fails on diff
+npm run dev:worker         # wrangler dev, env "dev": hosted entry + local D1 accounts.
+                           # First time: npm run migrate:local, and put a random
+                           # LV_AUTH_SECRET in .dev.vars. Without a Resend key the
+                           # magic sign-in link prints to this terminal.
 npm run release            # lockstep versioning: ALL five npm packages, one version, every release
 ```
 

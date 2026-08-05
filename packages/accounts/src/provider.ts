@@ -59,7 +59,8 @@ class TtlCache<V> {
 export class RegistryProvider implements AccountsProvider, TrustPolicy {
   private keyPolicies = new TtlCache<KeyPolicy | null>();
   private testOrgs = new TtlCache<string | null>();
-  private verifiedDomains = new TtlCache<boolean>();
+  /** domain -> verifying orgId, or null when nobody has verified it. */
+  private verifiedDomains = new TtlCache<string | null>();
 
   constructor(
     private db: Db,
@@ -129,22 +130,18 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
 
   /**
    * Trust policy over the registry: a destination is quietly allowed
-   * only when its domain (or a parent) is verified by the org owning
-   * the test; everything else external gets the continue screen. Never
-   * `false`: verification removes friction, it never adds denial.
+   * when its domain (or a parent) is verified by ANY org, because the
+   * continue screen protects visitors from disguised destinations, and
+   * a verified domain leads to the genuine site whoever authored the
+   * test. Deliberately not scoped to the test's owner: scoping would
+   * add no security (an attacker can claim their own test's key), and
+   * it would keep the screen on every test built before the domain was
+   * verified. Everything else external gets the screen; never `false`,
+   * so verification removes friction and never adds denial.
    */
-  async isDomainAllowedForRedirect(
-    domain: string,
-    ctx: { testId: string; statsKeyHash?: string }
-  ): Promise<RedirectVerdict> {
-    const owner = await this.ownerOrg(ctx);
-    if (!owner) {
-      return "interstitial";
-    }
-    const host = domain.toLowerCase();
-    const candidates = parentDomains(host);
-    for (const candidate of candidates) {
-      if (await this.domainVerifiedBy(candidate, owner)) {
+  async isDomainAllowedForRedirect(domain: string): Promise<RedirectVerdict> {
+    for (const candidate of parentDomains(domain.toLowerCase())) {
+      if ((await this.domainOwner(candidate)) !== null) {
         return true;
       }
     }
@@ -203,7 +200,7 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
         return;
       }
       for (const candidate of parentDomains(host)) {
-        if (await this.domainVerifiedBy(candidate, orgId)) {
+        if ((await this.domainOwner(candidate)) === orgId) {
           await registerTest(this.db, {
             testId: input.testId,
             orgId,
@@ -229,52 +226,30 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
     this.testOrgs.delete(testId);
   }
 
-  invalidateDomain(orgId: string, domain: string): void {
-    // Entries are keyed "orgId|domain" (domainVerifiedBy); a bare-domain
-    // delete would silently never match.
+  invalidateDomain(domain: string): void {
     for (const candidate of parentDomains(domain.toLowerCase())) {
-      this.verifiedDomains.delete(`${orgId}|${candidate}`);
+      this.verifiedDomains.delete(candidate);
     }
   }
 
-  private async ownerOrg(ctx: {
-    testId: string;
-    statsKeyHash?: string;
-  }): Promise<string | null> {
-    if (ctx.statsKeyHash) {
-      const policy = await this.keyPolicy(ctx.statsKeyHash);
-      if (policy) {
-        return policy.orgId;
-      }
-    }
-    return this.testOrg(ctx.testId);
-  }
-
-  private async domainVerifiedBy(
-    domain: string,
-    orgId: string
-  ): Promise<boolean> {
-    const cacheKey = `${orgId}|${domain}`;
-    const cached = this.verifiedDomains.get(cacheKey);
+  /** The org that VERIFIED a domain, or null. One cached read serves
+   * both the global redirect verdict and org-scoped registration. */
+  private async domainOwner(domain: string): Promise<string | null> {
+    const cached = this.verifiedDomains.get(domain);
     if (cached !== undefined) {
       return cached;
     }
-    let verified: boolean;
+    let owner: string | null;
     try {
       const row = await this.db.query.domains.findFirst({
         where: eq(domains.domain, domain)
       });
-      verified =
-        row !== undefined && row.orgId === orgId && row.verifiedAt !== null;
+      owner = row !== undefined && row.verifiedAt !== null ? row.orgId : null;
     } catch {
-      return false;
+      return null;
     }
-    this.verifiedDomains.set(
-      cacheKey,
-      verified,
-      verified ? TTL_MS : NEGATIVE_TTL_MS
-    );
-    return verified;
+    this.verifiedDomains.set(domain, owner, owner ? TTL_MS : NEGATIVE_TTL_MS);
+    return owner;
   }
 }
 

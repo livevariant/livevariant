@@ -301,22 +301,17 @@ describe("SDK first-sight registration", () => {
   });
 
   it("makes the redirect verdict true for a verified destination", async () => {
-    const { domain, pk, provider } = await providerWithVerifiedDomain();
-    const testId = `sdk-v-${seq}`.padEnd(64, "a");
-    await provider.registerFromSdk({
-      testId,
-      encoded: "enc",
-      publishableKey: pk.key,
-      origin: `https://${domain}`
-    });
-    provider.invalidateTest(testId);
-    const ctx = { testId, requestUrl: "https://serve.test/s/x" };
-    expect(
-      await provider.isDomainAllowedForRedirect(`shop.${domain}`, ctx)
-    ).toBe(true);
-    expect(
-      await provider.isDomainAllowedForRedirect("elsewhere.example", ctx)
-    ).toBe("interstitial");
+    const { domain, provider } = await providerWithVerifiedDomain();
+    // Global on purpose: the screen protects visitors from disguised
+    // destinations, so ANY test redirecting to a verified domain skips
+    // it, including tests built before verification and never claimed.
+    expect(await provider.isDomainAllowedForRedirect(`shop.${domain}`)).toBe(
+      true
+    );
+    expect(await provider.isDomainAllowedForRedirect(domain)).toBe(true);
+    expect(await provider.isDomainAllowedForRedirect("elsewhere.example")).toBe(
+      "interstitial"
+    );
   });
 });
 
@@ -333,21 +328,14 @@ describe("cache invalidation after verification", () => {
       token: "tok",
       method: "dns-txt"
     });
-    const kh = freshKh();
-    await claimKey(db, { kh, ...org });
-    const ctx = {
-      testId: "x".repeat(64),
-      statsKeyHash: kh,
-      requestUrl: "https://serve.test/s/x"
-    };
     // Prime the negative cache, then verify and invalidate: the verdict
     // must flip now, not after the TTL.
-    expect(await provider.isDomainAllowedForRedirect(domain, ctx)).toBe(
+    expect(await provider.isDomainAllowedForRedirect(domain)).toBe(
       "interstitial"
     );
     await markDomainVerified(db, org.orgId, domain, "dns-txt", true);
-    provider.invalidateDomain(org.orgId, domain);
-    expect(await provider.isDomainAllowedForRedirect(domain, ctx)).toBe(true);
+    provider.invalidateDomain(domain);
+    expect(await provider.isDomainAllowedForRedirect(domain)).toBe(true);
   });
 
   it("stores NULL, not empty string, for a missing SDK config", async () => {

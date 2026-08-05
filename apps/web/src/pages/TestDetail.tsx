@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { Bookmark, Check, Copy, RefreshCw, UserPlus } from "lucide-react";
 import { buildTestUrls } from "@livevariant/core";
@@ -83,15 +83,58 @@ function CopyField({ label, value }: { label: string; value: string }) {
  */
 function AccountCard({
   test,
-  onSaved
+  onSaved,
+  autoClaim
 }: {
   test: ResolvedTest;
   onSaved: () => void;
+  /** Landing on a manage URL while signed in claims without a click. */
+  autoClaim: boolean;
 }) {
   const account = useAccount();
   const [claiming, setClaiming] = useState(false);
   const [claimed, setClaimed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const attempted = useRef(false);
+
+  const claim = useCallback(() => {
+    if (!test.statsSecret) {
+      return;
+    }
+    setClaiming(true);
+    setError(null);
+    claimAndRegister({
+      statsSecret: test.statsSecret,
+      encoded: test.encoded,
+      name: test.name
+    })
+      .then(() => {
+        setClaimed(true);
+        onSaved();
+      })
+      .catch(err => {
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => setClaiming(false));
+  }, [test.statsSecret, test.encoded, test.name, onSaved]);
+
+  // Opening a manage link IS the claim gesture when a session exists:
+  // whoever holds the secret already has full authority, so asking for
+  // a second click would only lose tests between "made" and "kept".
+  useEffect(() => {
+    if (
+      autoClaim &&
+      account.ready &&
+      account.available &&
+      account.me &&
+      test.statsSecret &&
+      !attempted.current
+    ) {
+      attempted.current = true;
+      claim();
+    }
+  }, [autoClaim, account.ready, account.available, account.me, test, claim]);
+
   if (!account.ready || !account.available || !test.statsSecret) {
     return null;
   }
@@ -112,27 +155,12 @@ function AccountCard({
               <Check className="mr-1 inline size-4" /> Saved to your account.
               Find it under <Link to="/tests">My tests</Link>.
             </p>
+          ) : claiming ? (
+            <p className="text-muted-foreground text-sm">
+              Saving to your account…
+            </p>
           ) : (
-            <Button
-              disabled={claiming}
-              onClick={() => {
-                setClaiming(true);
-                setError(null);
-                claimAndRegister({
-                  statsSecret: test.statsSecret!,
-                  encoded: test.encoded,
-                  name: test.name
-                })
-                  .then(() => {
-                    setClaimed(true);
-                    onSaved();
-                  })
-                  .catch(err => {
-                    setError(err instanceof Error ? err.message : String(err));
-                  })
-                  .finally(() => setClaiming(false));
-              }}
-            >
+            <Button disabled={claiming} onClick={claim}>
               <UserPlus /> Add to my account
             </Button>
           )
@@ -340,7 +368,11 @@ element.textContent = test.variant.text;`;
         )}
       </Card>
 
-      <AccountCard test={test} onSaved={save} />
+      <AccountCard
+        test={test}
+        onSaved={save}
+        autoClaim={params.encoded !== undefined}
+      />
 
       <Card>
         <CardHeader>

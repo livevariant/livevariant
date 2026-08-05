@@ -40,12 +40,7 @@ export default {
     let app = apps.get(env);
     if (!app) {
       const options = baseAppOptions(env);
-      if (
-        env.LV_ACCOUNTS_DB &&
-        env.LV_AUTH_SECRET &&
-        env.LV_APP_URL &&
-        env.LV_RESEND_API_KEY
-      ) {
+      if (env.LV_ACCOUNTS_DB && env.LV_AUTH_SECRET && env.LV_APP_URL) {
         const accounts = createAccounts({
           db: env.LV_ACCOUNTS_DB,
           baseUrl: env.LV_APP_URL,
@@ -57,11 +52,19 @@ export default {
                   clientSecret: env.LV_GOOGLE_CLIENT_SECRET
                 }
               : undefined,
-          sendMagicLink: resendMagicLink({
-            apiKey: env.LV_RESEND_API_KEY,
-            from:
-              env.LV_EMAIL_FROM ?? "LiveVariant <login@mail.livevariant.com>"
-          })
+          // Without a Resend key the link goes to the worker log, which
+          // is the local dev loop (wrangler dev prints it); production
+          // sets the key so links actually arrive.
+          sendMagicLink: env.LV_RESEND_API_KEY
+            ? resendMagicLink({
+                apiKey: env.LV_RESEND_API_KEY,
+                from:
+                  env.LV_EMAIL_FROM ??
+                  "LiveVariant <login@mail.livevariant.com>"
+              })
+            : async (to, url) => {
+                console.log(`[livevariant] magic link for ${to}: ${url}`);
+              }
         });
         options.accounts = accounts.routes;
         options.provider = accounts.provider;

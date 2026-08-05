@@ -1572,3 +1572,169 @@ describe("SDK origin gate", () => {
     expect(res.headers.get("access-control-allow-origin")).toBeNull();
   });
 });
+
+describe("lockReads and org sessions on /stats", () => {
+  function providerFor(
+    policies: Record<string, { orgId: string; lockReads: boolean }>,
+    testOrgs: Record<string, string> = {}
+  ) {
+    return {
+      sessionOrgIds: async (req: Request) => {
+        const cookie = req.headers.get("cookie") ?? "";
+        return cookie.includes("session=owner")
+          ? ["org-1"]
+          : cookie.includes("session=stranger")
+            ? ["org-2"]
+            : [];
+      },
+      keyPolicy: async (kh: string) => policies[kh] ?? null,
+      testOrg: async (testId: string) => testOrgs[testId] ?? null,
+      listTests: async () => ({ tests: [], nextCursor: null })
+    };
+  }
+
+  it("keeps unclaimed keys byte-for-byte classic", async () => {
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider: providerFor({})
+    });
+    const { encoded } = await makeTest();
+    const ok = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect(ok.status).toBe(200);
+    const wrong = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: "Bearer nope" }
+    });
+    expect(wrong.status).toBe(401);
+  });
+
+  it("locked keys refuse the bearer secret with the same 401 as a wrong one", async () => {
+    const kh = await hashStatsSecret(SECRET);
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider: providerFor({ [kh]: { orgId: "org-1", lockReads: true } })
+    });
+    const { encoded } = await makeTest();
+    const bearer = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect(bearer.status).toBe(401);
+    const wrong = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: "Bearer nope" }
+    });
+    // Indistinguishable bodies: a locked key must not be an oracle.
+    expect(await bearer.text()).toBe(await wrong.text());
+    // The owning org's session reads without any secret at all.
+    const session = await app.request(`/stats/${encoded}`, {
+      headers: { cookie: "session=owner" }
+    });
+    expect(session.status).toBe(200);
+    // A different org's session does not.
+    const stranger = await app.request(`/stats/${encoded}`, {
+      headers: { cookie: "session=stranger" }
+    });
+    expect(stranger.status).toBe(401);
+  });
+
+  it("claimed-but-unlocked keys accept both the secret and the session", async () => {
+    const kh = await hashStatsSecret(SECRET);
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider: providerFor({ [kh]: { orgId: "org-1", lockReads: false } })
+    });
+    const { encoded } = await makeTest();
+    expect(
+      (
+        await app.request(`/stats/${encoded}`, {
+          headers: { authorization: `Bearer ${SECRET}` }
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await app.request(`/stats/${encoded}`, {
+          headers: { cookie: "session=owner" }
+        })
+      ).status
+    ).toBe(200);
+  });
+
+  it("keyless registered tests read via the owning org only", async () => {
+    const { encoded, testId } = await makeTest({
+      statsKeyHash: undefined
+    } as any);
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider: providerFor({}, { [testId]: "org-1" })
+    });
+    expect(
+      (
+        await app.request(`/stats/${encoded}`, {
+          headers: { cookie: "session=owner" }
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await app.request(`/stats/${encoded}`, {
+          headers: { cookie: "session=stranger" }
+        })
+      ).status
+    ).toBe(401);
+    expect((await app.request(`/stats/${encoded}`)).status).toBe(401);
+  });
+});
+
+describe("publishable-key registration on /choose", () => {
+  it("hands the pair to the provider off the response path", async () => {
+    const calls: unknown[] = [];
+    const provider = {
+      sessionOrgIds: async () => [],
+      keyPolicy: async () => null,
+      testOrg: async () => null,
+      listTests: async () => ({ tests: [], nextCursor: null }),
+      registerFromSdk: async (input: unknown) => {
+        calls.push(input);
+      }
+    };
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider
+    });
+    const { encoded, testId } = await makeTest();
+    const params = paramsFromConfig(await decodeConfig(encoded));
+    const res = await app.request("/choose", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://shop.example"
+      },
+      body: JSON.stringify({
+        testId,
+        slotSizes: params.slotSizes,
+        dim: params.dim,
+        idHash: hex("v1"),
+        publishableKey: `pk_${"a".repeat(24)}`,
+        encoded
+      })
+    });
+    expect(res.status).toBe(200);
+    // Node has no waitUntil; the registration promise runs unanchored.
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(calls).toEqual([
+      {
+        testId,
+        encoded,
+        region: undefined,
+        publishableKey: `pk_${"a".repeat(24)}`,
+        origin: "https://shop.example"
+      }
+    ]);
+  });
+});
