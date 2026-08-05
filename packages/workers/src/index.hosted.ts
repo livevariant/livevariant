@@ -10,7 +10,7 @@
  * it just behaves exactly like the base entry.
  */
 import { createApp } from "@livevariant/server";
-import { createAccounts, resendMagicLink } from "@livevariant/accounts";
+import { createAccounts, resendMailer } from "@livevariant/accounts";
 import { baseAppOptions, type Env } from "./index.js";
 
 // wrangler resolves Durable Object class names against the entry
@@ -103,20 +103,21 @@ export default {
                   env.LV_CF_BROWSER_TOKEN
                 )
               : undefined,
-          // Without a Resend key the link goes to the worker log, which
+          // Without a Resend key the mail goes to the worker log, which
           // is the local dev loop (wrangler dev prints it); production
-          // sets the key so links actually arrive.
-          sendMagicLink: env.LV_RESEND_API_KEY
-            ? resendMagicLink({
+          // sets the key so email actually arrives.
+          sendEmail: env.LV_RESEND_API_KEY
+            ? resendMailer({
                 apiKey: env.LV_RESEND_API_KEY,
                 from:
                   env.LV_EMAIL_FROM ??
                   "LiveVariant <login@mail.livevariant.com>"
               })
-            : async (to, url) => {
+            : async email => {
                 console.log(
                   `\n========================================\n` +
-                    `[livevariant] magic sign-in link for ${to}\n${url}\n` +
+                    `[livevariant] ${email.subject} (${email.to})\n` +
+                    `${email.text}\n` +
                     `========================================\n`
                 );
               }

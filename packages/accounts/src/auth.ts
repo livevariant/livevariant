@@ -16,7 +16,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink, organization } from "better-auth/plugins";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema.js";
-import type { SendMagicLink } from "./email.js";
+import { magicLinkEmail, verificationEmail, type SendEmail } from "./email.js";
 import type { RenderPage } from "./domains.js";
 
 export interface AccountsConfig {
@@ -29,7 +29,8 @@ export interface AccountsConfig {
   baseUrl: string;
   /** Signing secret for sessions and tokens (LV_AUTH_SECRET). */
   secret: string;
-  sendMagicLink: SendMagicLink;
+  /** Delivers magic links and verification emails (Resend in prod). */
+  sendEmail: SendEmail;
   /**
    * JS-rendered page fetch for domain verification (Cloudflare Browser
    * Rendering on the hosted deployment). Optional: without it, only
@@ -56,7 +57,17 @@ export function createAuth(config: AccountsConfig, db: Db) {
     trustedOrigins: [config.baseUrl],
     // Password AND magic link: the password pair is the register/sign-in
     // people expect, the link stays as the no-password alternative.
-    emailAndPassword: { enabled: true },
+    // Registration is not done until the address is verified: sign-up
+    // sends the verification email and sign-in refuses until the link
+    // is clicked. A magic-link sign-in verifies inherently.
+    emailAndPassword: { enabled: true, requireEmailVerification: true },
+    emailVerification: {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: true,
+      sendVerificationEmail: async ({ user, url }) => {
+        await config.sendEmail(verificationEmail(user.email, url));
+      }
+    },
     session: {
       cookieCache: {
         // Signed cookie carries the session for this long between
@@ -75,7 +86,7 @@ export function createAuth(config: AccountsConfig, db: Db) {
     plugins: [
       magicLink({
         sendMagicLink: async ({ email, url }) => {
-          await config.sendMagicLink(email, url);
+          await config.sendEmail(magicLinkEmail(email, url));
         }
       }),
       organization()

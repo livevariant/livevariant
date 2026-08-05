@@ -44,6 +44,6 @@ export function createAccounts(config: AccountsConfig): Accounts {
   return { routes, provider };
 }
 
-export { resendMagicLink } from "./email.js";
+export { resendMailer, type OutgoingEmail, type SendEmail } from "./email.js";
 export type { AccountsConfig } from "./auth.js";
 export { RegistryProvider } from "./provider.js";

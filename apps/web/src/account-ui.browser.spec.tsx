@@ -260,16 +260,13 @@ describe("the login page", () => {
     expect(calls).toContain("POST /auth/sign-in/email");
   });
 
-  it("registers through the toggle", async () => {
+  it("registers through the toggle and lands on the verify notice", async () => {
     const calls: string[] = [];
     stubServer(
       {
         "/account/me": () =>
           Response.json({ error: "sign in required" }, { status: 401 }),
-        "/auth/sign-up/email": () =>
-          // A failing answer on purpose: success would navigate the
-          // whole test page away. The POST itself is the assertion.
-          Response.json({ error: "email taken" }, { status: 422 })
+        "/auth/sign-up/email": () => Response.json({ user: { id: "u1" } })
       },
       calls
     );
@@ -286,7 +283,10 @@ describe("the login page", () => {
     [...container.querySelectorAll("button")]
       .find(button => button.textContent?.trim() === "Create account")!
       .click();
-    await until(() => container.textContent?.includes("email taken") ?? false);
+    // No redirect: registration finishes in the inbox.
+    await until(
+      () => container.textContent?.includes("verification link") ?? false
+    );
     expect(calls).toContain("POST /auth/sign-up/email");
   });
 });

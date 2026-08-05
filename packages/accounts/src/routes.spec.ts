@@ -42,7 +42,7 @@ beforeAll(async () => {
     db: d1,
     baseUrl: DASHBOARD,
     secret: "a".repeat(48),
-    sendMagicLink: async () => undefined
+    sendEmail: async () => undefined
   });
 });
 
@@ -104,8 +104,11 @@ describe("the whole sign-in and claim flow, end to end", () => {
       db: d1,
       baseUrl: DASHBOARD,
       secret: "b".repeat(48),
-      sendMagicLink: async (_to, url) => {
-        links.push(url);
+      sendEmail: async email => {
+        const url = email.text.match(/https?:\/\/\S+/)?.[0];
+        if (url) {
+          links.push(url);
+        }
       }
     });
 
@@ -165,13 +168,16 @@ describe("the whole sign-in and claim flow, end to end", () => {
 });
 
 describe("password register and sign-in, end to end", () => {
-  it("registers, signs in on a fresh client, claims", async () => {
+  it("registers, verifies the email, signs in, claims", async () => {
     const d1 = (proxy.env as { LV_ACCOUNTS_DB: D1Database }).LV_ACCOUNTS_DB;
+    const emails: Array<{ subject: string; text: string }> = [];
     const flow = createAccounts({
       db: d1,
       baseUrl: DASHBOARD,
       secret: "c".repeat(48),
-      sendMagicLink: async () => undefined
+      sendEmail: async email => {
+        emails.push(email);
+      }
     });
     const register = await flow.routes.request(
       `${DASHBOARD}/auth/sign-up/email`,
@@ -186,6 +192,28 @@ describe("password register and sign-in, end to end", () => {
       }
     );
     expect(register.status).toBe(200);
+    // Registration is not done until the address is proven: the
+    // verification email went out, and sign-in refuses until its link
+    // is followed.
+    expect(emails.map(e => e.subject).join()).toContain("Verify");
+    const early = await flow.routes.request(`${DASHBOARD}/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: DASHBOARD },
+      body: JSON.stringify({
+        email: "pw@example.com",
+        password: "correct-horse-battery"
+      })
+    });
+    expect(early.status).toBe(403);
+    const verifyUrl = emails
+      .map(e => e.text.match(/https?:\/\/\S+/)?.[0])
+      .find(Boolean)!;
+    const parsed = new URL(verifyUrl);
+    const verify = await flow.routes.request(
+      `${DASHBOARD}${parsed.pathname}${parsed.search}`,
+      { headers: { origin: DASHBOARD } }
+    );
+    expect([200, 302]).toContain(verify.status);
 
     // A fresh sign-in, as a new browser would: no cookies carried over.
     const signIn = await flow.routes.request(
