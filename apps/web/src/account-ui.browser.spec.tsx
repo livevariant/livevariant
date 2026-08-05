@@ -8,6 +8,7 @@ import {
   hashStatsSecret
 } from "@livevariant/core";
 import { AppLayout } from "./App";
+import { AcceptInvitation } from "./pages/AcceptInvitation";
 import { OrgSwitcher } from "./components/OrgSwitcher";
 import { Login } from "./pages/Login";
 import { Settings } from "./pages/Settings";
@@ -90,7 +91,8 @@ function render(path: string) {
           { path: "/tests/:testId", element: <TestDetail /> },
           { path: "/manage/:encoded", element: <TestDetail /> },
           { path: "/login", element: <Login /> },
-          { path: "/settings", element: <Settings /> }
+          { path: "/settings", element: <Settings /> },
+          { path: "/accept-invitation/:id", element: <AcceptInvitation /> }
         ]
       }
     ],
@@ -532,5 +534,48 @@ describe("the magic-link alternative", () => {
       () => container.textContent?.includes("Check your inbox") ?? false
     );
     expect(calls).toContain("POST /auth/sign-in/magic-link");
+  });
+});
+
+describe("accepting an invitation", () => {
+  it("never paints 'not found' over a join that succeeded", async () => {
+    // The consumed-invitation trap: after acceptance the invitation no
+    // longer loads, and a loader refire used to surface that as an
+    // error next to the success message.
+    let acceptedOnServer = false;
+    stubServer({
+      "/account/me": () =>
+        Response.json({
+          userId: "u1",
+          activeOrgId: "org-1",
+          orgs: [{ id: "org-1", name: "Personal" }]
+        }),
+      "/auth/organization/get-invitation": () =>
+        acceptedOnServer
+          ? Response.json({ message: "Invitation not found" }, { status: 404 })
+          : Response.json({
+              id: "inv-1",
+              email: "u1@example.com",
+              role: "member",
+              organizationId: "org-2",
+              organizationName: "Agency",
+              status: "pending"
+            }),
+      "/auth/organization/accept-invitation": () => {
+        acceptedOnServer = true;
+        return Response.json({ ok: true });
+      },
+      "/auth/organization/set-active": () => Response.json({ ok: true })
+    });
+    const container = render("/accept-invitation/inv-1");
+    await until(() => container.textContent?.includes("Join Agency") ?? false);
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.includes("Join Agency"))!
+      .click();
+    await until(() => container.textContent?.includes("You joined") ?? false);
+    // Give any stray refetch time to land before asserting its absence.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(container.textContent).not.toContain("not found");
+    expect(container.textContent).not.toContain("could not be loaded");
   });
 });

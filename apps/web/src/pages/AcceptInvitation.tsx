@@ -31,8 +31,13 @@ export function AcceptInvitation() {
   const [accepted, setAccepted] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // Depends on the userId PRIMITIVE, not the account.me object: refresh()
+  // recreates the object, and an object dependency made this loader
+  // refire after acceptance, refetching the consumed invitation and
+  // painting "not found" over a join that had just succeeded.
+  const userId = account.me?.userId ?? null;
   useEffect(() => {
-    if (!id || !account.ready || !account.available || !account.me) {
+    if (!id || !account.ready || !account.available || !userId || accepted) {
       return;
     }
     let live = true;
@@ -50,7 +55,7 @@ export function AcceptInvitation() {
     return () => {
       live = false;
     };
-  }, [id, account.ready, account.available, account.me]);
+  }, [id, account.ready, account.available, userId, accepted]);
 
   if (!account.ready) {
     return null;
