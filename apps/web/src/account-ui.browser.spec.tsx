@@ -13,6 +13,7 @@ import { Login } from "./pages/Login";
 import { Settings } from "./pages/Settings";
 import { TestDetail } from "./pages/TestDetail";
 import { saveTest } from "./lib/tests-store";
+import { fetchDeploymentConfig } from "./lib/serve-url";
 
 /**
  * The account UI in a real browser: these flows silently hid themselves
@@ -424,5 +425,58 @@ describe("the org switcher", () => {
     expect(
       container.querySelector('select[aria-label="Switch organization"]')
     ).toBeNull();
+  });
+});
+
+describe("google tag manager", () => {
+  afterEach(() => {
+    document.getElementById("lv-gtm")?.remove();
+    delete (window as { dataLayer?: unknown }).dataLayer;
+  });
+
+  it("injects the container the deployment names, exactly once", async () => {
+    stubServer({
+      "/config": () =>
+        Response.json({
+          serveUrl: "https://serve.example",
+          region: null,
+          gtmId: "GTM-TEST123"
+        })
+    });
+    render("/");
+    await until(() => document.getElementById("lv-gtm") !== null);
+    const script = document.getElementById("lv-gtm") as HTMLScriptElement;
+    expect(script.src).toContain("googletagmanager.com/gtm.js?id=GTM-TEST123");
+    const dataLayer = (window as { dataLayer?: unknown[] }).dataLayer ?? [];
+    expect(
+      dataLayer.some(entry => (entry as { event?: string }).event === "gtm.js")
+    ).toBe(true);
+  });
+
+  it("rejects a lowercase id (container ids are uppercase, strictly)", async () => {
+    stubServer({
+      "/config": () =>
+        Response.json({
+          serveUrl: "https://serve.example",
+          region: null,
+          gtmId: "gtm-lower99"
+        })
+    });
+    const config = await fetchDeploymentConfig();
+    expect(config.gtmId).toBeNull();
+  });
+
+  it("injects nothing without a container, or for a malformed one", async () => {
+    stubServer({
+      "/config": () =>
+        Response.json({
+          serveUrl: "https://serve.example",
+          region: null,
+          gtmId: "https://evil.example/x.js"
+        })
+    });
+    render("/");
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(document.getElementById("lv-gtm")).toBeNull();
   });
 });

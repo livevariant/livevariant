@@ -13,12 +13,18 @@ export interface DeploymentConfig {
   serveUrl: string;
   /** The creator's own region, as the deployment saw this request. */
   region: string | null;
+  /** GTM container id when the deployment enables it; null otherwise. */
+  gtmId: string | null;
 }
 
 export async function fetchDeploymentConfig(
   fetchImpl: typeof fetch = fetch
 ): Promise<DeploymentConfig> {
-  const fallback = { serveUrl: window.location.origin, region: null };
+  const fallback = {
+    serveUrl: window.location.origin,
+    region: null,
+    gtmId: null
+  };
   try {
     const res = await fetchImpl("/config");
     if (!res.ok) {
@@ -27,12 +33,19 @@ export async function fetchDeploymentConfig(
     const body: unknown = await res.json();
     const serveUrl = (body as { serveUrl?: unknown }).serveUrl;
     const region = (body as { region?: unknown }).region;
+    const gtmId = (body as { gtmId?: unknown }).gtmId;
     return {
       serveUrl:
         typeof serveUrl === "string" && serveUrl.length > 0
           ? serveUrl.replace(/\/+$/, "")
           : fallback.serveUrl,
-      region: typeof region === "string" ? region : null
+      region: typeof region === "string" ? region : null,
+      // Shape-checked here so a compromised or garbled /config can only
+      // ever name a container, never a script URL.
+      gtmId:
+        typeof gtmId === "string" && /^GTM-[A-Z0-9]+$/.test(gtmId)
+          ? gtmId
+          : null
     };
   } catch {
     // An older deployment, or offline. Serving from where we are loaded is
@@ -54,7 +67,8 @@ export function useServeUrl(): string {
 export function useDeploymentConfig(): DeploymentConfig {
   const [config, setConfig] = useState<DeploymentConfig>(() => ({
     serveUrl: window.location.origin,
-    region: null
+    region: null,
+    gtmId: null
   }));
   useEffect(() => {
     let live = true;

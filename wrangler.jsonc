@@ -41,7 +41,8 @@
     "LV_SERVE_URL": "",
     "LV_ALLOWED_DESTINATIONS": "",
     "LV_ALLOWED_ORIGINS": "",
-    "LV_UNLISTED_DESTINATIONS": ""
+    "LV_UNLISTED_DESTINATIONS": "",
+    "LV_GOOGLE_TAG_MANAGER": ""
   },
   // Deliberately no routes here. This is the config a
   // stranger gets when they deploy their own copy, and it has to work on
@@ -129,6 +130,7 @@
         "LV_ALLOWED_DESTINATIONS": "",
         "LV_ALLOWED_ORIGINS": "",
         "LV_UNLISTED_DESTINATIONS": "",
+        "LV_GOOGLE_TAG_MANAGER": "",
         // The vite origin: the dashboard is developed through its proxy,
         // so cookies, CORS and magic-link callbacks all key off it.
         "LV_APP_URL": "http://localhost:5173"
@@ -197,7 +199,11 @@
         // Our account id is not a secret; the Browser Rendering token is
         // (wrangler secret put LV_CF_BROWSER_TOKEN --env production).
         // Both present = tag-manager SDK installs verify domains too.
-        "LV_CF_ACCOUNT_ID": "7f5af4cd929693e6a93795847de63fbe"
+        "LV_CF_ACCOUNT_ID": "7f5af4cd929693e6a93795847de63fbe",
+        // Fill with the GTM-XXXXXXX container id to load Google Tag
+        // Manager on the dashboard pages (served via /config, injected
+        // by the SPA). Empty = no GTM.
+        "LV_GOOGLE_TAG_MANAGER": ""
       },
       "routes": [
         { "pattern": "livevariant.link/*", "zone_name": "livevariant.link" },

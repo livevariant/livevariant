@@ -117,7 +117,8 @@ describe("the tool API", () => {
     const config = await blank.request("https://ab.internal/config");
     expect(await config.json()).toEqual({
       serveUrl: "https://ab.internal",
-      region: null
+      region: null,
+      gtmId: null
     });
   });
 
@@ -129,7 +130,8 @@ describe("the tool API", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       serveUrl: "https://ab.internal",
-      region: null
+      region: null,
+      gtmId: null
     });
 
     const split = createApp({
@@ -140,7 +142,8 @@ describe("the tool API", () => {
     const res2 = await split.request("https://livevariant.com/config");
     expect(await res2.json()).toEqual({
       serveUrl: "https://livevariant.link",
-      region: null
+      region: null,
+      gtmId: null
     });
   });
 
@@ -302,5 +305,23 @@ describe("account-scoped tools with a provider", () => {
     expect(signed.status).toBe(200);
     const body = (await signed.json()) as { tests: Array<{ name: string }> };
     expect(body.tests[0].name).toBe("claimed test");
+  });
+});
+
+describe("GTM through /config", () => {
+  it("names the container when configured, null otherwise", async () => {
+    const withGtm = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      gtmId: "GTM-ABC1234"
+    });
+    const configured = (await (
+      await withGtm.request("https://x.test/config")
+    ).json()) as { gtmId: string | null };
+    expect(configured.gtmId).toBe("GTM-ABC1234");
+    const bare = (await (
+      await app.request("https://x.test/config")
+    ).json()) as { gtmId: string | null };
+    expect(bare.gtmId).toBeNull();
   });
 });

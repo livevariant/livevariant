@@ -4,6 +4,8 @@ import { LogOut, Moon, Sun, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
 import { signOut, useAccount } from "@/lib/account";
+import { useGoogleTagManager } from "@/lib/gtm";
+import { useDeploymentConfig } from "@/lib/serve-url";
 import { cn } from "@/lib/utils";
 
 type Theme = "dark" | "light";
@@ -56,6 +58,8 @@ function useTheme(): [Theme, () => void] {
 export function AppLayout() {
   const [theme, toggleTheme] = useTheme();
   const account = useAccount();
+  const deployment = useDeploymentConfig();
+  useGoogleTagManager(deployment.gtmId);
   const navClass = ({ isActive }: { isActive: boolean }) =>
     cn(
       "text-sm transition-colors hover:text-foreground",
