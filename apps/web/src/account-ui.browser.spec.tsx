@@ -9,6 +9,7 @@ import {
 } from "@livevariant/core";
 import { AppLayout } from "./App";
 import { Login } from "./pages/Login";
+import { Settings } from "./pages/Settings";
 import { TestDetail } from "./pages/TestDetail";
 import { saveTest } from "./lib/tests-store";
 
@@ -86,7 +87,8 @@ function render(path: string) {
           { path: "/tests", element: <div /> },
           { path: "/tests/:testId", element: <TestDetail /> },
           { path: "/manage/:encoded", element: <TestDetail /> },
-          { path: "/login", element: <Login /> }
+          { path: "/login", element: <Login /> },
+          { path: "/settings", element: <Settings /> }
         ]
       }
     ],
@@ -286,5 +288,30 @@ describe("the login page", () => {
       .click();
     await until(() => container.textContent?.includes("email taken") ?? false);
     expect(calls).toContain("POST /auth/sign-up/email");
+  });
+});
+
+describe("the settings page", () => {
+  it("shows the SDK snippet with the real key and serve origin", async () => {
+    const PK = "pk_uitestkeyabcdefghijklmno";
+    stubServer({
+      "/account/me": () =>
+        Response.json({ userId: "u1", activeOrgId: "org-1", orgs: [] }),
+      "/account/domains": () => Response.json({ domains: [] }),
+      "/account/publishable-keys": () =>
+        Response.json({
+          keys: [{ key: PK, label: null, createdAt: Date.now() }]
+        }),
+      "/config": () =>
+        Response.json({ serveUrl: "https://serve.example", region: null })
+    });
+    const container = render("/settings");
+    await until(() => container.textContent?.includes(PK) ?? false);
+    const snippet = container.querySelector("pre")?.textContent ?? "";
+    expect(snippet).toContain(`publishableKey: "${PK}"`);
+    expect(snippet).toContain('serverUrl: "https://serve.example"');
+    expect(snippet).toContain("@livevariant/sdk");
+    // The zero-setup verification is explained where domains are added.
+    expect(container.textContent).toContain("page source");
   });
 });

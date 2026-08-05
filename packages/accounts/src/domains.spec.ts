@@ -115,3 +115,92 @@ describe("effective TLD guard", () => {
     });
   });
 });
+
+describe("verification by installed SDK", () => {
+  const token = generateVerificationToken();
+  const PK = "pk_abcdefghijklmnopqrstuvwx";
+
+  function noDnsNoFile(page: (url: string) => Response | null) {
+    return (async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("dns-query")) {
+        return new Response(JSON.stringify({ Answer: [] }), {
+          headers: { "content-type": "application/dns-json" }
+        });
+      }
+      if (u.includes("/.well-known/")) {
+        return new Response("nope", { status: 404 });
+      }
+      void init;
+      return page(u) ?? new Response("nope", { status: 404 });
+    }) as typeof fetch;
+  }
+
+  it("verifies when the publishable key sits in the homepage source", async () => {
+    const result = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFile(url =>
+        url === "https://example.com/"
+          ? new Response(
+              `<html><script>createTest({}, {publishableKey: "${PK}"})</script></html>`
+            )
+          : null
+      ),
+      [PK]
+    );
+    expect(result).toEqual({ ok: true, method: "sdk" });
+  });
+
+  it("follows one same-site redirect (apex to www), nothing foreign", async () => {
+    const sameSite = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFile(url => {
+        if (url === "https://example.com/") {
+          return new Response(null, {
+            status: 301,
+            headers: { location: "https://www.example.com/" }
+          });
+        }
+        if (url === "https://www.example.com/") {
+          return new Response(`<script>{publishableKey:"${PK}"}</script>`);
+        }
+        return null;
+      }),
+      [PK]
+    );
+    expect(sameSite.method).toBe("sdk");
+    const foreign = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFile(url =>
+        url === "https://example.com/"
+          ? new Response(null, {
+              status: 301,
+              headers: { location: "https://evil.test/" }
+            })
+          : new Response(`key ${PK} here`)
+      ),
+      [PK]
+    );
+    expect(foreign.ok).toBe(false);
+  });
+
+  it("fails without keys, or when the page lacks the key", async () => {
+    const noKeys = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFile(() => new Response(`whatever ${PK}`)),
+      []
+    );
+    expect(noKeys.ok).toBe(false);
+    const wrongPage = await verifyDomain(
+      "example.com",
+      token,
+      noDnsNoFile(() => new Response("<html>no key here</html>")),
+      [PK]
+    );
+    expect(wrongPage.ok).toBe(false);
+  });
+});

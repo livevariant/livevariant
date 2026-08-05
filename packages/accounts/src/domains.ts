@@ -17,10 +17,12 @@ export const WELL_KNOWN_PATH = "/.well-known/livevariant-verification.txt";
 const DOH_ENDPOINT = "https://cloudflare-dns.com/dns-query";
 const TIMEOUT_MS = 5_000;
 const MAX_BODY_BYTES = 1_024;
+/** Homepage scan cap for SDK detection. */
+const MAX_PAGE_BYTES = 512_000;
 
 export interface VerifyResult {
   ok: boolean;
-  method?: "dns-txt" | "well-known";
+  method?: "dns-txt" | "well-known" | "sdk";
   reason?: string;
 }
 
@@ -112,7 +114,8 @@ export function verificationInstructions(domain: string, token: string) {
 export async function verifyDomain(
   domain: string,
   token: string,
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  publishableKeys: string[] = []
 ): Promise<VerifyResult> {
   const viaDns = await checkDnsTxt(domain, token, fetchImpl);
   if (viaDns) {
@@ -122,12 +125,96 @@ export async function verifyDomain(
   if (viaFile) {
     return { ok: true, method: "well-known" };
   }
+  const viaSdk = await checkSdkInstalled(domain, publishableKeys, fetchImpl);
+  if (viaSdk) {
+    return { ok: true, method: "sdk" };
+  }
   return {
     ok: false,
     reason:
-      `no ${TXT_PREFIX} TXT record and no ${WELL_KNOWN_PATH} file ` +
-      `matched the verification token`
+      `no ${TXT_PREFIX} TXT record, no ${WELL_KNOWN_PATH} file, and no ` +
+      `publishable key found on the homepage. Publish one of the ` +
+      `verification records, or install the SDK with your publishable ` +
+      `key directly in the page source and check again`
   };
+}
+
+/**
+ * The zero-setup path: your publishable key sitting in the homepage's
+ * HTML source proves exactly what the well-known file proves (you can
+ * put content on this domain), so installing the SDK IS the
+ * verification. This is a server-side fetch of the page, deliberately
+ * NOT "we saw SDK traffic claiming this Origin": the Origin header and
+ * the key are both public and forgeable by any non-browser client, so
+ * observed traffic could squat a stranger's domain. A script injected
+ * through a tag manager does not appear in the raw HTML; those setups
+ * use DNS or the well-known file instead.
+ */
+async function checkSdkInstalled(
+  domain: string,
+  publishableKeys: string[],
+  fetchImpl: typeof fetch
+): Promise<boolean> {
+  if (publishableKeys.length === 0) {
+    return false;
+  }
+  try {
+    let url = `https://${domain}/`;
+    // Follow at most one redirect, and only within the same site
+    // (apex to www is routine); anywhere else would let a domain that
+    // merely redirects somewhere attacker-controlled verify.
+    for (let hop = 0; hop < 2; hop++) {
+      const res = await fetchImpl(url, {
+        redirect: "manual",
+        headers: { accept: "text/html" },
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      });
+      if (res.status >= 300 && res.status < 400 && hop === 0) {
+        const location = res.headers.get("location");
+        if (!location) {
+          return false;
+        }
+        const target = new URL(location, url);
+        const sameSite =
+          target.protocol === "https:" &&
+          (target.hostname === domain ||
+            target.hostname === `www.${domain}` ||
+            domain === target.hostname.replace(/^www\./, ""));
+        if (!sameSite) {
+          return false;
+        }
+        url = target.toString();
+        continue;
+      }
+      if (res.status !== 200 || !res.body) {
+        return false;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let received = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        received += decoder.decode(value, { stream: true });
+        if (publishableKeys.some(key => received.includes(key))) {
+          await reader.cancel();
+          return true;
+        }
+        // Homepages are big but keys sit in the first script tags; a
+        // cap keeps a hostile endless stream from pinning the worker.
+        if (received.length > MAX_PAGE_BYTES) {
+          await reader.cancel();
+          return false;
+        }
+      }
+      return publishableKeys.some(key => received.includes(key));
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 async function checkDnsTxt(

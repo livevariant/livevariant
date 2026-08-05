@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAccount } from "@/lib/account";
+import { useServeUrl } from "@/lib/serve-url";
 
 /**
  * Account settings: verified domains (which remove the redirect
@@ -72,6 +73,52 @@ function CopyValue({ value }: { value: string }) {
         {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
       </Button>
     </span>
+  );
+}
+
+function SdkSnippet({ pk }: { pk: string }) {
+  const serveUrl = useServeUrl();
+  const [copied, setCopied] = useState(false);
+  const snippet = `import { createTest } from "@livevariant/sdk";
+
+const test = await createTest(
+  { slots: { headline: ["Ship faster", "Ship safer"] } },
+  {
+    serverUrl: "${serveUrl}",
+    publishableKey: "${pk}"
+  }
+);
+element.textContent = test.slots.headline.text;`;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <p className="text-muted-foreground flex-1 text-xs">
+          Drop this in your page (npm i @livevariant/sdk). Once it is live on
+          your homepage, "Check now" above verifies the domain by finding this
+          key in the page source.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            navigator.clipboard
+              .writeText(snippet)
+              .then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              })
+              .catch(() => {
+                // Denied clipboard must not show a green check.
+              });
+          }}
+        >
+          {copied ? <Check /> : <Copy />} Copy
+        </Button>
+      </div>
+      <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
+        <code>{snippet}</code>
+      </pre>
+    </div>
   );
 }
 
@@ -136,7 +183,8 @@ export function Settings() {
             Verifying a domain proves it is yours: redirects to it skip the
             "Redirecting you to…" screen, and the SDK can register tests served
             from it. Verify with a DNS TXT record, or by serving the well-known
-            file.
+            file, or simply by having the SDK with your publishable key live in
+            the page source.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -235,6 +283,10 @@ export function Settings() {
                     containing{" "}
                     <CopyValue value={row.instructions.wellKnown.body} />
                   </p>
+                  <p>
+                    Or install the SDK with your publishable key (snippet below)
+                    directly in the page source, then Check now.
+                  </p>
                 </div>
               )}
             </div>
@@ -271,24 +323,27 @@ export function Settings() {
             <Plus /> Create key
           </Button>
           {pks.map(row => (
-            <div key={row.key} className="flex items-center gap-2">
-              <CopyValue value={row.key} />
-              <span className="text-muted-foreground flex-1 text-xs">
-                created {new Date(row.createdAt).toLocaleDateString()}
-              </span>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Delete key"
-                onClick={() => {
-                  void fetch(`/account/publishable-keys/${row.key}`, {
-                    method: "DELETE",
-                    credentials: "include"
-                  }).then(() => reload());
-                }}
-              >
-                <Trash2 />
-              </Button>
+            <div key={row.key} className="space-y-3 rounded border p-3">
+              <div className="flex items-center gap-2">
+                <CopyValue value={row.key} />
+                <span className="text-muted-foreground flex-1 text-xs">
+                  created {new Date(row.createdAt).toLocaleDateString()}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Delete key"
+                  onClick={() => {
+                    void fetch(`/account/publishable-keys/${row.key}`, {
+                      method: "DELETE",
+                      credentials: "include"
+                    }).then(() => reload());
+                  }}
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+              <SdkSnippet pk={row.key} />
             </div>
           ))}
         </CardContent>

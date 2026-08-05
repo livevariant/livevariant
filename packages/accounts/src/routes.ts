@@ -435,7 +435,12 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
     if (!row) {
       return c.json({ error: "no such domain in this organization" }, 404);
     }
-    const result = await verifyDomain(domain, row.token);
+    // The org's publishable keys ride along: finding one in the
+    // homepage source is the zero-setup verification method.
+    const keys = (await listPublishableKeys(deps.db, who.orgId)).map(
+      k => k.key
+    );
+    const result = await verifyDomain(domain, row.token, fetch, keys);
     await markDomainVerified(
       deps.db,
       who.orgId,
