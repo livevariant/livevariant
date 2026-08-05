@@ -111,11 +111,21 @@ export function verificationInstructions(domain: string, token: string) {
   };
 }
 
+/**
+ * Renders a page with JavaScript executed and returns its HTML, or null
+ * when rendering is unavailable or fails. The hosted deployment backs
+ * this with Cloudflare Browser Rendering, which is what makes an SDK
+ * snippet injected through a tag manager (invisible to a raw fetch)
+ * count for verification.
+ */
+export type RenderPage = (url: string) => Promise<string | null>;
+
 export async function verifyDomain(
   domain: string,
   token: string,
   fetchImpl: typeof fetch = fetch,
-  publishableKeys: string[] = []
+  publishableKeys: string[] = [],
+  renderPage?: RenderPage
 ): Promise<VerifyResult> {
   const viaDns = await checkDnsTxt(domain, token, fetchImpl);
   if (viaDns) {
@@ -129,13 +139,21 @@ export async function verifyDomain(
   if (viaSdk) {
     return { ok: true, method: "sdk" };
   }
+  // The rendered pass runs last: it is the expensive one, and the raw
+  // fetch already caught every directly-embedded snippet.
+  if (renderPage && publishableKeys.length > 0) {
+    const html = await renderPage(`https://${domain}/`);
+    if (html && publishableKeys.some(key => html.includes(key))) {
+      return { ok: true, method: "sdk" };
+    }
+  }
   return {
     ok: false,
     reason:
       `no ${TXT_PREFIX} TXT record, no ${WELL_KNOWN_PATH} file, and no ` +
       `publishable key found on the homepage. Publish one of the ` +
       `verification records, or install the SDK with your publishable ` +
-      `key directly in the page source and check again`
+      `key and check again`
   };
 }
 

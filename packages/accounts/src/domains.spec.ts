@@ -204,3 +204,83 @@ describe("verification by installed SDK", () => {
     expect(wrongPage.ok).toBe(false);
   });
 });
+
+describe("rendered verification (tag-manager installs)", () => {
+  const token = generateVerificationToken();
+  const PK = "pk_abcdefghijklmnopqrstuvwx";
+
+  const rawPageWithoutKey = (async (url: RequestInfo | URL) => {
+    const u = String(url);
+    if (u.includes("dns-query")) {
+      return new Response(JSON.stringify({ Answer: [] }), {
+        headers: { "content-type": "application/dns-json" }
+      });
+    }
+    if (u.includes("/.well-known/")) {
+      return new Response("nope", { status: 404 });
+    }
+    // The raw homepage: GTM loader present, SDK key absent.
+    return new Response("<html><script src='gtm.js'></script></html>");
+  }) as typeof fetch;
+
+  it("finds a key that only exists after JavaScript ran", async () => {
+    const rendered: string[] = [];
+    const result = await verifyDomain(
+      "example.com",
+      token,
+      rawPageWithoutKey,
+      [PK],
+      async url => {
+        rendered.push(url);
+        return `<html><script>createTest({},{publishableKey:"${PK}"})</script></html>`;
+      }
+    );
+    expect(result).toEqual({ ok: true, method: "sdk" });
+    expect(rendered).toEqual(["https://example.com/"]);
+  });
+
+  it("fails open when rendering is unavailable or empty", async () => {
+    const unavailable = await verifyDomain(
+      "example.com",
+      token,
+      rawPageWithoutKey,
+      [PK],
+      async () => null
+    );
+    expect(unavailable.ok).toBe(false);
+    const noRenderer = await verifyDomain(
+      "example.com",
+      token,
+      rawPageWithoutKey,
+      [PK]
+    );
+    expect(noRenderer.ok).toBe(false);
+  });
+
+  it("never renders when the raw page already had the key", async () => {
+    const rendered: string[] = [];
+    const result = await verifyDomain(
+      "example.com",
+      token,
+      (async (url: RequestInfo | URL) => {
+        const u = String(url);
+        if (u.includes("dns-query")) {
+          return new Response(JSON.stringify({ Answer: [] }), {
+            headers: { "content-type": "application/dns-json" }
+          });
+        }
+        if (u.includes("/.well-known/")) {
+          return new Response("nope", { status: 404 });
+        }
+        return new Response(`<script>{publishableKey:"${PK}"}</script>`);
+      }) as typeof fetch,
+      [PK],
+      async url => {
+        rendered.push(url);
+        return null;
+      }
+    );
+    expect(result.method).toBe("sdk");
+    expect(rendered).toEqual([]);
+  });
+});

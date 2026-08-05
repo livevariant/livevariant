@@ -193,7 +193,11 @@
         // of making livevariant.link a one-hop open redirector.
         "LV_UNLISTED_DESTINATIONS": "interstitial",
         "LV_APP_URL": "https://livevariant.com",
-        "LV_EMAIL_FROM": "LiveVariant <login@mail.livevariant.com>"
+        "LV_EMAIL_FROM": "LiveVariant <login@mail.livevariant.com>",
+        // Our account id is not a secret; the Browser Rendering token is
+        // (wrangler secret put LV_CF_BROWSER_TOKEN --env production).
+        // Both present = tag-manager SDK installs verify domains too.
+        "LV_CF_ACCOUNT_ID": "7f5af4cd929693e6a93795847de63fbe"
       },
       "routes": [
         { "pattern": "livevariant.link/*", "zone_name": "livevariant.link" },

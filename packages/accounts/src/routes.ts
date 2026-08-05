@@ -32,6 +32,7 @@ import {
 } from "./registry.js";
 import { member, organization } from "./schema.js";
 import type { Auth, Db } from "./auth.js";
+import type { RenderPage } from "./domains.js";
 import type { RegistryProvider } from "./provider.js";
 
 export interface AccountRoutesDeps {
@@ -40,6 +41,8 @@ export interface AccountRoutesDeps {
   provider: RegistryProvider;
   /** Dashboard origin; the only host these routes answer on. */
   baseUrl: string;
+  /** JS-rendered fetch for the tag-manager verification path. */
+  renderPage?: RenderPage;
 }
 
 const claimSchema = z.object({
@@ -440,7 +443,13 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
     const keys = (await listPublishableKeys(deps.db, who.orgId)).map(
       k => k.key
     );
-    const result = await verifyDomain(domain, row.token, fetch, keys);
+    const result = await verifyDomain(
+      domain,
+      row.token,
+      fetch,
+      keys,
+      deps.renderPage
+    );
     await markDomainVerified(
       deps.db,
       who.orgId,

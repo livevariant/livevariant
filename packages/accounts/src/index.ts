@@ -38,7 +38,8 @@ export function createAccounts(config: AccountsConfig): Accounts {
     db,
     auth: lazyAuth,
     provider,
-    baseUrl: config.baseUrl
+    baseUrl: config.baseUrl,
+    renderPage: config.renderPage
   });
   return { routes, provider };
 }

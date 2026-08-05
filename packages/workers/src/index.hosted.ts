@@ -29,6 +29,59 @@ export interface HostedEnv extends Env {
   LV_RESEND_API_KEY?: string;
   /** From address; defaults to the LiveVariant login sender. */
   LV_EMAIL_FROM?: string;
+  /**
+   * Cloudflare Browser Rendering, for the tag-manager verification
+   * path: rendering a homepage with JavaScript executed makes a
+   * GTM-injected SDK snippet visible. Both present switches it on; the
+   * token needs the "Browser Rendering - Edit" permission.
+   */
+  LV_CF_ACCOUNT_ID?: string;
+  LV_CF_BROWSER_TOKEN?: string;
+}
+
+/**
+ * The /content endpoint returns a page's HTML after JavaScript ran,
+ * which is exactly the difference between "the SDK is in the source"
+ * and "a tag manager injected the SDK". Failures return null: the
+ * rendered pass is an extra chance, never a gate.
+ */
+function renderWithBrowserRendering(
+  accountId: string,
+  token: string
+): (url: string) => Promise<string | null> {
+  return async url => {
+    try {
+      const res = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/browser-rendering/content`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            url,
+            // The SDK loads with the page's other scripts; idle-ish is
+            // enough and keeps slow third parties from eating the run.
+            gotoOptions: { waitUntil: "networkidle2", timeout: 15000 },
+            rejectResourceTypes: ["image", "media", "font"]
+          }),
+          signal: AbortSignal.timeout(30_000)
+        }
+      );
+      if (!res.ok) {
+        return null;
+      }
+      const contentType = res.headers.get("content-type") ?? "";
+      if (contentType.includes("application/json")) {
+        const body = (await res.json()) as { result?: unknown };
+        return typeof body.result === "string" ? body.result : null;
+      }
+      return await res.text();
+    } catch {
+      return null;
+    }
+  };
 }
 
 const apps = new WeakMap<HostedEnv, ReturnType<typeof createApp>>();
@@ -43,6 +96,13 @@ export default {
           db: env.LV_ACCOUNTS_DB,
           baseUrl: env.LV_APP_URL,
           secret: env.LV_AUTH_SECRET,
+          renderPage:
+            env.LV_CF_ACCOUNT_ID && env.LV_CF_BROWSER_TOKEN
+              ? renderWithBrowserRendering(
+                  env.LV_CF_ACCOUNT_ID,
+                  env.LV_CF_BROWSER_TOKEN
+                )
+              : undefined,
           // Without a Resend key the link goes to the worker log, which
           // is the local dev loop (wrangler dev prints it); production
           // sets the key so links actually arrive.

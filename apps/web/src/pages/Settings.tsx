@@ -284,8 +284,9 @@ export function Settings() {
                     <CopyValue value={row.instructions.wellKnown.body} />
                   </p>
                   <p>
-                    Or install the SDK with your publishable key (snippet below)
-                    directly in the page source, then Check now.
+                    Or install the SDK with your publishable key (snippet
+                    below), then Check now. Tag-manager installs count too: the
+                    check renders the page before looking.
                   </p>
                 </div>
               )}

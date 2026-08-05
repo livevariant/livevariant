@@ -20,3 +20,8 @@ LV_API_TOKEN=
 # D1). Any long random string works; without LV_RESEND_API_KEY the magic
 # sign-in link is printed to the wrangler terminal instead of emailed.
 LV_AUTH_SECRET=
+
+# Optional: Cloudflare Browser Rendering for domain verification of
+# tag-manager SDK installs (token permission: Browser Rendering - Edit).
+LV_CF_ACCOUNT_ID=
+LV_CF_BROWSER_TOKEN=

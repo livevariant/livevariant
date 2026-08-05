@@ -17,6 +17,7 @@ import { magicLink, organization } from "better-auth/plugins";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema.js";
 import type { SendMagicLink } from "./email.js";
+import type { RenderPage } from "./domains.js";
 
 export interface AccountsConfig {
   db: D1Database;
@@ -29,6 +30,13 @@ export interface AccountsConfig {
   /** Signing secret for sessions and tokens (LV_AUTH_SECRET). */
   secret: string;
   sendMagicLink: SendMagicLink;
+  /**
+   * JS-rendered page fetch for domain verification (Cloudflare Browser
+   * Rendering on the hosted deployment). Optional: without it, only
+   * snippets visible in raw HTML count, and tag-manager installs fall
+   * back to DNS or the well-known file.
+   */
+  renderPage?: RenderPage;
 }
 
 export function createDb(d1: D1Database) {
