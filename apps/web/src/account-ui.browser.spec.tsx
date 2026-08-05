@@ -578,6 +578,88 @@ describe("accepting an invitation", () => {
     expect(container.textContent).not.toContain("not found");
     expect(container.textContent).not.toContain("could not be loaded");
   });
+
+  it("loads a second invitation after the first was accepted", async () => {
+    // Acceptance is keyed to the invitation id: pointing the same
+    // mounted page at another invite link must load it, not keep
+    // showing the first one's success state.
+    const joined = new Set<string>();
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url,
+          window.location.origin
+        );
+        void init;
+        if (url.pathname === "/account/me") {
+          return Response.json({
+            userId: "u1",
+            activeOrgId: "org-1",
+            orgs: [{ id: "org-1", name: "Personal" }]
+          });
+        }
+        if (url.pathname === "/auth/organization/get-invitation") {
+          const id = url.searchParams.get("id") ?? "";
+          if (joined.has(id)) {
+            return Response.json(
+              { message: "Invitation not found" },
+              { status: 404 }
+            );
+          }
+          return Response.json({
+            id,
+            email: "u1@example.com",
+            role: "member",
+            organizationId: id === "inv-1" ? "org-2" : "org-3",
+            organizationName: id === "inv-1" ? "Agency" : "Beta",
+            status: "pending"
+          });
+        }
+        if (url.pathname === "/auth/organization/accept-invitation") {
+          joined.add("inv-1");
+          return Response.json({ ok: true });
+        }
+        if (url.pathname === "/auth/organization/set-active") {
+          return Response.json({ ok: true });
+        }
+        return new Response("404", { status: 404 });
+      }
+    );
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    containers.push(container);
+    const router = createMemoryRouter(
+      [
+        {
+          element: <AppLayout />,
+          children: [
+            { path: "/accept-invitation/:id", element: <AcceptInvitation /> },
+            { path: "/tests", element: <div /> }
+          ]
+        }
+      ],
+      { initialEntries: ["/accept-invitation/inv-1"] }
+    );
+    const root = createRoot(container);
+    roots.push(root);
+    root.render(
+      <StrictMode>
+        <RouterProvider router={router} />
+      </StrictMode>
+    );
+    await until(() => container.textContent?.includes("Join Agency") ?? false);
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.includes("Join Agency"))!
+      .click();
+    await until(() => container.textContent?.includes("You joined") ?? false);
+    await router.navigate("/accept-invitation/inv-2");
+    await until(() => container.textContent?.includes("Join Beta") ?? false);
+  });
 });
 
 describe("domain verification feedback", () => {

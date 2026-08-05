@@ -28,7 +28,12 @@ export function AcceptInvitation() {
   const account = useAccount();
   const [invitation, setInvitation] = useState<InvitationDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [accepted, setAccepted] = useState(false);
+  // Keyed to the invitation id, not a plain boolean: the same mounted
+  // page can be pointed at a SECOND invitation link, and a bare
+  // "accepted" would keep showing the first one's success state
+  // instead of loading the new invite.
+  const [acceptedId, setAcceptedId] = useState<string | null>(null);
+  const accepted = id != null && acceptedId === id;
   const [busy, setBusy] = useState(false);
 
   // Depends on the userId PRIMITIVE, not the account.me object: refresh()
@@ -123,7 +128,7 @@ export function AcceptInvitation() {
                         : Promise.resolve()
                     )
                     .then(() => {
-                      setAccepted(true);
+                      setAcceptedId(id);
                       account.refresh();
                     })
                     .catch(err => {
