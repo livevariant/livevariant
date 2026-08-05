@@ -579,3 +579,60 @@ describe("accepting an invitation", () => {
     expect(container.textContent).not.toContain("could not be loaded");
   });
 });
+
+describe("domain verification feedback", () => {
+  it("shows the server's reason when a check finds nothing", async () => {
+    stubServer({
+      "/account/me": () =>
+        Response.json({
+          userId: "u1",
+          activeOrgId: "org-1",
+          orgs: [{ id: "org-1", name: "Personal" }]
+        }),
+      "/account/domains/example.com/verify": () =>
+        Response.json({
+          domain: "example.com",
+          verified: false,
+          reason: "no TXT record matched the verification token"
+        }),
+      "/account/domains": () =>
+        Response.json({
+          domains: [
+            {
+              domain: "example.com",
+              verifiedAt: null,
+              checkedAt: null,
+              createdAt: 1,
+              method: "dns-txt",
+              token: "tok",
+              instructions: {
+                dnsTxt: {
+                  name: "_livevariant.example.com",
+                  type: "TXT",
+                  value: "livevariant-site-verification=tok"
+                },
+                wellKnown: {
+                  url: "https://example.com/.well-known/livevariant-verification.txt",
+                  body: "tok"
+                }
+              }
+            }
+          ]
+        }),
+      "/account/publishable-keys": () => Response.json({ keys: [] }),
+      "/config": () =>
+        Response.json({ serveUrl: "https://serve.example", region: null })
+    });
+    const container = render("/settings");
+    await until(() => container.textContent?.includes("Check now") ?? false);
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.trim() === "Check now")!
+      .click();
+    await until(
+      () =>
+        container.textContent?.includes(
+          "no TXT record matched the verification token"
+        ) ?? false
+    );
+  });
+});

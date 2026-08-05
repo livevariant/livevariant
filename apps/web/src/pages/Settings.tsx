@@ -463,8 +463,18 @@ export function Settings() {
                         method: "POST",
                         credentials: "include"
                       })
-                        .then(res => json(res))
-                        .then(() => reload())
+                        .then(res =>
+                          json<{ verified: boolean; reason?: string }>(res)
+                        )
+                        .then(result => {
+                          if (!result.verified) {
+                            setNotice(
+                              result.reason ??
+                                "Not verified yet: publish one of the records below and check again."
+                            );
+                          }
+                          reload();
+                        })
                         .catch(err =>
                           setNotice(
                             err instanceof Error ? err.message : String(err)
