@@ -238,6 +238,8 @@ export interface Env {
   LV_API_TOKEN?: string;
   /** GTM container id (GTM-XXXXXXX) for the dashboard pages. */
   LV_GOOGLE_TAG_MANAGER?: string;
+  /** The deployment's own publishable key, for the landing's test. */
+  LV_PUBLISHABLE_KEY?: string;
 }
 
 /** Counter keys arrive as c:{testId}:{scope}; the DO stores scopes. */
@@ -331,6 +333,7 @@ export function baseAppOptions(env: Env): AppOptions {
     serveUrl: env.LV_SERVE_URL,
     apiToken: env.LV_API_TOKEN,
     gtmId: env.LV_GOOGLE_TAG_MANAGER,
+    publishableKey: env.LV_PUBLISHABLE_KEY,
     assets:
       env.ASSET_STORE && env.LV_ASSET_SECRET
         ? {

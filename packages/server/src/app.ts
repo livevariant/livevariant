@@ -132,6 +132,8 @@ export interface AppOptions {
   apiToken?: string;
   /** GTM container id for the dashboard pages. See ApiOptions.gtmId. */
   gtmId?: string;
+  /** The deployment's own key. See ApiOptions.publishableKey. */
+  publishableKey?: string;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -659,6 +661,7 @@ export function createApp(options: AppOptions): Hono {
       apiToken: options.apiToken,
       provider: options.provider,
       gtmId: options.gtmId,
+      publishableKey: options.publishableKey,
       fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
         app.fetch(new Request(input as RequestInfo, init))) as typeof fetch
     })

@@ -66,6 +66,13 @@ export interface ApiOptions {
    * which is the default and the self-host norm.
    */
   gtmId?: string;
+  /**
+   * The deployment's OWN publishable key (LV_PUBLISHABLE_KEY), for
+   * dogfooding: the dashboard's landing page runs a real test, and this
+   * is the key it registers under. Served through /config; unset means
+   * the landing waits briefly for a tag-set global instead.
+   */
+  publishableKey?: string;
 }
 
 export function createApi(options: ApiOptions): Hono {
@@ -186,7 +193,8 @@ export function createApi(options: ApiOptions): Hono {
       region: regionHint(
         (c.req.raw as Request & { cf?: CloudflareGeo }).cf ?? null
       ),
-      gtmId: options.gtmId?.trim() || null
+      gtmId: options.gtmId?.trim() || null,
+      publishableKey: options.publishableKey?.trim() || null
     })
   );
 

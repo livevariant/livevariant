@@ -79,6 +79,37 @@ export interface LiveVariantGlobal {
   rewardEvents?: string[];
 }
 
+/**
+ * Resolves with the page's global config (window.livevariant) as soon
+ * as it exists, or null once timeoutMs passes without it. For SPAs
+ * whose LiveVariant tag arrives late through a tag manager: wait a
+ * moment for the tag instead of racing it, then render the control
+ * rather than hold the page.
+ */
+export function whenTagReady(
+  options: { win?: Window; timeoutMs?: number; pollMs?: number } = {}
+): Promise<LiveVariantGlobal | null> {
+  const win = options.win ?? window;
+  const timeoutMs = options.timeoutMs ?? 3000;
+  const pollMs = options.pollMs ?? 50;
+  const read = () =>
+    (win as Window & { livevariant?: LiveVariantGlobal }).livevariant ?? null;
+  const first = read();
+  if (first) {
+    return Promise.resolve(first);
+  }
+  return new Promise(resolve => {
+    const deadline = Date.now() + timeoutMs;
+    const timer = setInterval(() => {
+      const tag = read();
+      if (tag || Date.now() >= deadline) {
+        clearInterval(timer);
+        resolve(tag);
+      }
+    }, pollMs);
+  });
+}
+
 export interface CreateTestOptions {
   /**
    * Serving origin, e.g. "https://livevariant.link" or your self-host.

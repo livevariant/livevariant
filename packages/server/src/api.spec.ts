@@ -118,7 +118,8 @@ describe("the tool API", () => {
     expect(await config.json()).toEqual({
       serveUrl: "https://ab.internal",
       region: null,
-      gtmId: null
+      gtmId: null,
+      publishableKey: null
     });
   });
 
@@ -131,7 +132,8 @@ describe("the tool API", () => {
     expect(await res.json()).toEqual({
       serveUrl: "https://ab.internal",
       region: null,
-      gtmId: null
+      gtmId: null,
+      publishableKey: null
     });
 
     const split = createApp({
@@ -143,7 +145,8 @@ describe("the tool API", () => {
     expect(await res2.json()).toEqual({
       serveUrl: "https://livevariant.link",
       region: null,
-      gtmId: null
+      gtmId: null,
+      publishableKey: null
     });
   });
 
@@ -323,5 +326,17 @@ describe("GTM through /config", () => {
       await app.request("https://x.test/config")
     ).json()) as { gtmId: string | null };
     expect(bare.gtmId).toBeNull();
+  });
+
+  it("serves the deployment's own publishable key when configured", async () => {
+    const dogfood = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      publishableKey: "pk_own"
+    });
+    const configured = (await (
+      await dogfood.request("https://x.test/config")
+    ).json()) as { publishableKey: string | null };
+    expect(configured.publishableKey).toBe("pk_own");
   });
 });

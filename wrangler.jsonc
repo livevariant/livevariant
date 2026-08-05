@@ -42,7 +42,8 @@
     "LV_ALLOWED_DESTINATIONS": "",
     "LV_ALLOWED_ORIGINS": "",
     "LV_UNLISTED_DESTINATIONS": "",
-    "LV_GOOGLE_TAG_MANAGER": ""
+    "LV_GOOGLE_TAG_MANAGER": "",
+    "LV_PUBLISHABLE_KEY": ""
   },
   // Deliberately no routes here. This is the config a
   // stranger gets when they deploy their own copy, and it has to work on
@@ -131,6 +132,7 @@
         "LV_ALLOWED_ORIGINS": "",
         "LV_UNLISTED_DESTINATIONS": "",
         "LV_GOOGLE_TAG_MANAGER": "",
+        "LV_PUBLISHABLE_KEY": "",
         // The vite origin: the dashboard is developed through its proxy,
         // so cookies, CORS and magic-link callbacks all key off it.
         "LV_APP_URL": "http://localhost:5173"
@@ -203,7 +205,11 @@
         // Fill with the GTM-XXXXXXX container id to load Google Tag
         // Manager on the dashboard pages (served via /config, injected
         // by the SPA). Empty = no GTM.
-        "LV_GOOGLE_TAG_MANAGER": ""
+        "LV_GOOGLE_TAG_MANAGER": "",
+        // Our own publishable key (from Settings), so the landing's
+        // hero test registers under our org and shows in My tests.
+        // Publishable keys are public by design.
+        "LV_PUBLISHABLE_KEY": "pk_4h92m7urxh7to7c83eacn2e8" // gitleaks:allow
       },
       "routes": [
         { "pattern": "livevariant.link/*", "zone_name": "livevariant.link" },
