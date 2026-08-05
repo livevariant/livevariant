@@ -480,3 +480,57 @@ describe("google tag manager", () => {
     expect(document.getElementById("lv-gtm")).toBeNull();
   });
 });
+
+describe("the magic-link alternative", () => {
+  it("is always clickable: empty email explains and focuses the field", async () => {
+    const calls: string[] = [];
+    stubServer(
+      {
+        "/account/me": () =>
+          Response.json({ error: "sign in required" }, { status: 401 })
+      },
+      calls
+    );
+    const container = render("/login");
+    await until(() => container.querySelector("#email") !== null);
+    const magic = [...container.querySelectorAll("button")].find(button =>
+      button.textContent?.includes("sign-in link")
+    )!;
+    expect(magic.hasAttribute("disabled")).toBe(false);
+    magic.click();
+    await until(
+      () =>
+        container.textContent?.includes("Enter your email above first") ?? false
+    );
+    expect(calls).not.toContain("POST /auth/sign-in/magic-link");
+    expect(document.activeElement?.id).toBe("email");
+  });
+
+  it("sends the link once the email is there", async () => {
+    const calls: string[] = [];
+    stubServer(
+      {
+        "/account/me": () =>
+          Response.json({ error: "sign in required" }, { status: 401 }),
+        "/auth/sign-in/magic-link": () => Response.json({ status: true })
+      },
+      calls
+    );
+    const container = render("/login");
+    await until(() => container.querySelector("#email") !== null);
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value"
+    )!.set!;
+    const email = container.querySelector("#email") as HTMLInputElement;
+    setter.call(email, "magic@example.com");
+    email.dispatchEvent(new Event("input", { bubbles: true }));
+    [...container.querySelectorAll("button")]
+      .find(button => button.textContent?.includes("sign-in link"))!
+      .click();
+    await until(
+      () => container.textContent?.includes("Check your inbox") ?? false
+    );
+    expect(calls).toContain("POST /auth/sign-in/magic-link");
+  });
+});

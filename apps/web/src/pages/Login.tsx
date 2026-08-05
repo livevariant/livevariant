@@ -144,8 +144,15 @@ export function Login() {
               <Button
                 variant="outline"
                 className="w-full"
-                disabled={!email}
                 onClick={() => {
+                  // Never disabled: people click the alternative FIRST,
+                  // and a dead-looking button explains nothing. Missing
+                  // email routes them to the field instead.
+                  if (!email) {
+                    setError("Enter your email above first.");
+                    document.getElementById("email")?.focus();
+                    return;
+                  }
                   setError(null);
                   requestMagicLink(email, next)
                     .then(() => setLinkSent(true))
