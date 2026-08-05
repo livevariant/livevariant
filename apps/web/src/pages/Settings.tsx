@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
-import { Check, Copy, Globe, KeyRound, Plus, Trash2 } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Globe,
+  KeyRound,
+  Plus,
+  Trash2,
+  Users,
+  X
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +20,18 @@ import {
   CardTitle
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useAccount } from "@/lib/account";
+import { NativeSelect } from "@/components/ui/select";
+import {
+  cancelInvitation,
+  createOrg,
+  fullOrganization,
+  inviteMember,
+  leaveOrg,
+  setActiveOrg,
+  useAccount,
+  type AccountState,
+  type FullOrganization
+} from "@/lib/account";
 import { useServeUrl } from "@/lib/serve-url";
 
 /**
@@ -142,6 +162,183 @@ element.textContent = test.slots.headline.text;`}
   );
 }
 
+function OrganizationCard({ account }: { account: AccountState }) {
+  const [org, setOrg] = useState<FullOrganization | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"member" | "admin">("member");
+  const [newOrgName, setNewOrgName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const activeOrgId = account.me?.activeOrgId ?? account.me?.orgs[0]?.id;
+
+  const reload = useCallback(() => {
+    if (!activeOrgId) {
+      setOrg(null);
+      return;
+    }
+    void fullOrganization(activeOrgId)
+      .then(setOrg)
+      .catch(() => setOrg(null));
+  }, [activeOrgId]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const surface = (err: unknown) =>
+    setNotice(err instanceof Error ? err.message : String(err));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <Users className="mr-1 inline size-5" /> Organization
+          {org ? `: ${org.name}` : ""}
+        </CardTitle>
+        <CardDescription>
+          Tests, keys and verified domains belong to an organization, and
+          everything you do here acts on the active one (switch in the header).
+          You can belong to as many as you are invited to.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {org && (
+          <>
+            <div className="space-y-1">
+              {org.members.map(member => (
+                <div
+                  key={member.id}
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <span className="flex-1">
+                    {member.user.name || member.user.email}
+                    <span className="text-muted-foreground">
+                      {" "}
+                      · {member.user.email}
+                    </span>
+                  </span>
+                  <Badge variant="secondary">{member.role}</Badge>
+                </div>
+              ))}
+            </div>
+            {org.invitations.filter(inv => inv.status === "pending").length >
+              0 && (
+              <div className="space-y-1">
+                {org.invitations
+                  .filter(inv => inv.status === "pending")
+                  .map(inv => (
+                    <div
+                      key={inv.id}
+                      className="text-muted-foreground flex items-center gap-2 text-sm"
+                    >
+                      <span className="flex-1">
+                        {inv.email} · invited as {inv.role ?? "member"}
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Cancel invitation for ${inv.email}`}
+                        onClick={() => {
+                          setNotice(null);
+                          void cancelInvitation(inv.id)
+                            .then(reload)
+                            .catch(surface);
+                        }}
+                      >
+                        <X />
+                      </Button>
+                    </div>
+                  ))}
+              </div>
+            )}
+            <form
+              className="flex flex-wrap gap-2"
+              onSubmit={event => {
+                event.preventDefault();
+                setNotice(null);
+                void inviteMember({ email: inviteEmail, role: inviteRole })
+                  .then(() => {
+                    setInviteEmail("");
+                    reload();
+                  })
+                  .catch(surface);
+              }}
+            >
+              <Input
+                type="email"
+                value={inviteEmail}
+                onChange={event => setInviteEmail(event.target.value)}
+                placeholder="teammate@example.com"
+                className="max-w-xs"
+                aria-label="Invite email"
+              />
+              <NativeSelect
+                value={inviteRole}
+                aria-label="Invite role"
+                className="h-9 w-auto"
+                onChange={event =>
+                  setInviteRole(event.target.value as "member" | "admin")
+                }
+              >
+                <option value="member">member</option>
+                <option value="admin">admin</option>
+              </NativeSelect>
+              <Button type="submit" disabled={!inviteEmail}>
+                <Plus /> Invite
+              </Button>
+            </form>
+          </>
+        )}
+        <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+          <Input
+            value={newOrgName}
+            onChange={event => setNewOrgName(event.target.value)}
+            placeholder="New organization name"
+            className="max-w-xs"
+            aria-label="New organization name"
+          />
+          <Button
+            variant="outline"
+            disabled={creating || !newOrgName}
+            onClick={() => {
+              setCreating(true);
+              setNotice(null);
+              void createOrg(newOrgName)
+                .then(created =>
+                  setActiveOrg(created.id).then(() => {
+                    window.location.reload();
+                  })
+                )
+                .catch(err => {
+                  surface(err);
+                  setCreating(false);
+                });
+            }}
+          >
+            <Plus /> Create organization
+          </Button>
+          {(account.me?.orgs.length ?? 0) > 1 && activeOrgId && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setNotice(null);
+                void leaveOrg(activeOrgId)
+                  .then(() => {
+                    window.location.reload();
+                  })
+                  .catch(surface);
+              }}
+            >
+              Leave this organization
+            </Button>
+          )}
+        </div>
+        {notice && <p className="text-destructive text-sm">{notice}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function Settings() {
   const account = useAccount();
   const [domains, setDomains] = useState<DomainRow[]>([]);
@@ -193,6 +390,8 @@ export function Settings() {
   return (
     <div className="space-y-6">
       <h1 className="font-display text-3xl">Settings</h1>
+
+      <OrganizationCard account={account} />
 
       <Card>
         <CardHeader>

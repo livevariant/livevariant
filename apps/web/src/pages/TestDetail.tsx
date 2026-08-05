@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { Bookmark, Check, Copy, RefreshCw, UserPlus } from "lucide-react";
 import { buildTestUrls } from "@livevariant/core";
@@ -11,7 +11,8 @@ import {
   CardTitle
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { useAccount, claimAndRegister } from "@/lib/account";
+import { NativeSelect } from "@/components/ui/select";
+import { claimAndRegister, setActiveOrg, useAccount } from "@/lib/account";
 import { useResolvedTest, type ResolvedTest } from "@/lib/resolve-test";
 
 interface VariantStats {
@@ -83,62 +84,59 @@ function CopyField({ label, value }: { label: string; value: string }) {
  */
 function AccountCard({
   test,
-  onSaved,
-  autoClaim
+  onSaved
 }: {
   test: ResolvedTest;
   onSaved: () => void;
-  /** Landing on a manage URL while signed in claims without a click. */
-  autoClaim: boolean;
 }) {
   const account = useAccount();
   const [claiming, setClaiming] = useState(false);
   const [claimed, setClaimed] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const attempted = useRef(false);
+  const [targetOrg, setTargetOrg] = useState<string | null>(null);
 
+  const orgs = account.me?.orgs ?? [];
+  const activeOrgId = account.me?.activeOrgId ?? orgs[0]?.id ?? null;
+  const chosenOrg = targetOrg ?? activeOrgId;
+
+  // Claiming is EXPLICIT: with several organizations, an automatic
+  // claim would silently pick one of them, and a test filed under the
+  // wrong org is worse than one extra click.
   const claim = useCallback(() => {
     if (!test.statsSecret) {
       return;
     }
     setClaiming(true);
     setError(null);
-    claimAndRegister({
-      statsSecret: test.statsSecret,
-      encoded: test.encoded,
-      name: test.name
-    })
+    const switchFirst =
+      chosenOrg && chosenOrg !== activeOrgId
+        ? setActiveOrg(chosenOrg)
+        : Promise.resolve();
+    switchFirst
+      .then(() =>
+        claimAndRegister({
+          statsSecret: test.statsSecret!,
+          encoded: test.encoded,
+          name: test.name
+        })
+      )
       .then(() => {
         setClaimed(true);
         onSaved();
+        account.refresh();
       })
       .catch(err => {
         setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => setClaiming(false));
-  }, [test.statsSecret, test.encoded, test.name, onSaved]);
-
-  // Opening a manage link IS the claim gesture when a session exists:
-  // whoever holds the secret already has full authority, so asking for
-  // a second click would only lose tests between "made" and "kept".
-  useEffect(() => {
-    if (
-      autoClaim &&
-      account.ready &&
-      account.available &&
-      account.me &&
-      test.statsSecret &&
-      !attempted.current
-    ) {
-      attempted.current = true;
-      claim();
-    }
-  }, [autoClaim, account.ready, account.available, account.me, test, claim]);
+  }, [test, chosenOrg, activeOrgId, onSaved, account]);
 
   if (!account.ready || !account.available || !test.statsSecret) {
     return null;
   }
   const next = `/manage/${test.encoded}`;
+  const chosenName =
+    orgs.find(org => org.id === chosenOrg)?.name ?? "my account";
   return (
     <Card>
       <CardHeader>
@@ -152,17 +150,30 @@ function AccountCard({
         {account.me ? (
           claimed ? (
             <p className="text-sm">
-              <Check className="mr-1 inline size-4" /> Saved to your account.
+              <Check className="mr-1 inline size-4" /> Saved to {chosenName}.
               Find it under <Link to="/tests">My tests</Link>.
             </p>
-          ) : claiming ? (
-            <p className="text-muted-foreground text-sm">
-              Saving to your account…
-            </p>
           ) : (
-            <Button disabled={claiming} onClick={claim}>
-              <UserPlus /> Add to my account
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {orgs.length > 1 && (
+                <NativeSelect
+                  value={chosenOrg ?? undefined}
+                  aria-label="Organization to add this test to"
+                  className="h-9 w-auto max-w-48"
+                  onChange={event => setTargetOrg(event.target.value)}
+                >
+                  {orgs.map(org => (
+                    <option key={org.id} value={org.id}>
+                      {org.name}
+                    </option>
+                  ))}
+                </NativeSelect>
+              )}
+              <Button disabled={claiming} onClick={claim}>
+                <UserPlus />{" "}
+                {orgs.length > 1 ? `Add to ${chosenName}` : "Add to my account"}
+              </Button>
+            </div>
           )
         ) : (
           <Button asChild>
@@ -368,11 +379,7 @@ element.textContent = test.variant.text;`;
         )}
       </Card>
 
-      <AccountCard
-        test={test}
-        onSaved={save}
-        autoClaim={params.encoded !== undefined}
-      />
+      <AccountCard test={test} onSaved={save} />
 
       <Card>
         <CardHeader>

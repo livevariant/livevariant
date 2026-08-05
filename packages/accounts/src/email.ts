@@ -71,6 +71,26 @@ export function verificationEmail(to: string, url: string): OutgoingEmail {
   };
 }
 
+export function invitationEmail(input: {
+  to: string;
+  orgName: string;
+  inviterName: string;
+  url: string;
+}): OutgoingEmail {
+  return {
+    to: input.to,
+    subject: `${input.inviterName} invited you to ${input.orgName} on LiveVariant`,
+    ...linkEmail({
+      lead:
+        `${input.inviterName} invited you to join the ${input.orgName} ` +
+        `organization on LiveVariant. Accepting shares its tests, keys ` +
+        `and verified domains with you:`,
+      action: "Accept invitation",
+      url: input.url
+    })
+  };
+}
+
 export function resendMailer(options: ResendOptions): SendEmail {
   return async email => {
     const res = await fetch("https://api.resend.com/emails", {

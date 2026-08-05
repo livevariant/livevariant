@@ -256,3 +256,162 @@ describe("password register and sign-in, end to end", () => {
     expect(claim.status).toBe(201);
   });
 });
+
+describe("multiple organizations, end to end", () => {
+  it("switching the active org changes what claims and lists act on", async () => {
+    const d1 = (proxy.env as { LV_ACCOUNTS_DB: D1Database }).LV_ACCOUNTS_DB;
+    const emails: Array<{ to: string; subject: string; text: string }> = [];
+    const flow = createAccounts({
+      db: d1,
+      baseUrl: DASHBOARD,
+      secret: "d".repeat(48),
+      sendEmail: async email => {
+        emails.push(email);
+      }
+    });
+    const post = (path: string, body: unknown, cookie?: string) =>
+      flow.routes.request(`${DASHBOARD}${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: DASHBOARD,
+          ...(cookie ? { cookie } : {})
+        },
+        body: JSON.stringify(body)
+      });
+    const cookieOf = (res: Response, previous = "") => {
+      const set = res.headers.get("set-cookie");
+      if (!set) {
+        return previous;
+      }
+      const jar = new Map<string, string>(
+        previous
+          .split("; ")
+          .filter(Boolean)
+          .map(pair => [pair.split("=")[0], pair] as [string, string])
+      );
+      for (const part of set.split(",")) {
+        const pair = part.split(";")[0].trim();
+        if (pair.includes("=")) {
+          jar.set(pair.split("=")[0], pair);
+        }
+      }
+      return [...jar.values()].join("; ");
+    };
+
+    // Owner signs up (verify via emailed link) and signs in.
+    await post("/auth/sign-up/email", {
+      name: "owner",
+      email: "owner@example.com",
+      password: "owner-password-long"
+    });
+    const ownerVerify = emails
+      .map(e => e.text.match(/https?:\/\/\S+/)?.[0])
+      .find(Boolean)!;
+    const ownerParsed = new URL(ownerVerify);
+    await flow.routes.request(
+      `${DASHBOARD}${ownerParsed.pathname}${ownerParsed.search}`,
+      { headers: { origin: DASHBOARD } }
+    );
+    const ownerSignIn = await post("/auth/sign-in/email", {
+      email: "owner@example.com",
+      password: "owner-password-long"
+    });
+    let ownerCookie = cookieOf(ownerSignIn);
+
+    // Claim under the auto-created personal org.
+    const claimA = await post(
+      "/account/keys",
+      { statsSecret: "org-switch-secret-a" },
+      ownerCookie
+    );
+    expect(claimA.status).toBe(201);
+
+    // Create a second org and make it active.
+    const created = await post(
+      "/auth/organization/create",
+      { name: "Second Org", slug: `second-${Date.now()}` },
+      ownerCookie
+    );
+    expect(created.status).toBe(200);
+    const org2 = ((await created.json()) as { id: string }).id;
+    const setActive = await post(
+      "/auth/organization/set-active",
+      { organizationId: org2 },
+      ownerCookie
+    );
+    ownerCookie = cookieOf(setActive, ownerCookie);
+
+    // The key claimed under org 1 is not in org 2's list; a new claim
+    // lands in org 2.
+    const keysInOrg2 = await flow.routes.request(`${DASHBOARD}/account/keys`, {
+      headers: { cookie: ownerCookie }
+    });
+    expect(
+      ((await keysInOrg2.json()) as { keys: unknown[] }).keys
+    ).toHaveLength(0);
+    const claimB = await post(
+      "/account/keys",
+      { statsSecret: "org-switch-secret-b" },
+      ownerCookie
+    );
+    expect(claimB.status).toBe(201);
+    expect(((await claimB.json()) as { orgId: string }).orgId).toBe(org2);
+
+    // Invite a teammate into org 2; the email carries the accept URL.
+    emails.length = 0;
+    const invite = await post(
+      "/auth/organization/invite-member",
+      { email: "teammate@example.com", role: "member" },
+      ownerCookie
+    );
+    expect(invite.status).toBe(200);
+    expect(emails.map(e => e.subject).join()).toContain("invited you");
+    const acceptUrl = emails
+      .map(e => e.text.match(/https?:\/\/\S+accept-invitation\/\S+/)?.[0])
+      .find(Boolean)!;
+    const invitationId = acceptUrl.split("/accept-invitation/")[1];
+
+    // The teammate registers, verifies, signs in, accepts.
+    emails.length = 0;
+    await post("/auth/sign-up/email", {
+      name: "teammate",
+      email: "teammate@example.com",
+      password: "teammate-password-1"
+    });
+    const mateVerify = emails
+      .map(e => e.text.match(/https?:\/\/\S+/)?.[0])
+      .find(Boolean)!;
+    const mateParsed = new URL(mateVerify);
+    await flow.routes.request(
+      `${DASHBOARD}${mateParsed.pathname}${mateParsed.search}`,
+      { headers: { origin: DASHBOARD } }
+    );
+    const mateSignIn = await post("/auth/sign-in/email", {
+      email: "teammate@example.com",
+      password: "teammate-password-1"
+    });
+    let mateCookie = cookieOf(mateSignIn);
+    const accept = await post(
+      "/auth/organization/accept-invitation",
+      { invitationId },
+      mateCookie
+    );
+    expect(accept.status).toBe(200);
+    const mateActive = await post(
+      "/auth/organization/set-active",
+      { organizationId: org2 },
+      mateCookie
+    );
+    mateCookie = cookieOf(mateActive, mateCookie);
+
+    // Membership is real: the teammate sees org 2's key.
+    const mateKeys = await flow.routes.request(`${DASHBOARD}/account/keys`, {
+      headers: { cookie: mateCookie }
+    });
+    const mateList = (await mateKeys.json()) as {
+      keys: Array<{ orgId?: string }>;
+    };
+    expect(mateList.keys).toHaveLength(1);
+  });
+});

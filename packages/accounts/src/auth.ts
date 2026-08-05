@@ -16,7 +16,12 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink, organization } from "better-auth/plugins";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema.js";
-import { magicLinkEmail, verificationEmail, type SendEmail } from "./email.js";
+import {
+  invitationEmail,
+  magicLinkEmail,
+  verificationEmail,
+  type SendEmail
+} from "./email.js";
 import type { RenderPage } from "./domains.js";
 
 export interface AccountsConfig {
@@ -89,7 +94,19 @@ export function createAuth(config: AccountsConfig, db: Db) {
           await config.sendEmail(magicLinkEmail(email, url));
         }
       }),
-      organization()
+      organization({
+        sendInvitationEmail: async data => {
+          // Better Auth generates no URL; the accept page is ours.
+          await config.sendEmail(
+            invitationEmail({
+              to: data.email,
+              orgName: data.organization.name,
+              inviterName: data.inviter.user.name || data.inviter.user.email,
+              url: `${config.baseUrl}/accept-invitation/${data.id}`
+            })
+          );
+        }
+      })
     ]
   });
 }

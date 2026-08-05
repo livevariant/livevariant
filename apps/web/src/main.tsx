@@ -11,6 +11,7 @@ import { Tests } from "./pages/Tests.js";
 import { TestDetail } from "./pages/TestDetail.js";
 import { Login } from "./pages/Login.js";
 import { Settings } from "./pages/Settings.js";
+import { AcceptInvitation } from "./pages/AcceptInvitation.js";
 
 const router = createBrowserRouter([
   {
@@ -25,7 +26,8 @@ const router = createBrowserRouter([
       // shell is gone and the URL shape is unchanged.
       { path: "/manage/:encoded", element: <TestDetail /> },
       { path: "/login", element: <Login /> },
-      { path: "/settings", element: <Settings /> }
+      { path: "/settings", element: <Settings /> },
+      { path: "/accept-invitation/:id", element: <AcceptInvitation /> }
     ]
   }
 ]);

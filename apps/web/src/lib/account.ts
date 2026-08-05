@@ -199,3 +199,134 @@ export async function listServerTests(options: {
     })
   );
 }
+
+// ---- organizations -------------------------------------------------------
+// These call Better Auth's organization plugin directly (same-origin,
+// cookie-authenticated); /account/me stays the summary the shell reads.
+
+export interface OrgMember {
+  id: string;
+  role: string;
+  user: { email: string; name: string | null };
+}
+
+export interface OrgInvitation {
+  id: string;
+  email: string;
+  role: string | null;
+  status: string;
+  expiresAt: string;
+}
+
+export interface FullOrganization {
+  id: string;
+  name: string;
+  members: OrgMember[];
+  invitations: OrgInvitation[];
+}
+
+export async function setActiveOrg(organizationId: string): Promise<void> {
+  await json(
+    await fetch("/auth/organization/set-active", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organizationId })
+    })
+  );
+}
+
+export async function createOrg(name: string): Promise<{ id: string }> {
+  const slugBase = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  // A random suffix keeps slugs (globally unique) from colliding on
+  // common names; nobody types these anywhere.
+  const slug = `${slugBase || "org"}-${Math.random().toString(36).slice(2, 8)}`;
+  return json(
+    await fetch("/auth/organization/create", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, slug })
+    })
+  );
+}
+
+export async function fullOrganization(
+  organizationId: string
+): Promise<FullOrganization> {
+  return json(
+    await fetch(
+      `/auth/organization/get-full-organization?organizationId=${encodeURIComponent(organizationId)}`,
+      { credentials: "include" }
+    )
+  );
+}
+
+export async function inviteMember(input: {
+  email: string;
+  role: "member" | "admin";
+}): Promise<void> {
+  await json(
+    await fetch("/auth/organization/invite-member", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input)
+    })
+  );
+}
+
+export async function cancelInvitation(invitationId: string): Promise<void> {
+  await json(
+    await fetch("/auth/organization/cancel-invitation", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ invitationId })
+    })
+  );
+}
+
+export interface InvitationDetails {
+  id: string;
+  email: string;
+  role: string | null;
+  organizationId: string;
+  organizationName: string;
+  status: string;
+}
+
+export async function getInvitation(id: string): Promise<InvitationDetails> {
+  return json(
+    await fetch(
+      `/auth/organization/get-invitation?id=${encodeURIComponent(id)}`,
+      { credentials: "include" }
+    )
+  );
+}
+
+export async function acceptInvitation(invitationId: string): Promise<void> {
+  await json(
+    await fetch("/auth/organization/accept-invitation", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ invitationId })
+    })
+  );
+}
+
+export async function leaveOrg(organizationId: string): Promise<void> {
+  await json(
+    await fetch("/auth/organization/leave", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organizationId })
+    })
+  );
+}
