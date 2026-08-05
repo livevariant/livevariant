@@ -13,6 +13,7 @@ import { Login } from "./pages/Login";
 import { Settings } from "./pages/Settings";
 import { TestDetail } from "./pages/TestDetail";
 import { saveTest } from "./lib/tests-store";
+import { fetchDeploymentConfig } from "./lib/serve-url";
 
 /**
  * The account UI in a real browser: these flows silently hid themselves
@@ -450,6 +451,19 @@ describe("google tag manager", () => {
     expect(
       dataLayer.some(entry => (entry as { event?: string }).event === "gtm.js")
     ).toBe(true);
+  });
+
+  it("rejects a lowercase id (container ids are uppercase, strictly)", async () => {
+    stubServer({
+      "/config": () =>
+        Response.json({
+          serveUrl: "https://serve.example",
+          region: null,
+          gtmId: "gtm-lower99"
+        })
+    });
+    const config = await fetchDeploymentConfig();
+    expect(config.gtmId).toBeNull();
   });
 
   it("injects nothing without a container, or for a malformed one", async () => {
