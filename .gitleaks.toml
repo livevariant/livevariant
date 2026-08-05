@@ -1,0 +1,10 @@
+# LiveVariant publishable keys (pk_...) are public identifiers by
+# design: every install ships one in page source, so one appearing in
+# the repo (our own deployment's key in wrangler.jsonc, fixtures in
+# specs) is not a leak. Everything else scans with the default rules.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Publishable keys are public by design"
+regexes = ['''\bpk_[a-z0-9]{6,}\b''']
