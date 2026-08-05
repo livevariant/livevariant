@@ -47,3 +47,4 @@ vitest.config.*.timestamp*
 __screenshots__
 .vitest-attachments
 .gstack/
+.dev.vars

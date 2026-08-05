@@ -27,12 +27,19 @@ export const DEFAULT_SERVER_URL = "https://livevariant.link";
 export interface McpServerOptions {
   serverUrl?: string;
   fetch?: typeof globalThis.fetch;
+  /**
+   * Account-scoped capability. Absent (a stdio server, a self-host
+   * without accounts) means account-scoped tools are not registered at
+   * all, so an agent never sees a tool the deployment cannot serve.
+   */
+  accounts?: ToolContext["accounts"];
 }
 
 export function toolContext(options: McpServerOptions = {}): ToolContext {
   return {
     serverUrl: options.serverUrl ?? DEFAULT_SERVER_URL,
-    fetch: options.fetch ?? globalThis.fetch
+    fetch: options.fetch ?? globalThis.fetch,
+    accounts: options.accounts
   };
 }
 
@@ -62,7 +69,10 @@ export function registerTools(
   options: McpServerOptions = {}
 ): string[] {
   const context = toolContext(options);
-  for (const tool of TOOLS as readonly ToolDefinition[]) {
+  const available = (TOOLS as readonly ToolDefinition[]).filter(
+    tool => tool.scope !== "account" || context.accounts !== undefined
+  );
+  for (const tool of available) {
     server.registerTool(
       tool.name,
       {
@@ -90,7 +100,7 @@ export function registerTools(
       }) as never
     );
   }
-  return TOOLS.map(tool => tool.name);
+  return available.map(tool => tool.name);
 }
 
 export function createServer(options: McpServerOptions = {}): McpServer {

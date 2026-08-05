@@ -1,8 +1,10 @@
 import { defineConfig } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
+import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
 export default defineConfig({
+  plugins: [react()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url))
@@ -10,7 +12,7 @@ export default defineConfig({
   },
   test: {
     name: "@livevariant/web",
-    include: ["src/**/*.browser.spec.ts"],
+    include: ["src/**/*.browser.spec.ts", "src/**/*.browser.spec.tsx"],
     // tests-store is localStorage persistence: a real browser is the
     // only honest environment for it.
     browser: {

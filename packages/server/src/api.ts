@@ -2,7 +2,8 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "@livevariant/mcp";
-import { regionHint, type CloudflareGeo } from "@livevariant/core";
+import { regionHint, sha256Hex, type CloudflareGeo } from "@livevariant/core";
+import type { AccountsProvider } from "./accounts-port.js";
 import {
   TOOLS,
   ToolInputError,
@@ -43,6 +44,21 @@ export interface ApiOptions {
    * and even where it can, a round trip to yourself is pure latency.
    */
   fetch: typeof globalThis.fetch;
+  /**
+   * When set, the tool API and /mcp require `Authorization: Bearer` with
+   * exactly this value: the self-hoster's server-to-server credential
+   * (LV_API_TOKEN), one deployment-wide identity meaning "the operator".
+   * Unset keeps both surfaces open, which is the account-free default.
+   * The hosted deployment must never set it: "operator" is the wrong
+   * granularity for a multi-tenant service.
+   */
+  apiToken?: string;
+  /**
+   * The accounts read side. Its presence is what registers the
+   * account-scoped tools (list_tests); a deployment without it never
+   * shows an agent a tool it cannot serve.
+   */
+  provider?: AccountsProvider;
 }
 
 export function createApi(options: ApiOptions): Hono {
@@ -59,6 +75,7 @@ export function createApi(options: ApiOptions): Hono {
   // Passed through, it built origin-less URLs like "/s/<config>", which in
   // an email resolve against the mail client and serve nothing.
   const serveUrl = options.serveUrl?.trim() || undefined;
+  const provider = options.provider;
   const contextFor = (url: string, raw?: Request): ToolContext => {
     const origin = new URL(url).origin;
     // The caller's own geography, so build_test can default a new
@@ -69,7 +86,26 @@ export function createApi(options: ApiOptions): Hono {
       serverUrl: origin,
       serveUrl: serveUrl ?? origin,
       region: regionHint(cf) ?? undefined,
-      fetch: options.fetch
+      fetch: options.fetch,
+      // Identity resolves lazily per call: a session cookie on the
+      // same-origin dashboard identifies the caller; without one the
+      // tool rejects with instructions instead of listing nothing.
+      accounts:
+        provider && raw
+          ? {
+              listTests: async listOptions => {
+                const orgIds = await provider.sessionOrgIds(raw);
+                if (orgIds.length === 0) {
+                  throw new ToolInputError(
+                    "sign in required: call this from a signed-in " +
+                      "dashboard session",
+                    401
+                  );
+                }
+                return provider.listTests(orgIds, listOptions);
+              }
+            }
+          : undefined
     };
   };
 
@@ -85,7 +121,31 @@ export function createApi(options: ApiOptions): Hono {
   app.use("/api/*", openCors);
   app.use("/mcp", openCors);
 
-  for (const tool of TOOLS as readonly ToolDefinition[]) {
+  const apiToken = options.apiToken?.trim() || undefined;
+  if (apiToken) {
+    const gate = async (
+      c: Parameters<Parameters<Hono["use"]>[1]>[0],
+      next: () => Promise<void>
+    ): Promise<Response | undefined> => {
+      const header = c.req.header("authorization");
+      const token = header?.match(/^Bearer\s+(\S+)$/i)?.[1];
+      // Hash both sides before comparing: constant-time by construction.
+      if (!token || (await sha256Hex(token)) !== (await sha256Hex(apiToken))) {
+        return c.json({ error: "api token required" }, 401);
+      }
+      await next();
+      return undefined;
+    };
+    // Discovery stays open (/config, /openapi.json, /docs describe the
+    // API without granting anything); the tools and MCP need the token.
+    app.use("/api/v1/*", gate);
+    app.use("/mcp", gate);
+  }
+
+  const availableTools = (TOOLS as readonly ToolDefinition[]).filter(
+    tool => tool.scope !== "account" || provider !== undefined
+  );
+  for (const tool of availableTools) {
     app.post(toolPath(tool.name), async c => {
       const body: unknown = await c.req.json().catch(() => undefined);
       const parsed = tool.input.safeParse(body ?? {});

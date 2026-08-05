@@ -3,6 +3,7 @@ import type { Hono } from "hono";
 import {
   bucketKey,
   configFromParams,
+  decodeConfig,
   dimForShape,
   encodeConfig,
   featureIndices,
@@ -12,6 +13,7 @@ import {
   type TestConfigInput
 } from "@livevariant/core";
 import { createApp } from "./app.js";
+import { paramsFromConfig } from "./service.js";
 import { MemoryStore } from "./store/memory.js";
 
 /**
@@ -699,40 +701,6 @@ describe("source visibility and creator quarantine", () => {
     });
     expect(wrong.status).toBe(401);
   });
-
-  it("serves the manage shell openly; stats stay behind the fragment secret", async () => {
-    const { encoded } = await makeTest();
-    const res = await app.request(`/manage/${encoded}`);
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).toContain("landing page test");
-    // The shell contains no stats data (only loading placeholders), just
-    // the fetch wiring that turns the #fragment into a Bearer header.
-    expect(html).toContain("location.hash");
-    expect(html).toContain("Bearer");
-    expect(html).toContain("loading…");
-  });
-
-  it("offers the plain-URL toggle when the config can be spelled that way", async () => {
-    // Per-variant redirectUrl has no query spelling, so use a config
-    // without one.
-    const { encoded } = await makeTest({
-      variants: [
-        { name: "control", url: "https://example.com/a" },
-        { name: "variant", url: "https://example.com/b" }
-      ]
-    });
-    const html = await (await app.request(`/manage/${encoded}`)).text();
-    expect(html).toContain('id="toggle-plain"');
-    // Inline text variants have no query spelling, so no toggle.
-    const inline = await makeTest({
-      variants: ["Ship faster", "Ship safer"] as any
-    });
-    const inlineHtml = await (
-      await app.request(`/manage/${inline.encoded}`)
-    ).text();
-    expect(inlineHtml).not.toContain('id="toggle-plain"');
-  });
 });
 
 describe("region and scope", () => {
@@ -1401,5 +1369,372 @@ describe("campaign tags as context", () => {
     const s = await statsFor(TEST);
     expect(s.bySignal.utm_source.newsletter.pulls).toBe(1);
     expect(s.bySignal.country).toBeUndefined();
+  });
+});
+
+describe("interstitial for unverified destinations", () => {
+  const hosted = () =>
+    createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      unlistedDestinations: "interstitial"
+    });
+
+  it("shows the continue screen to a navigation, with the decorated target", async () => {
+    const app = hosted();
+    const { encoded } = await makeTest();
+    const res = await app.request(`/s/${encoded}?id=u1&utm_source=nl`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    expect(res.headers.get("cache-control")).toContain("no-store");
+    const html = await res.text();
+    expect(html).toContain("example.com");
+    expect(html).toContain("Redirecting you to");
+    expect(html).toContain('rel="noreferrer"');
+    // Handoff + passthrough decoration survives onto the continue link.
+    expect(html).toContain("_lvt");
+    expect(html).toContain("utm_source=nl");
+  });
+
+  it("still 302s an image-shaped fetch (email clients)", async () => {
+    const app = hosted();
+    const { encoded } = await makeTest();
+    const res = await app.request(`/s/${encoded}?id=u1`, {
+      headers: {
+        accept: "image/webp,image/apng,*/*",
+        "sec-fetch-dest": "image"
+      }
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("example.com");
+  });
+
+  it("302s a listed destination even in interstitial mode", async () => {
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      allowedDestinations: ["example.com"],
+      unlistedDestinations: "interstitial"
+    });
+    const { encoded } = await makeTest();
+    const res = await app.request(`/s/${encoded}?id=u1`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(302);
+  });
+
+  it("gives every variant the same friction when one destination is unlisted", async () => {
+    // One variant on a listed host, one off it: the strictest verdict
+    // wins for the whole test, or the bandit would measure our screen.
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      allowedDestinations: ["example.com"],
+      unlistedDestinations: "interstitial"
+    });
+    const { encoded } = await makeTest({
+      variants: [
+        { name: "listed", url: "https://example.com/a" },
+        { name: "unlisted", url: "https://elsewhere.test/b" }
+      ]
+    });
+    for (const id of ["u1", "u2", "u3", "u4"]) {
+      const res = await app.request(`/s/${encoded}?id=${id}`, {
+        headers: { accept: BROWSER_ACCEPT }
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("text/html");
+    }
+  });
+
+  it("shows the screen on /c clicks and still records the reward", async () => {
+    const app = hosted();
+    const { encoded } = await makeTest();
+    await app.request(`/s/${encoded}?id=u1`, {
+      headers: { accept: "image/webp,*/*" }
+    });
+    const res = await app.request(`/c/${encoded}?id=u1`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("Redirecting you to");
+    const s = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    const rewards = (await s.json()).combinations.reduce(
+      (sum: number, combo: any) => sum + combo.rewardTotal,
+      0
+    );
+    expect(rewards).toBeGreaterThan(0);
+  });
+
+  it("keeps default deployments byte-for-byte on the 302 path", async () => {
+    const app = createApp({ store: new MemoryStore(), rng: mulberry32(7) });
+    const { encoded } = await makeTest();
+    const res = await app.request(`/s/${encoded}?id=u1`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(302);
+  });
+});
+
+describe("SDK origin gate", () => {
+  const gated = () =>
+    createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      allowedOrigins: ["site.example"]
+    });
+
+  async function chooseBody() {
+    const { encoded, testId } = await makeTest();
+    const params = paramsFromConfig(await decodeConfig(encoded));
+    return {
+      testId,
+      slotSizes: params.slotSizes,
+      dim: params.dim,
+      idHash: hex("visitor-1")
+    };
+  }
+
+  it("403s /choose from a foreign origin without recording anything", async () => {
+    const app = gated();
+    const body = await chooseBody();
+    const res = await app.request("/choose", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://stranger.example"
+      },
+      body: JSON.stringify(body)
+    });
+    expect(res.status).toBe(403);
+    const { encoded } = await makeTest();
+    const s = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect((await s.json()).totalAssignments).toBe(0);
+  });
+
+  it("answers /choose from an allowed origin, echoing it in CORS", async () => {
+    const app = gated();
+    const body = await chooseBody();
+    const res = await app.request("/choose", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://site.example"
+      },
+      body: JSON.stringify(body)
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe(
+      "https://site.example"
+    );
+  });
+
+  it("lets server-to-server calls (no Origin) through", async () => {
+    const app = gated();
+    const body = await chooseBody();
+    const res = await app.request("/choose", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("403s /reward from a foreign origin", async () => {
+    const app = gated();
+    const { testId } = await makeTest();
+    const res = await app.request("/reward", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://stranger.example"
+      },
+      body: JSON.stringify({ testId, idHash: hex("visitor-1"), amount: 1 })
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("denies the preflight for a foreign origin", async () => {
+    const app = gated();
+    const res = await app.request("/choose", {
+      method: "OPTIONS",
+      headers: {
+        origin: "https://stranger.example",
+        "access-control-request-method": "POST"
+      }
+    });
+    expect(res.headers.get("access-control-allow-origin")).toBeNull();
+  });
+});
+
+describe("lockReads and org sessions on /stats", () => {
+  function providerFor(
+    policies: Record<string, { orgId: string; lockReads: boolean }>,
+    testOrgs: Record<string, string> = {}
+  ) {
+    return {
+      sessionOrgIds: async (req: Request) => {
+        const cookie = req.headers.get("cookie") ?? "";
+        return cookie.includes("session=owner")
+          ? ["org-1"]
+          : cookie.includes("session=stranger")
+            ? ["org-2"]
+            : [];
+      },
+      keyPolicy: async (kh: string) => policies[kh] ?? null,
+      testOrg: async (testId: string) => testOrgs[testId] ?? null,
+      listTests: async () => ({ tests: [], nextCursor: null })
+    };
+  }
+
+  it("keeps unclaimed keys byte-for-byte classic", async () => {
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider: providerFor({})
+    });
+    const { encoded } = await makeTest();
+    const ok = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect(ok.status).toBe(200);
+    const wrong = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: "Bearer nope" }
+    });
+    expect(wrong.status).toBe(401);
+  });
+
+  it("locked keys refuse the bearer secret with the same 401 as a wrong one", async () => {
+    const kh = await hashStatsSecret(SECRET);
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider: providerFor({ [kh]: { orgId: "org-1", lockReads: true } })
+    });
+    const { encoded } = await makeTest();
+    const bearer = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect(bearer.status).toBe(401);
+    const wrong = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: "Bearer nope" }
+    });
+    // Indistinguishable bodies: a locked key must not be an oracle.
+    expect(await bearer.text()).toBe(await wrong.text());
+    // The owning org's session reads without any secret at all.
+    const session = await app.request(`/stats/${encoded}`, {
+      headers: { cookie: "session=owner" }
+    });
+    expect(session.status).toBe(200);
+    // A different org's session does not.
+    const stranger = await app.request(`/stats/${encoded}`, {
+      headers: { cookie: "session=stranger" }
+    });
+    expect(stranger.status).toBe(401);
+  });
+
+  it("claimed-but-unlocked keys accept both the secret and the session", async () => {
+    const kh = await hashStatsSecret(SECRET);
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider: providerFor({ [kh]: { orgId: "org-1", lockReads: false } })
+    });
+    const { encoded } = await makeTest();
+    expect(
+      (
+        await app.request(`/stats/${encoded}`, {
+          headers: { authorization: `Bearer ${SECRET}` }
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await app.request(`/stats/${encoded}`, {
+          headers: { cookie: "session=owner" }
+        })
+      ).status
+    ).toBe(200);
+  });
+
+  it("keyless registered tests read via the owning org only", async () => {
+    const { encoded, testId } = await makeTest({
+      statsKeyHash: undefined
+    } as any);
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider: providerFor({}, { [testId]: "org-1" })
+    });
+    expect(
+      (
+        await app.request(`/stats/${encoded}`, {
+          headers: { cookie: "session=owner" }
+        })
+      ).status
+    ).toBe(200);
+    expect(
+      (
+        await app.request(`/stats/${encoded}`, {
+          headers: { cookie: "session=stranger" }
+        })
+      ).status
+    ).toBe(401);
+    expect((await app.request(`/stats/${encoded}`)).status).toBe(401);
+  });
+});
+
+describe("publishable-key registration on /choose", () => {
+  it("hands the pair to the provider off the response path", async () => {
+    const calls: unknown[] = [];
+    const provider = {
+      sessionOrgIds: async () => [],
+      keyPolicy: async () => null,
+      testOrg: async () => null,
+      listTests: async () => ({ tests: [], nextCursor: null }),
+      registerFromSdk: async (input: unknown) => {
+        calls.push(input);
+      }
+    };
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      provider
+    });
+    const { encoded, testId } = await makeTest();
+    const params = paramsFromConfig(await decodeConfig(encoded));
+    const res = await app.request("/choose", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        origin: "https://shop.example"
+      },
+      body: JSON.stringify({
+        testId,
+        slotSizes: params.slotSizes,
+        dim: params.dim,
+        idHash: hex("v1"),
+        publishableKey: `pk_${"a".repeat(24)}`,
+        encoded
+      })
+    });
+    expect(res.status).toBe(200);
+    // Node has no waitUntil; the registration promise runs unanchored.
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(calls).toEqual([
+      {
+        testId,
+        encoded,
+        region: undefined,
+        publishableKey: `pk_${"a".repeat(24)}`,
+        origin: "https://shop.example"
+      }
+    ]);
   });
 });

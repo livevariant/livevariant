@@ -36,17 +36,37 @@ export interface ToolContext {
   region?: TestRegion;
   /** Injected so tests need no network and hosts can supply their own. */
   fetch: typeof globalThis.fetch;
+  /**
+   * Account-scoped capability, present only on deployments that HAVE
+   * accounts. Its absence is meaningful: hosts do not register
+   * account-scoped tools without it, so an agent never sees a tool the
+   * deployment cannot serve. The host resolves the caller's identity
+   * (session, API token) before answering; a call without one rejects
+   * with a ToolInputError naming how to authenticate.
+   */
+  accounts?: AccountTools;
+}
+
+/** What account-scoped tools can ask of the host. */
+export interface AccountTools {
+  listTests(options: { q?: string; cursor?: string; limit?: number }): Promise<{
+    tests: Array<{
+      testId: string;
+      name: string | null;
+      encoded: string | null;
+      region: string | null;
+      addedAt: number;
+    }>;
+    nextCursor: string | null;
+  }>;
 }
 
 /**
- * There is deliberately no auth field here. Every tool carries its own
- * authority in its arguments: a test is its config, and reading results
- * needs the stats secret, which the server checks against the hash inside
- * that config. Nothing a caller could authenticate AS would grant more.
- *
- * When account-scoped operations arrive ("list my tests"), which genuinely
- * cannot be authorized by an argument, this is where the requirement goes:
- * a field here, a gate in each host, no change to any existing tool.
+ * Every OPEN tool carries its authority in its arguments: a test is its
+ * config, and reading results needs the stats secret, which the server
+ * checks against the hash inside that config. Only tools that ask
+ * "which tests are MINE" need a caller, and they declare scope
+ * "account" and are registered only where ToolContext.accounts exists.
  */
 export interface ToolDefinition<
   Input extends z.ZodType = z.ZodType,
@@ -69,6 +89,13 @@ export interface ToolDefinition<
   readOnly: boolean;
   /** Whether the handler reaches the network (an MCP openWorldHint). */
   reachesNetwork: boolean;
+  /**
+   * "open" (default): authorized entirely by its arguments, callable on
+   * any deployment. "account": needs an identified caller and the
+   * ToolContext.accounts capability; unregistered where accounts are
+   * absent.
+   */
+  scope?: "open" | "account";
   handler: (
     input: z.infer<Input>,
     context: ToolContext

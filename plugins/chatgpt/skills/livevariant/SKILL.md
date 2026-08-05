@@ -36,6 +36,7 @@ Two consequences that will bite you if you skip them:
 | `inspect_test`    | Decode any test URL and report what it will actually do, with warnings    |
 | `generate_priors` | Turn your predictions into capped priors and embed them                   |
 | `get_stats`       | Live results plus win probabilities and a stop/continue call              |
+| `list_tests`      | Lists the tests saved to the caller's account, with search.               |
 | `upload_image`    | Store an image and get back a protected URL to use as a variant           |
 | `variant_brief`   | Channel-specific specs and rules for drafting the variants themselves     |
 

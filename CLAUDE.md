@@ -63,15 +63,25 @@ fields)`. Tampering derives a different test with empty state.
 
 ## Architecture
 
-| Package                | Purpose                                                       |
-| ---------------------- | ------------------------------------------------------------- |
-| `@livevariant/core`    | Config codec, identity, the joint model, cells, priors, state |
-| `@livevariant/server`  | Hono app behind pluggable `StateStore` + `TestBackend`        |
-| `@livevariant/workers` | Cloudflare: one SQLite Durable Object per test                |
-| `@livevariant/sdk`     | Browser SDK: sticky combinations, GA auto-rewards, handoff    |
-| `@livevariant/tools`   | ONE registry of agent operations: MCP, REST, OpenAPI, SKILL   |
-| `@livevariant/mcp`     | MCP server (stdio) over that registry                         |
-| `apps/web`             | livevariant.com: site + account-free builder (React/shadcn)   |
+| Package                 | Purpose                                                       |
+| ----------------------- | ------------------------------------------------------------- |
+| `@livevariant/core`     | Config codec, identity, the joint model, cells, priors, state |
+| `@livevariant/server`   | Hono app behind pluggable `StateStore` + `TestBackend`        |
+| `@livevariant/workers`  | Cloudflare: one SQLite Durable Object per test                |
+| `@livevariant/sdk`      | Browser SDK: sticky combinations, GA auto-rewards, handoff    |
+| `@livevariant/tools`    | ONE registry of agent operations: MCP, REST, OpenAPI, SKILL   |
+| `@livevariant/mcp`      | MCP server (stdio) over that registry                         |
+| `@livevariant/accounts` | Hosted-only: Better Auth + Drizzle/D1 ownership registry      |
+| `apps/web`              | livevariant.com: site + builder + stats/manage (React/shadcn) |
+
+Two Worker entries: `packages/workers/src/index.ts` (self-host `main`,
+never imports accounts; a bundle-assertion spec proves it) and
+`index.hosted.ts` (`env.production.main`, wires `@livevariant/accounts`
+when the D1 binding and secrets exist). Shared options come from
+`baseAppOptions` so the entries cannot drift. `packages/server` reaches
+accounts only through two dependency-free ports: `TrustPolicy`
+(origins + redirect verdicts, `trust.ts`) and `AccountsProvider`
+(sessions, claimed keys, registered tests, `accounts-port.ts`).
 
 ### HTTP surface
 
@@ -85,8 +95,12 @@ fields)`. Tampering derives a different test with empty state.
 | `GET /stats/:cfg`                                             | Creator-only: combinations, per-slot marginals, buckets, bySignal, perSource, excluded                                                                                   |
 | `POST /recompute/:cfg`                                        | Rebuild derived state from the event log                                                                                                                                 |
 | `POST /exclude/:cfg`                                          | Quarantine source hashes / time windows, then recompute                                                                                                                  |
-| `GET /manage/:cfg`                                            | Static shell; secret in `#fragment`; plain-URL toggle when `configToParams` can express the config                                                                       |
-| `POST /api/v1/*`, `/mcp`, `/docs`, `/openapi.json`, `/config` | The tool registry surfaces + deployment info                                                                                                                             |
+| `POST /api/v1/*`, `/mcp`, `/docs`, `/openapi.json`, `/config` | The tool registry surfaces + deployment info (gated by `LV_API_TOKEN` when set)                                                                                          |
+| `/auth/*`, `/account/*`                                       | Hosted only: Better Auth + registry REST; credentialed CORS, host-gated to the dashboard domain, the only prefixes with cookies                                          |
+
+`/manage/:cfg` is a DASHBOARD route (apps/web, SPA fallback), not a
+server one: the secret stays in the `#fragment` and one React page
+(`TestDetail`) serves saved tests and manage links alike.
 
 Handoff params on redirects: `_lvt` (testId), `_lvid` (idHash), `_lvvar`
 (cell), `_lvr` (region, when set). Query config form: `v` `vn` `s` `n`
@@ -104,9 +118,24 @@ Handoff params on redirects: `_lvt` (testId), `_lvid` (idHash), `_lvvar`
   excluded automatically and there is NO rate limiting: mail-provider
   proxies legitimately concentrate a whole campaign into a few
   prefixes. `applyExclusions` + recompute heal history retroactively.
-- Redirects are an open-redirector risk: `LV_ALLOWED_DESTINATIONS`
-  gates them on public deployments; hosted-asset URLs count as "ours"
-  only when path AND host match.
+- Redirects are an open-redirector risk. The `TrustPolicy` port
+  decides per destination: allow, block, or "interstitial" (an explicit
+  "Redirecting you to…" continue screen, navigations only, decided once
+  per test so variants get equal friction). Env knobs:
+  `LV_ALLOWED_DESTINATIONS` + `LV_UNLISTED_DESTINATIONS`; the hosted
+  deployment runs interstitial-unless-verified through the accounts
+  registry. Hosted-asset URLs count as "ours" only when path AND host
+  match.
+- Ownership is per stats KEY (`kh`), never per test: one secret spans
+  every campaign built from it. Claims are single-statement D1 upserts
+  (race-free by primary key). `lockReads` trades the bearer capability
+  for org sessions on the creator-only endpoints; a locked key 401s
+  exactly like a wrong secret. Secrets cannot rotate (kh is inside the
+  identity hash).
+- SDK registration (`publishableKey` + `encoded` on /choose) is opt-in
+  consent for a JS-mode config to reach the server, requires the page
+  origin's domain verified by the key's org, runs in `waitUntil`, and
+  grants nothing beyond registration.
 - Email signals doctrine: network signals (geo/device) from image
   fetches describe the mail proxy, not the reader; assignment is
   sticky so the first fetch wins. `?auto=0` links, proxy detection, and
@@ -137,6 +166,10 @@ npm test                   # all, incl. Playwright browser tests (sdk, web)
 npm run test:no-browser    # CI-safe subset
 npm run lint && npm run typecheck
 npm run generate           # regenerate skills/livevariant/SKILL.md + plugins; CI fails on diff
+npm run dev:worker         # wrangler dev, env "dev": hosted entry + local D1 accounts.
+                           # First time: npm run migrate:local, and put a random
+                           # LV_AUTH_SECRET in .dev.vars. Without a Resend key the
+                           # magic sign-in link prints to this terminal.
 npm run release            # lockstep versioning: ALL five npm packages, one version, every release
 ```
 

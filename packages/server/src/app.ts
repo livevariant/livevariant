@@ -41,7 +41,15 @@ import {
   DEFAULT_ASSET_TTL_SECONDS,
   type AssetOptions
 } from "./assets/routes.js";
-import { renderManagePage } from "./manage-page.js";
+import { renderInterstitialPage } from "./interstitial-page.js";
+import {
+  envTrustPolicy,
+  originMatches,
+  type RedirectVerdict,
+  type TrustContext,
+  type TrustPolicy,
+  type UnlistedDestinationMode
+} from "./trust.js";
 import {
   labelsFromConfig,
   paramsFromConfig,
@@ -51,6 +59,7 @@ import {
   type ServingParams,
   type TestBackend
 } from "./service.js";
+import type { AccountsProvider } from "./accounts-port.js";
 import type { StateStore } from "./store/types.js";
 
 export interface AppOptions {
@@ -61,13 +70,48 @@ export interface AppOptions {
   /** Injectable for deterministic tests; defaults to a random seed. */
   rng?: Rng;
   /**
-   * Hostnames redirects may send visitors to. Unset means allow-all,
-   * which is right for self-hosters serving their own configs; the
-   * hosted deployment sets it so livevariant.link can't be used as an
-   * open redirector for phishing (anyone can author a config, so the
+   * Hostnames redirects may send visitors to; a hostname admits its
+   * subdomains. Unset means no list, and what happens then is decided
+   * by `unlistedDestinations` (anyone can author a config, so the
    * config's own origins are not a trust boundary).
    */
   allowedDestinations?: string[];
+  /**
+   * Page origins allowed to drive tests through /choose and /reward.
+   * Unset means any origin. A hygiene control for self-hosters running
+   * their own sites, not authentication: only requests that carry an
+   * Origin header are checked, because server-to-server callers have
+   * none, and a non-browser client can claim any origin anyway.
+   */
+  allowedOrigins?: string[];
+  /**
+   * What redirects do with a destination the allowlist does not name:
+   * "allow" it, "block" it, or show the visitor an explicit
+   * "Redirecting you to…" page ("interstitial"). Defaults keep the
+   * classic semantics: allow-all with no list, block-unlisted with one.
+   * The hosted deployment runs "interstitial" with no list, which is
+   * what keeps it open without being an open redirector.
+   */
+  unlistedDestinations?: UnlistedDestinationMode;
+  /**
+   * Full custom trust policy; overrides the three options above. This
+   * is the hook for deployments with their own notion of which origins
+   * and destinations to trust (the hosted registry of verified domains
+   * is one implementation).
+   */
+  trust?: TrustPolicy;
+  /**
+   * Accounts sub-app (sign-in, key claiming, domains), mounted at "/".
+   * Built elsewhere and passed in ready-made: this package never
+   * imports an auth framework, which is what keeps one out of a
+   * self-hoster's bundle.
+   */
+  accounts?: Hono;
+  /**
+   * The read side of accounts for the creator-only endpoints. Unset
+   * (self-host, Node, tests) keeps the classic bearer-secret behavior.
+   */
+  provider?: AccountsProvider;
   /**
    * Optional image hosting: uploads at /assets, signed serving at /a.
    * Unset disables both routes entirely, and configs referencing hosted
@@ -81,6 +125,11 @@ export interface AppOptions {
    * keep bulk email traffic off the dashboard's reputation.
    */
   serveUrl?: string;
+  /**
+   * Self-host machine credential: when set, the tool API (/api/v1) and
+   * /mcp require it as a Bearer token. See ApiOptions.apiToken.
+   */
+  apiToken?: string;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -114,11 +163,47 @@ export function createApp(options: AppOptions): Hono {
     allowMethods: ["GET", "POST", "OPTIONS"],
     allowHeaders: ["content-type", "authorization"]
   });
-  app.use("/choose", openCors);
-  app.use("/reward", openCors);
+  // The SDK endpoints narrow to the origin allowlist when one is set: a
+  // preflight can only be answered from the env list (no body to derive
+  // a test from), and the handlers re-check through the trust policy
+  // before writing anything.
+  const sdkOrigins = (options.allowedOrigins ?? []).filter(Boolean);
+  const sdkCors =
+    sdkOrigins.length === 0
+      ? openCors
+      : cors({
+          origin: origin => (originMatches(origin, sdkOrigins) ? origin : ""),
+          allowMethods: ["POST", "OPTIONS"],
+          allowHeaders: ["content-type"]
+        });
+  app.use("/choose", sdkCors);
+  app.use("/reward", sdkCors);
   app.use("/stats/*", openCors);
   app.use("/recompute/*", openCors);
   app.use("/exclude/*", openCors);
+
+  /**
+   * The handler-side origin gate for /choose and /reward: 403 before
+   * anything is recorded. Only requests carrying an Origin header are
+   * checked; server-to-server callers have none, and against a client
+   * that can forge one this is hygiene, not authentication.
+   */
+  async function originDenied(
+    c: Context,
+    testId: string
+  ): Promise<Response | null> {
+    const origin = c.req.header("origin");
+    if (!origin) {
+      return null;
+    }
+    const allowed = await trust.isOriginAllowedForSDK(origin, {
+      testId,
+      requestUrl: c.req.url
+    });
+    return allowed
+      ? null
+      : c.json({ error: "origin not allowed by this server" }, 403);
+  }
 
   /**
    * Everything the platform tells us about a request. On Workers the geo
@@ -187,13 +272,23 @@ export function createApp(options: AppOptions): Hono {
    */
   async function paramsOr404(
     query: URLSearchParams,
-    requestUrl: string
+    requestUrl: string,
+    navigation: boolean
   ): Promise<{ decoded: DecodedConfig } | { error: Response }> {
     try {
       return { decoded: await configFromParams(query) };
     } catch (err) {
       const target = fallbackTarget(query);
-      if (target && destinationAllowed(target, requestUrl)) {
+      const verdict = target
+        ? await destinationVerdict(target, { testId: "", requestUrl })
+        : false;
+      if (target && verdict !== false) {
+        // Same shape as the main serve path: unverified destinations
+        // show the continue screen to navigations and 302 otherwise
+        // (an ESP's broken template is usually an image fetch).
+        if (verdict === "interstitial" && navigation) {
+          return { error: interstitialResponse(target) };
+        }
         return {
           error: new Response(null, {
             status: 302,
@@ -211,15 +306,18 @@ export function createApp(options: AppOptions): Hono {
   }
 
   /**
-   * Operator allowlist: the only real anti-phishing control here, because
-   * anyone can author a config, so a config's own origins prove nothing.
-   * Unset means allow-all (correct for a self-host serving its own
-   * campaigns); the hosted deployment sets it to protect the serving
-   * domain's reputation. Matches a host or any of its subdomains.
+   * The operator's trust policy is the only real anti-phishing control
+   * here, because anyone can author a config, so a config's own origins
+   * prove nothing. Env-driven by default; a custom policy (the hosted
+   * verified-domain registry) plugs in through options.trust.
    */
-  const allowedHosts = (options.allowedDestinations ?? []).map(h =>
-    h.toLowerCase().replace(/^\./, "")
-  );
+  const trust =
+    options.trust ??
+    envTrustPolicy({
+      allowedOrigins: options.allowedOrigins,
+      allowedDestinations: options.allowedDestinations,
+      unlistedDestinations: options.unlistedDestinations
+    });
   /**
    * A target is OUR hosted asset only when both the path shape AND the
    * host say so. The path alone is spoofable: evil.com/a/<64hex> matches
@@ -246,15 +344,15 @@ export function createApp(options: AppOptions): Hono {
     }
   }
 
-  function destinationAllowed(target: string, requestUrl: string): boolean {
-    // OUR hosted assets never leave this deployment, so the operator
-    // allowlist (an anti-phishing control on outbound redirects) does
-    // not apply to them. Foreign URLs that merely look like asset paths
-    // get no such pass.
-    if (ownAssetId(target, requestUrl)) {
-      return true;
-    }
-    if (allowedHosts.length === 0) {
+  async function destinationVerdict(
+    target: string,
+    ctx: TrustContext
+  ): Promise<RedirectVerdict> {
+    // OUR hosted assets never leave this deployment, so the trust policy
+    // (an anti-phishing control on outbound redirects) does not apply to
+    // them. Foreign URLs that merely look like asset paths get no such
+    // pass.
+    if (ownAssetId(target, ctx.requestUrl)) {
       return true;
     }
     let host: string;
@@ -263,8 +361,77 @@ export function createApp(options: AppOptions): Hono {
     } catch {
       return false;
     }
-    return allowedHosts.some(
-      allowed => host === allowed || host.endsWith(`.${allowed}`)
+    return trust.isDomainAllowedForRedirect(host, ctx);
+  }
+
+  function trustContext(
+    decoded: DecodedConfig,
+    requestUrl: string
+  ): TrustContext {
+    return {
+      testId: decoded.testId,
+      statsKeyHash: decoded.config.statsKeyHash,
+      requestUrl
+    };
+  }
+
+  /**
+   * The strictest verdict across a test's candidate destinations, so a
+   * decision is made once per test, never per variant: a test mixing a
+   * verified and an unverified domain must give every variant the same
+   * friction, or the model would be measuring our interstitial instead
+   * of the creative.
+   */
+  async function destinationsVerdict(
+    targets: string[],
+    ctx: TrustContext
+  ): Promise<RedirectVerdict> {
+    let verdict: RedirectVerdict = true;
+    for (const target of targets) {
+      const v = await destinationVerdict(target, ctx);
+      if (v === false) {
+        return false;
+      }
+      if (v === "interstitial") {
+        verdict = "interstitial";
+      }
+    }
+    return verdict;
+  }
+
+  /**
+   * Whether this request is a human navigation, which is what decides
+   * interstitial eligibility: HTML handed to an email client's image
+   * fetch would break the flagship use case, so anything not clearly a
+   * navigation gets the plain 302 it gets today.
+   */
+  function isNavigation(c: {
+    req: { header(name: string): string | undefined };
+  }): boolean {
+    const dest = c.req.header("sec-fetch-dest");
+    if (dest) {
+      return dest === "document";
+    }
+    return c.req.header("accept")?.includes("text/html") ?? false;
+  }
+
+  /** The interstitial response for an approved-but-unverified target. */
+  function interstitialResponse(continueUrl: string): Response {
+    let host: string;
+    try {
+      host = new URL(continueUrl).hostname;
+    } catch {
+      host = continueUrl;
+    }
+    return new Response(
+      renderInterstitialPage({ continueUrl, destinationHost: host }),
+      {
+        status: 200,
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": NO_STORE
+        }
+      }
     );
   }
 
@@ -324,7 +491,7 @@ export function createApp(options: AppOptions): Hono {
     const encoded = c.req.param("cfg");
     const result = encoded
       ? await decodeOr404(encoded)
-      : await paramsOr404(query, c.req.raw.url);
+      : await paramsOr404(query, c.req.raw.url, isNavigation(c));
     if ("error" in result) {
       return result;
     }
@@ -390,22 +557,54 @@ export function createApp(options: AppOptions): Hono {
    * Stats secret via Authorization: Bearer only. Query parameters would
    * land in access/proxy logs; the shareable manage URL instead carries
    * the secret in its #fragment, which never leaves the browser, and the
-   * manage page's script converts it into this Bearer header.
+   * page's script converts it into this Bearer header.
+   *
+   * With an accounts provider configured, a claimed key adds a second
+   * way in (a session in the owning org) and lockReads can remove the
+   * first. Read the branches in order and note what does not change:
+   * with no provider, or for an unclaimed key, this is byte-for-byte
+   * the classic zero-I/O check, which is the self-host guarantee. Not
+   * on the serving hot path: only /stats, /recompute and /exclude call
+   * this.
    */
   async function authorized(
-    c: { req: { header(name: string): string | undefined } },
+    c: { req: { header(name: string): string | undefined; raw: Request } },
     decoded: DecodedConfig
   ): Promise<boolean> {
     const header = c.req.header("authorization");
     const match = header?.match(/^Bearer\s+(\S+)$/i);
     const secret = match?.[1];
     const { statsKeyHash } = decoded.config;
-    // A config without a stats key has no owner: nothing can match, so
-    // every creator-only endpoint stays shut rather than open.
-    if (!secret || !statsKeyHash) {
+    // A config without a stats key has no owner through the secret path:
+    // nothing can match a hash that is not there. It can still have an
+    // org owner via registration (keyless SDK tests), checked below.
+    const bearerOk =
+      secret && statsKeyHash
+        ? await verifyStatsSecret(secret, statsKeyHash)
+        : false;
+    const provider = options.provider;
+    if (!provider) {
+      return bearerOk;
+    }
+    const policy = statsKeyHash ? await provider.keyPolicy(statsKeyHash) : null;
+    if (policy) {
+      const orgs = await provider.sessionOrgIds(c.req.raw);
+      const orgOk = orgs.includes(policy.orgId);
+      // A locked key must fail exactly like a wrong secret, or an old
+      // secret becomes an oracle for "claimed and locked".
+      return orgOk || (bearerOk && !policy.lockReads);
+    }
+    if (bearerOk) {
+      return true;
+    }
+    // Keyless-but-registered tests: readable by the owning org, which is
+    // the first time a config without a stats key is readable at all.
+    const owner = await provider.testOrg(decoded.testId);
+    if (!owner) {
       return false;
     }
-    return verifyStatsSecret(secret, statsKeyHash);
+    const orgs = await provider.sessionOrgIds(c.req.raw);
+    return orgs.includes(owner);
   }
 
   app.get("/health", c => c.json({ ok: true }));
@@ -415,6 +614,14 @@ export function createApp(options: AppOptions): Hono {
       "/",
       createAssetRoutes({ ...options.assets, serveUrl: options.serveUrl })
     );
+  }
+
+  // Accounts (hosted only): the sub-app arrives ready-made so this
+  // package never depends on an auth framework. Mounted before the tool
+  // API so its /auth and /account prefixes are matched by their own
+  // middleware and nothing else.
+  if (options.accounts) {
+    app.route("/", options.accounts);
   }
 
   /**
@@ -447,6 +654,8 @@ export function createApp(options: AppOptions): Hono {
     "/",
     createApi({
       serveUrl: options.serveUrl,
+      apiToken: options.apiToken,
+      provider: options.provider,
       fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
         app.fetch(new Request(input as RequestInfo, init))) as typeof fetch
     })
@@ -515,10 +724,11 @@ export function createApp(options: AppOptions): Hono {
         400
       );
     }
-    const disallowed = slot.variants.find(
-      v => !destinationAllowed((v.url ?? v.image)!, c.req.url)
+    const verdict = await destinationsVerdict(
+      slot.variants.map(v => (v.url ?? v.image) as string),
+      trustContext(decoded, c.req.url)
     );
-    if (disallowed) {
+    if (verdict === false) {
       return c.json({ error: "destination not allowed by this server" }, 403);
     }
     const { cell } = await service.assign(params, identity);
@@ -529,8 +739,15 @@ export function createApp(options: AppOptions): Hono {
     const decorated = variant.url
       ? maybeDecorate(decoded, identity, cell, choice, target, query)
       : target;
+    const destination = await maybeSignAsset(decorated, c.req.url);
+    // Unverified destinations show the continue screen, but only to a
+    // human navigation headed for a page: an email client fetching an
+    // image variant must always get its 302.
+    if (verdict === "interstitial" && variant.url && isNavigation(c)) {
+      return interstitialResponse(destination);
+    }
     c.header("cache-control", NO_STORE);
-    return c.redirect(await maybeSignAsset(decorated, c.req.url), 302);
+    return c.redirect(destination, 302);
   };
   app.get("/s/:cfg", serveHandler);
   app.get("/s", serveHandler);
@@ -567,11 +784,11 @@ export function createApp(options: AppOptions): Hono {
         400
       );
     }
-    if (
-      !candidates.every(target =>
-        destinationAllowed(target as string, c.req.url)
-      )
-    ) {
+    const verdict = await destinationsVerdict(
+      candidates as string[],
+      trustContext(decoded, c.req.url)
+    );
+    if (verdict === false) {
       return c.json({ error: "destination not allowed by this server" }, 403);
     }
     // A click implies a serve, so assign (sticky or fresh) before rewarding.
@@ -589,14 +806,18 @@ export function createApp(options: AppOptions): Hono {
         decoded.config.region
       );
     }
-    c.header("cache-control", NO_STORE);
-    return c.redirect(
-      await maybeSignAsset(
-        maybeDecorate(decoded, identity, cell, choice, target, query),
-        c.req.url
-      ),
-      302
+    const destination = await maybeSignAsset(
+      maybeDecorate(decoded, identity, cell, choice, target, query),
+      c.req.url
     );
+    // The reward above is already recorded either way; abandonment at
+    // the continue screen is uniform across variants, so it cannot bias
+    // the comparison. Non-navigations (link scanners) still 302.
+    if (verdict === "interstitial" && isNavigation(c)) {
+      return interstitialResponse(destination);
+    }
+    c.header("cache-control", NO_STORE);
+    return c.redirect(destination, 302);
   };
   app.get("/c/:cfg", clickHandler);
   app.get("/c", clickHandler);
@@ -644,6 +865,10 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const r = body.data;
+    const denied = await originDenied(c, r.testId);
+    if (denied) {
+      return denied;
+    }
     // The caller supplies both the priors and their cap, so the cap can't
     // be trusted to bound them: clamp to the server's own ceiling, which
     // is what keeps a hostile prior from pinning a variant (priors are
@@ -683,6 +908,24 @@ export function createApp(options: AppOptions): Hono {
       signals
     });
     const choice = decodeCell(r.slotSizes, cell);
+    // First-sight registration, entirely off the response path: a
+    // publishable key plus a verified page origin may register this
+    // test to an org. The provider decides; serving never waits.
+    if (r.publishableKey && options.provider?.registerFromSdk) {
+      const registration = options.provider.registerFromSdk({
+        testId: r.testId,
+        encoded: r.encoded,
+        region: r.region,
+        publishableKey: r.publishableKey,
+        origin: c.req.header("origin") ?? null
+      });
+      try {
+        c.executionCtx.waitUntil(registration);
+      } catch {
+        // Node has no executionCtx; let it run unanchored (dev only).
+        void registration;
+      }
+    }
     // Signatures for the WINNING combination's hosted assets only. The
     // SDK holds canonical asset URLs in its config that 403 on their own;
     // this is the JS-mode counterpart of the redirect path signing its
@@ -720,6 +963,10 @@ export function createApp(options: AppOptions): Hono {
       );
     }
     const r = body.data;
+    const denied = await originDenied(c, r.testId);
+    if (denied) {
+      return denied;
+    }
     const result = await service.reward(r.testId, r.idHash, r.amount, r.region);
     return c.json({ rewarded: result !== null, first: result?.first ?? false });
   });
@@ -787,16 +1034,10 @@ export function createApp(options: AppOptions): Hono {
     return c.json({ ok: true, events, policy });
   });
 
-  // Unauthenticated static shell: exposes nothing beyond the (public)
-  // config; its script reads the secret from the #fragment and fetches
-  // /stats with a Bearer header.
-  app.get("/manage/:cfg", async c => {
-    const result = await decodeOr404(c.req.param("cfg"));
-    if ("error" in result) {
-      return result.error;
-    }
-    return c.html(renderManagePage(result.decoded.config, c.req.param("cfg")));
-  });
+  // /manage/<cfg> is deliberately NOT here anymore: it is a dashboard
+  // route (apps/web), served by the SPA fallback, so the stats page
+  // exists exactly once. The URL shape and its #fragment secret are
+  // unchanged for everyone holding an old link.
 
   return app;
 }

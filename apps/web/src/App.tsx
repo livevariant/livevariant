@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet } from "react-router";
-import { Moon, Sun } from "lucide-react";
+import { LogOut, Moon, Sun, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { signOut, useAccount } from "@/lib/account";
 import { cn } from "@/lib/utils";
 
 type Theme = "dark" | "light";
@@ -53,6 +54,7 @@ function useTheme(): [Theme, () => void] {
  */
 export function AppLayout() {
   const [theme, toggleTheme] = useTheme();
+  const account = useAccount();
   const navClass = ({ isActive }: { isActive: boolean }) =>
     cn(
       "text-sm transition-colors hover:text-foreground",
@@ -76,6 +78,11 @@ export function AppLayout() {
           <NavLink to="/tests" className={navClass}>
             My tests
           </NavLink>
+          {account.ready && account.available && account.me && (
+            <NavLink to="/settings" className={navClass}>
+              Settings
+            </NavLink>
+          )}
         </nav>
         <nav className="ml-auto flex items-center gap-5 text-sm">
           <a
@@ -103,6 +110,29 @@ export function AppLayout() {
           >
             {theme === "dark" ? <Sun /> : <Moon />}
           </Button>
+          {/* Account controls exist only on deployments that have the
+              module; a plain self-host renders neither button. */}
+          {account.ready &&
+            account.available &&
+            (account.me ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Sign out"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  void signOut().then(() => account.refresh());
+                }}
+              >
+                <LogOut />
+              </Button>
+            ) : (
+              <Button variant="ghost" asChild>
+                <Link to="/login">
+                  <User /> Sign in
+                </Link>
+              </Button>
+            ))}
           <Button variant="outline" asChild>
             <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/livevariant/livevariant">
               Deploy your own

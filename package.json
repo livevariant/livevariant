@@ -18,10 +18,13 @@
     "generate": "node scripts/generate-agent-assets.mjs",
     "release": "node scripts/release.mjs",
     "release:dry": "node scripts/release.mjs --dry-run",
-    "dev:worker": "wrangler dev",
+    "dev": "nx run-many -t dev",
+    "dev:worker": "nx run @livevariant/accounts:build && wrangler dev --env dev",
     "deploy": "wrangler deploy --env=\"\"",
     "deploy:livevariant": "wrangler deploy --env production",
-    "versions:livevariant": "wrangler versions upload --env production"
+    "versions:livevariant": "wrangler versions upload --env production",
+    "migrate:livevariant": "wrangler d1 migrations apply livevariant-accounts --env production --remote",
+    "migrate:local": "wrangler d1 migrations apply livevariant-accounts --env dev --local"
   },
   "lint-staged": {
     "*": "prettier --ignore-unknown --write"
@@ -68,10 +71,19 @@
         "description": "Optional. Leave empty to serve everything from one domain, which is the simplest setup. Set it to a second domain if you send bulk email and want campaign links on their own hostname, so a campaign's reputation never touches your dashboard's."
       },
       "LV_ALLOWED_DESTINATIONS": {
-        "description": "Optional, comma-separated hostnames. Anyone can author a test config pointing anywhere, so set this on a deployment reachable from the internet to stop yours being used as an open redirector."
+        "description": "Optional, comma-separated hostnames redirects may send visitors to (a hostname admits its subdomains). Anyone can author a test config pointing anywhere, so set this on a deployment reachable from the internet to stop yours being used as an open redirector."
+      },
+      "LV_ALLOWED_ORIGINS": {
+        "description": "Optional, comma-separated page origins allowed to drive tests through the SDK (/choose, /reward). Leave empty to accept any origin; set it if only your own sites should be able to run tests against this deployment."
+      },
+      "LV_UNLISTED_DESTINATIONS": {
+        "description": "Optional: what redirects do with a destination not on LV_ALLOWED_DESTINATIONS. 'allow', 'block', or 'interstitial' (visitors see an explicit 'Redirecting you to...' screen). Empty keeps the defaults: allow everything with no list, block unlisted with one."
       },
       "LV_ASSET_SECRET": {
         "description": "Optional. Enables image hosting (uploads at /assets, download URLs signed per serve). Generate one with `openssl rand -hex 32`. Leave empty to run without image hosting."
+      },
+      "LV_API_TOKEN": {
+        "description": "Optional. When set, calling the tools API (/api/v1) and the MCP endpoint requires this value as a Bearer token: your server-to-server credential. Generate one with `openssl rand -hex 32`. Leave empty to keep the API open."
       }
     }
   },

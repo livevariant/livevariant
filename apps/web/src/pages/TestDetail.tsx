@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router";
-import { Check, Copy, RefreshCw } from "lucide-react";
-import { buildTestUrls, hashStatsSecret } from "@livevariant/core";
+import { Bookmark, Check, Copy, RefreshCw, UserPlus } from "lucide-react";
+import { buildTestUrls } from "@livevariant/core";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -11,7 +11,8 @@ import {
   CardTitle
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { loadTests } from "@/lib/tests-store";
+import { useAccount, claimAndRegister } from "@/lib/account";
+import { useResolvedTest, type ResolvedTest } from "@/lib/resolve-test";
 
 interface VariantStats {
   name: string;
@@ -75,35 +76,117 @@ function CopyField({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function TestDetail() {
-  const { testId } = useParams<{ testId: string }>();
-  const test = useMemo(
-    () => loadTests().find(t => t.testId === testId),
-    [testId]
+/**
+ * The "own this test" surface. Renders nothing on deployments without
+ * accounts, which is every self-host without the module: the page then
+ * IS the account-free product.
+ */
+function AccountCard({
+  test,
+  onSaved,
+  autoClaim
+}: {
+  test: ResolvedTest;
+  onSaved: () => void;
+  /** Landing on a manage URL while signed in claims without a click. */
+  autoClaim: boolean;
+}) {
+  const account = useAccount();
+  const [claiming, setClaiming] = useState(false);
+  const [claimed, setClaimed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const attempted = useRef(false);
+
+  const claim = useCallback(() => {
+    if (!test.statsSecret) {
+      return;
+    }
+    setClaiming(true);
+    setError(null);
+    claimAndRegister({
+      statsSecret: test.statsSecret,
+      encoded: test.encoded,
+      name: test.name
+    })
+      .then(() => {
+        setClaimed(true);
+        onSaved();
+      })
+      .catch(err => {
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => setClaiming(false));
+  }, [test.statsSecret, test.encoded, test.name, onSaved]);
+
+  // Opening a manage link IS the claim gesture when a session exists:
+  // whoever holds the secret already has full authority, so asking for
+  // a second click would only lose tests between "made" and "kept".
+  useEffect(() => {
+    if (
+      autoClaim &&
+      account.ready &&
+      account.available &&
+      account.me &&
+      test.statsSecret &&
+      !attempted.current
+    ) {
+      attempted.current = true;
+      claim();
+    }
+  }, [autoClaim, account.ready, account.available, account.me, test, claim]);
+
+  if (!account.ready || !account.available || !test.statsSecret) {
+    return null;
+  }
+  const next = `/manage/${test.encoded}`;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Account</CardTitle>
+        <CardDescription>
+          A claimed test follows you across browsers, and nobody else can claim
+          it. Your stats secret keeps working either way.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {account.me ? (
+          claimed ? (
+            <p className="text-sm">
+              <Check className="mr-1 inline size-4" /> Saved to your account.
+              Find it under <Link to="/tests">My tests</Link>.
+            </p>
+          ) : claiming ? (
+            <p className="text-muted-foreground text-sm">
+              Saving to your account…
+            </p>
+          ) : (
+            <Button disabled={claiming} onClick={claim}>
+              <UserPlus /> Add to my account
+            </Button>
+          )
+        ) : (
+          <Button asChild>
+            <Link
+              to={`/login?next=${encodeURIComponent(next)}`}
+              onClick={onSaved}
+            >
+              <UserPlus /> Log in or create an account to save your tests
+            </Link>
+          </Button>
+        )}
+        {error && <p className="text-destructive text-sm">{error}</p>}
+      </CardContent>
+    </Card>
   );
+}
+
+export function TestDetail() {
+  const params = useParams<{ testId?: string; encoded?: string }>();
+  const { test, ready, save } = useResolvedTest(params);
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [snippetCopied, setSnippetCopied] = useState(false);
-  // The stats key is the one fixed part of an ESP template: set it once
-  // and every campaign built from the template is readable with the same
-  // secret, while each one is still its own test.
-  const [statsKeyHash, setStatsKeyHash] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!test) {
-      return;
-    }
-    let live = true;
-    void hashStatsSecret(test.statsSecret).then(hash => {
-      if (live) {
-        setStatsKeyHash(hash);
-      }
-    });
-    return () => {
-      live = false;
-    };
-  }, [test]);
 
   const refresh = useCallback(async () => {
     if (!test) {
@@ -112,8 +195,14 @@ export function TestDetail() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${test.serverUrl}/stats/${test.encoded}`, {
-        headers: { authorization: `Bearer ${test.statsSecret}` }
+      // Same-origin on purpose: the one Worker answers /stats on every
+      // hostname it serves, and a signed-in member of the owning org can
+      // read without the bearer secret at all.
+      const res = await fetch(`/stats/${test.encoded}`, {
+        credentials: "include",
+        headers: test.statsSecret
+          ? { authorization: `Bearer ${test.statsSecret}` }
+          : {}
       });
       if (!res.ok) {
         throw new Error(`stats request failed (${res.status})`);
@@ -130,11 +219,16 @@ export function TestDetail() {
     void refresh();
   }, [refresh]);
 
+  if (!ready) {
+    return null;
+  }
   if (!test) {
     return (
       <div className="space-y-4 text-center">
         <p className="text-muted-foreground">
-          This test isn't saved in this browser.
+          {params.encoded
+            ? "That link does not contain a valid test."
+            : "This test isn't saved in this browser."}
         </p>
         <Button variant="outline" asChild>
           <Link to="/tests">Back to my tests</Link>
@@ -143,13 +237,18 @@ export function TestDetail() {
     );
   }
 
-  const urls = buildTestUrls(test.serverUrl, test.encoded, test.statsSecret);
+  const urls = buildTestUrls(
+    test.serveUrl,
+    test.encoded,
+    test.statsSecret ?? undefined,
+    window.location.origin
+  );
   // Full encoded config: the snippet must be copy-paste runnable.
   const snippet = `import { createTest } from "@livevariant/sdk";
 
 const test = await createTest(
   "${test.encoded}",
-  { serverUrl: "${test.serverUrl}" }
+  { serverUrl: "${test.serveUrl}" }
 );
 element.textContent = test.variant.text;`;
 
@@ -162,15 +261,21 @@ element.textContent = test.variant.text;`;
             {stats.combinations.length} combinations
           </Badge>
         )}
-        <Button
-          className="ml-auto"
-          variant="outline"
-          size="sm"
-          disabled={loading}
-          onClick={() => void refresh()}
-        >
-          <RefreshCw className={loading ? "animate-spin" : ""} /> Refresh
-        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          {!test.saved && test.statsSecret && (
+            <Button variant="outline" size="sm" onClick={save}>
+              <Bookmark /> Save in this browser
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            onClick={() => void refresh()}
+          >
+            <RefreshCw className={loading ? "animate-spin" : ""} /> Refresh
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -180,7 +285,11 @@ element.textContent = test.variant.text;`;
             {stats
               ? `${stats.totalAssignments} assignments · ${Object.keys(stats.buckets).length} context buckets`
               : error
-                ? `Could not load stats: ${error}`
+                ? `Could not load stats: ${error}${
+                    test.statsSecret
+                      ? ""
+                      : " (open the manage link with its #secret, or sign in to the owning account)"
+                  }`
                 : "loading…"}
           </CardDescription>
         </CardHeader>
@@ -259,6 +368,12 @@ element.textContent = test.variant.text;`;
         )}
       </Card>
 
+      <AccountCard
+        test={test}
+        onSaved={save}
+        autoClaim={params.encoded !== undefined}
+      />
+
       <Card>
         <CardHeader>
           <CardTitle>URLs</CardTitle>
@@ -281,7 +396,9 @@ element.textContent = test.variant.text;`;
             label="Pixel"
             value={`${urls.pixel}?id={{recipient_id}}`}
           />
-          <CopyField label="Manage (keep private)" value={urls.manage} />
+          {test.statsSecret && (
+            <CopyField label="Manage (keep private)" value={urls.manage} />
+          )}
           <p className="text-muted-foreground pt-1 text-sm">
             If your email carries a tracking image, use the pair below instead.
             The image is fetched by the mail provider, not the reader, and
@@ -316,15 +433,15 @@ element.textContent = test.variant.text;`;
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {statsKeyHash && (
+          {test.statsKeyHash && (
             <>
               <CopyField
                 label="Image src (serve)"
-                value={`${test.serverUrl}/s?v={{variant_1_url}}&v={{variant_2_url}}&stamp=utm_content&auto=0&id={{recipient_id}}&kh=${statsKeyHash}`}
+                value={`${test.serveUrl}/s?v={{variant_1_url}}&v={{variant_2_url}}&stamp=utm_content&auto=0&id={{recipient_id}}&kh=${test.statsKeyHash}`}
               />
               <CopyField
                 label="Link href (click)"
-                value={`${test.serverUrl}/c?v={{variant_1_url}}&v={{variant_2_url}}&r={{landing_url}}&stamp=utm_content&auto=0&id={{recipient_id}}&kh=${statsKeyHash}`}
+                value={`${test.serveUrl}/c?v={{variant_1_url}}&v={{variant_2_url}}&r={{landing_url}}&stamp=utm_content&auto=0&id={{recipient_id}}&kh=${test.statsKeyHash}`}
               />
             </>
           )}

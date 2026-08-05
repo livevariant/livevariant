@@ -3,6 +3,10 @@ import type { Hono } from "hono";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TOOLS } from "@livevariant/tools";
+
+// This app has no accounts provider, so the account-scoped tools are
+// deliberately absent from every surface.
+const OPEN_TOOLS = TOOLS.filter(t => t.scope !== "account");
 import { mulberry32 } from "@livevariant/core";
 import { createApp } from "./app.js";
 import { MemoryStore } from "./store/memory.js";
@@ -35,7 +39,7 @@ describe("MCP over HTTP", () => {
     const client = await connect();
     const { tools } = await client.listTools();
     expect(tools.map(t => t.name).sort()).toEqual(
-      TOOLS.map(t => t.name).sort()
+      OPEN_TOOLS.map(t => t.name).sort()
     );
   });
 
@@ -61,8 +65,8 @@ describe("MCP over HTTP", () => {
     // makes this safe across Worker isolates.
     const [a, b] = await Promise.all([connect(), connect()]);
     const [ta, tb] = await Promise.all([a.listTools(), b.listTools()]);
-    expect(ta.tools).toHaveLength(TOOLS.length);
-    expect(tb.tools).toHaveLength(TOOLS.length);
+    expect(ta.tools).toHaveLength(OPEN_TOOLS.length);
+    expect(tb.tools).toHaveLength(OPEN_TOOLS.length);
   });
 
   it("answers on whatever domain the deployment runs on", async () => {
@@ -79,6 +83,6 @@ describe("MCP over HTTP", () => {
       })
     );
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(TOOLS.length);
+    expect(tools).toHaveLength(OPEN_TOOLS.length);
   });
 });

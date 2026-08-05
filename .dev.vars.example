@@ -2,3 +2,21 @@
 # Generate a value with: openssl rand -hex 32
 # Leave unset to run without image hosting.
 LV_ASSET_SECRET=
+
+# Page origins allowed to drive tests through the SDK (/choose, /reward),
+# comma-separated. Leave unset to accept any origin.
+LV_ALLOWED_ORIGINS=
+
+# What redirects do with destinations not on LV_ALLOWED_DESTINATIONS:
+# allow | block | interstitial. Unset keeps the defaults (allow everything
+# with no list, block unlisted with one).
+LV_UNLISTED_DESTINATIONS=
+
+# When set, the tools API (/api/v1) and /mcp require this Bearer token.
+# Generate one with: openssl rand -hex 32. Unset keeps them open.
+LV_API_TOKEN=
+
+# Local accounts (npm run dev:worker uses the hosted entry with a local
+# D1). Any long random string works; without LV_RESEND_API_KEY the magic
+# sign-in link is printed to the wrangler terminal instead of emailed.
+LV_AUTH_SECRET=
