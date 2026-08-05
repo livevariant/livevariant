@@ -76,33 +76,18 @@ function CopyValue({ value }: { value: string }) {
   );
 }
 
-function SdkSnippet({ pk }: { pk: string }) {
-  const serveUrl = useServeUrl();
+function Snippet({ intro, code }: { intro: string; code: string }) {
   const [copied, setCopied] = useState(false);
-  const snippet = `import { createTest } from "@livevariant/sdk";
-
-const test = await createTest(
-  { slots: { headline: ["Ship faster", "Ship safer"] } },
-  {
-    serverUrl: "${serveUrl}",
-    publishableKey: "${pk}"
-  }
-);
-element.textContent = test.slots.headline.text;`;
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <p className="text-muted-foreground flex-1 text-xs">
-          Drop this in your page (npm i @livevariant/sdk). Once it is live on
-          your homepage, "Check now" above verifies the domain by finding this
-          key in the page source.
-        </p>
+        <p className="text-muted-foreground flex-1 text-xs">{intro}</p>
         <Button
           variant="outline"
           size="sm"
           onClick={() => {
             navigator.clipboard
-              .writeText(snippet)
+              .writeText(code)
               .then(() => {
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1500);
@@ -116,8 +101,43 @@ element.textContent = test.slots.headline.text;`;
         </Button>
       </div>
       <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
-        <code>{snippet}</code>
+        <code>{code}</code>
       </pre>
+    </div>
+  );
+}
+
+function SdkSnippet({ pk }: { pk: string }) {
+  const serveUrl = useServeUrl();
+  return (
+    <div className="space-y-4">
+      <Snippet
+        intro={
+          "The tag, in <head>. On its own it already tracks conversions " +
+          "for this visitor's redirect and email tests, sets the page-wide " +
+          'config, and (once live on your homepage) lets "Check now" above ' +
+          "verify the domain."
+        }
+        code={`<script defer src="${serveUrl}/sdk.js"
+        data-publishable-key="${pk}"></script>`}
+      />
+      <p className="text-muted-foreground text-xs">
+        Adding it through Google Tag Manager instead? Use a Custom HTML tag with
+        this same snippet and tick "Support document.write" in the tag settings;
+        verification then needs the rendered check (automatic on the hosted
+        service) since GTM tags never appear in raw HTML.
+      </p>
+      <Snippet
+        intro={
+          "Then testing on-page content needs only the test itself: with " +
+          "the tag installed, createTest reads the server and key from the " +
+          "page config (or pass them explicitly with npm i @livevariant/sdk)."
+        }
+        code={`const test = await window.livevariant.createTest({
+  slots: { headline: ["Ship faster", "Ship safer"] }
+});
+element.textContent = test.slots.headline.text;`}
+      />
     </div>
   );
 }

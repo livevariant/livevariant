@@ -306,12 +306,18 @@ describe("the settings page", () => {
         Response.json({ serveUrl: "https://serve.example", region: null })
     });
     const container = render("/settings");
-    await until(() => container.textContent?.includes(PK) ?? false);
-    const snippet = container.querySelector("pre")?.textContent ?? "";
-    expect(snippet).toContain(`publishableKey: "${PK}"`);
-    expect(snippet).toContain('serverUrl: "https://serve.example"');
-    expect(snippet).toContain("@livevariant/sdk");
-    // The zero-setup verification is explained where domains are added.
-    expect(container.textContent).toContain("page source");
+    // The serve origin arrives async from /config; wait for the final
+    // render, not the first (this exact race failed once on CI).
+    await until(
+      () =>
+        [...container.querySelectorAll("pre")].some(pre =>
+          pre.textContent?.includes("https://serve.example/sdk.js")
+        ) ?? false
+    );
+    const snippets = [...container.querySelectorAll("pre")]
+      .map(pre => pre.textContent ?? "")
+      .join("\n");
+    expect(snippets).toContain(`data-publishable-key="${PK}"`);
+    expect(snippets).toContain("window.livevariant.createTest");
   });
 });

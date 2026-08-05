@@ -135,16 +135,23 @@ export async function verifyDomain(
   if (viaFile) {
     return { ok: true, method: "well-known" };
   }
-  const viaSdk = await checkSdkInstalled(domain, publishableKeys, fetchImpl);
-  if (viaSdk) {
-    return { ok: true, method: "sdk" };
-  }
-  // The rendered pass runs last: it is the expensive one, and the raw
-  // fetch already caught every directly-embedded snippet.
-  if (renderPage && publishableKeys.length > 0) {
-    const html = await renderPage(`https://${domain}/`);
-    if (html && publishableKeys.some(key => html.includes(key))) {
+  // The SDK path: the homepage is resolved ONCE (refusing any offsite
+  // redirect), scanned raw, and only then, still on the same-site URL,
+  // rendered. Rendering the original address instead would follow
+  // redirects freely and hand verification to whatever page a domain
+  // happens to bounce to.
+  if (publishableKeys.length > 0) {
+    const homepage = await fetchHomepage(domain, fetchImpl);
+    if (homepage && keyInScripts(homepage.html, publishableKeys)) {
       return { ok: true, method: "sdk" };
+    }
+    // The rendered pass runs last: it is the expensive one, and the raw
+    // scan already caught every directly-embedded snippet.
+    if (renderPage && homepage) {
+      const html = await renderPage(homepage.finalUrl);
+      if (html && keyInScripts(html, publishableKeys)) {
+        return { ok: true, method: "sdk" };
+      }
     }
   }
   return {
@@ -158,29 +165,35 @@ export async function verifyDomain(
 }
 
 /**
- * The zero-setup path: your publishable key sitting in the homepage's
- * HTML source proves exactly what the well-known file proves (you can
- * put content on this domain), so installing the SDK IS the
- * verification. This is a server-side fetch of the page, deliberately
- * NOT "we saw SDK traffic claiming this Origin": the Origin header and
- * the key are both public and forgeable by any non-browser client, so
- * observed traffic could squat a stranger's domain. A script injected
- * through a tag manager does not appear in the raw HTML; those setups
- * use DNS or the well-known file instead.
+ * Keys count only inside <script> elements (tag body or attributes).
+ * Anywhere else is displayable content, and a homepage that renders
+ * user-generated text (comments, reviews) must not let a stranger
+ * "install" a key by typing it. Script context requires script
+ * injection, which is page control by definition. The same rule bounds
+ * the rendered pass's residual: a page that JS-navigates offsite could
+ * present foreign HTML, but a key in a script there means the attacker
+ * already controls script on that destination.
  */
-async function checkSdkInstalled(
+export function keyInScripts(html: string, keys: string[]): boolean {
+  const scripts = html.match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) ?? [];
+  return scripts.some(block => keys.some(key => block.includes(key)));
+}
+
+/**
+ * The zero-setup path's data source: the homepage, resolved with at
+ * most one redirect and only within the same site (apex to www is
+ * routine); anywhere else would let a domain that merely redirects
+ * somewhere attacker-controlled verify. Deliberately NOT "we saw SDK
+ * traffic claiming this Origin": the Origin header and the key are both
+ * public and forgeable by any non-browser client, so observed traffic
+ * could squat a stranger's domain.
+ */
+async function fetchHomepage(
   domain: string,
-  publishableKeys: string[],
   fetchImpl: typeof fetch
-): Promise<boolean> {
-  if (publishableKeys.length === 0) {
-    return false;
-  }
+): Promise<{ finalUrl: string; html: string } | null> {
   try {
     let url = `https://${domain}/`;
-    // Follow at most one redirect, and only within the same site
-    // (apex to www is routine); anywhere else would let a domain that
-    // merely redirects somewhere attacker-controlled verify.
     for (let hop = 0; hop < 2; hop++) {
       const res = await fetchImpl(url, {
         redirect: "manual",
@@ -190,7 +203,7 @@ async function checkSdkInstalled(
       if (res.status >= 300 && res.status < 400 && hop === 0) {
         const location = res.headers.get("location");
         if (!location) {
-          return false;
+          return null;
         }
         const target = new URL(location, url);
         const sameSite =
@@ -199,13 +212,13 @@ async function checkSdkInstalled(
             target.hostname === `www.${domain}` ||
             domain === target.hostname.replace(/^www\./, ""));
         if (!sameSite) {
-          return false;
+          return null;
         }
         url = target.toString();
         continue;
       }
       if (res.status !== 200 || !res.body) {
-        return false;
+        return null;
       }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -216,22 +229,18 @@ async function checkSdkInstalled(
           break;
         }
         received += decoder.decode(value, { stream: true });
-        if (publishableKeys.some(key => received.includes(key))) {
-          await reader.cancel();
-          return true;
-        }
         // Homepages are big but keys sit in the first script tags; a
         // cap keeps a hostile endless stream from pinning the worker.
         if (received.length > MAX_PAGE_BYTES) {
           await reader.cancel();
-          return false;
+          break;
         }
       }
-      return publishableKeys.some(key => received.includes(key));
+      return { finalUrl: url, html: received };
     }
-    return false;
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
