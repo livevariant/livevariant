@@ -126,6 +126,14 @@ export interface CreateTestOptions {
   /** Defaults to window.localStorage; pass null to disable caching. */
   storage?: Storage | null;
   /**
+   * How long to wait for a tag-manager-loaded tag's global config when
+   * no serverUrl is otherwise known. Tag managers inject the tag late,
+   * so a page script racing it would throw where waiting a moment
+   * succeeds; a page that provides serverUrl itself never waits. False
+   * disables waiting. Default 3000.
+   */
+  tagWaitMs?: number | false;
+  /**
    * How long to wait for the assignment before rendering the control
    * combination. An A/B tool must never hold up a page, so a slow or
    * unreachable server degrades to the first variants rather than block.
@@ -203,8 +211,19 @@ export async function createTest(
   const win = options.window ?? window;
   // Explicit options win; the page-wide global (set by the tag) fills
   // the gaps, which is what lets page code pass no options at all.
-  const pageGlobal = (win as Window & { livevariant?: LiveVariantGlobal })
+  let pageGlobal = (win as Window & { livevariant?: LiveVariantGlobal })
     .livevariant;
+  if (!options.serverUrl && !pageGlobal && options.tagWaitMs !== false) {
+    // No way to reach a server yet: the tag may simply not have loaded
+    // (tag managers inject it late). Waiting here, not in page code,
+    // is what lets every SDK user stay oblivious to that race.
+    pageGlobal =
+      (await whenTagReady({
+        win,
+        timeoutMs:
+          typeof options.tagWaitMs === "number" ? options.tagWaitMs : 3000
+      })) ?? undefined;
+  }
   const serverUrl = options.serverUrl ?? pageGlobal?.serverUrl;
   if (!serverUrl) {
     throw new Error(

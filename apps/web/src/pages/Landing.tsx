@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { ArrowRight, Check, Copy } from "lucide-react";
-import { createTest, whenTagReady, type LiveTest } from "@livevariant/sdk";
+import { createTest, type LiveTest } from "@livevariant/sdk";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -105,9 +105,6 @@ interface PageTestState {
   ready: boolean;
 }
 
-/** How long the landing waits for a tag-manager-loaded tag. */
-const TAG_WAIT_MS = 2500;
-
 function usePageTest(): PageTestState {
   const [state, setState] = useState<PageTestState>({
     headline: 0,
@@ -128,24 +125,17 @@ function usePageTest(): PageTestState {
       try {
         const deployment = await fetchDeploymentConfig();
         // The deployment's own key makes this test OURS in the
-        // dashboard. Prefer the /config copy; without one, wait
-        // briefly for the tag (it arrives late through GTM) whose
-        // global carries the key, and past the timeout show the
-        // control rather than run a key-less, unowned test.
-        const options: { serverUrl?: string; publishableKey?: string } | null =
-          deployment.publishableKey
-            ? {
-                serverUrl: deployment.serveUrl,
-                publishableKey: deployment.publishableKey
-              }
-            : (await whenTagReady({ timeoutMs: TAG_WAIT_MS })) && {};
-        if (!live) {
-          return;
-        }
-        if (!options) {
-          reveal();
-          return;
-        }
+        // dashboard. Prefer the /config copy; without one, pass no
+        // serverUrl at all: createTest then waits for a tag-manager
+        // loaded tag's global (which carries a key) and throws past
+        // its timeout, caught below, so the control renders rather
+        // than a key-less, unowned test running.
+        const options = deployment.publishableKey
+          ? {
+              serverUrl: deployment.serveUrl,
+              publishableKey: deployment.publishableKey
+            }
+          : {};
         created = await createTest(PAGE_TEST, {
           ...options,
           // Conversions are tracked manually on the CTA click; no GA
