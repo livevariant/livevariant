@@ -43,7 +43,7 @@ export async function fetchDeploymentConfig(
       // Shape-checked here so a compromised or garbled /config can only
       // ever name a container, never a script URL.
       gtmId:
-        typeof gtmId === "string" && /^GTM-[A-Z0-9]+$/i.test(gtmId)
+        typeof gtmId === "string" && /^GTM-[A-Z0-9]+$/.test(gtmId)
           ? gtmId
           : null
     };
