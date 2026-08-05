@@ -204,8 +204,9 @@
         "LV_CF_ACCOUNT_ID": "7f5af4cd929693e6a93795847de63fbe",
         // Fill with the GTM-XXXXXXX container id to load Google Tag
         // Manager on the dashboard pages (served via /config, injected
-        // by the SPA). Empty = no GTM.
-        "LV_GOOGLE_TAG_MANAGER": "",
+        // by the SPA). Committed here because deploys overwrite
+        // dashboard-set vars; container ids are public.
+        "LV_GOOGLE_TAG_MANAGER": "GTM-MBJGT37D",
         // Our own publishable key (from Settings), so the landing's
         // hero test registers under our org and shows in My tests.
         // Publishable keys are public by design.
