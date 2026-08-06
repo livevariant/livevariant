@@ -6,7 +6,8 @@
  * instead of a double claim.
  */
 import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
-import { domains, keys, publishableKeys, tests } from "./schema.js";
+import { assetRefs, domains, keys, publishableKeys, tests } from "./schema.js";
+import { decodeConfig } from "@livevariant/core";
 import type { Db } from "./auth.js";
 
 export interface ClaimResult {
@@ -130,6 +131,54 @@ export async function registerTest(
       addedAt: new Date()
     })
     .onConflictDoNothing();
+  await recordAssetRefs(db, input);
+}
+
+/**
+ * Attribution for uploaded files, written at the one moment a config
+ * becomes attributable: registration. The config references its assets
+ * by /a/<sha256> URL; each unique hash gets a (asset, test, org) row,
+ * which is what abuse handling and future cleanup read. Anonymous
+ * tests never reach here, so their assets stay anonymous by design.
+ * Best-effort: a failed ref write must not fail a registration.
+ */
+async function recordAssetRefs(
+  db: Db,
+  input: { testId: string; orgId: string; encoded?: string }
+): Promise<void> {
+  if (!input.encoded) {
+    return;
+  }
+  try {
+    const { config } = await decodeConfig(input.encoded);
+    const hashes = new Set<string>();
+    for (const variants of Object.values(config.slots)) {
+      for (const variant of variants) {
+        for (const value of [variant.url, variant.image]) {
+          const match = value?.match(/\/a\/([0-9a-f]{64})(?:[?#]|$)/);
+          if (match) {
+            hashes.add(match[1]);
+          }
+        }
+      }
+    }
+    if (hashes.size === 0) {
+      return;
+    }
+    await db
+      .insert(assetRefs)
+      .values(
+        [...hashes].map(assetId => ({
+          assetId,
+          testId: input.testId,
+          orgId: input.orgId,
+          createdAt: new Date()
+        }))
+      )
+      .onConflictDoNothing();
+  } catch {
+    // Attribution is a byproduct; registration is the product.
+  }
 }
 
 export interface TestPage {

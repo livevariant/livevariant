@@ -648,3 +648,103 @@ describe("removing a registered test", () => {
     expect(foreign.status).toBe(404);
   });
 });
+
+describe("asset attribution", () => {
+  it("registration records refs for /a/ assets; removal cascades them", async () => {
+    const d1 = (proxy.env as { LV_ACCOUNTS_DB: D1Database }).LV_ACCOUNTS_DB;
+    const emails: Array<{ to: string; subject: string; text: string }> = [];
+    const flow = createAccounts({
+      db: d1,
+      baseUrl: DASHBOARD,
+      secret: "9".repeat(48),
+      sendEmail: async email => {
+        emails.push(email);
+      }
+    });
+    const post = (path: string, body: unknown, cookie?: string) =>
+      flow.routes.request(`${DASHBOARD}${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: DASHBOARD,
+          ...(cookie ? { cookie } : {})
+        },
+        body: JSON.stringify(body)
+      });
+    const cookieOf = (res: Response) =>
+      (res.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map(part => part.split(";")[0].trim())
+        .filter(pair => pair.includes("="))
+        .join("; ");
+
+    await post("/auth/sign-up/email", {
+      name: "attrib",
+      email: "attrib@example.com",
+      password: "attrib-password-long"
+    });
+    const verify = emails
+      .map(e => e.text.match(/https?:\/\/\S+/)?.[0])
+      .find(Boolean)!;
+    const parsed = new URL(verify);
+    await flow.routes.request(
+      `${DASHBOARD}${parsed.pathname}${parsed.search}`,
+      { headers: { origin: DASHBOARD } }
+    );
+    const cookie = cookieOf(
+      await post("/auth/sign-in/email", {
+        email: "attrib@example.com",
+        password: "attrib-password-long"
+      })
+    );
+    const { key: pk } = (await (
+      await post("/account/publishable-keys", {}, cookie)
+    ).json()) as { key: string };
+
+    // Two variants sharing one uploaded asset, plus a second asset and
+    // an external URL that must NOT be recorded.
+    const hashA = "a1".repeat(32);
+    const hashB = "b2".repeat(32);
+    const statsSecret = generateStatsSecret();
+    const { encoded, testId } = await encodeConfig({
+      v: 2,
+      name: "attributed",
+      slots: {
+        hero: [
+          { name: "a", image: `https://serve.example/a/${hashA}` },
+          { name: "b", image: `https://serve.example/a/${hashB}` }
+        ],
+        cta: [
+          { name: "a", image: `https://serve.example/a/${hashA}` },
+          { name: "b", image: "https://cdn.elsewhere.example/own.png" }
+        ]
+      },
+      statsKeyHash: await hashStatsSecret(statsSecret)
+    } as never);
+    const registered = await flow.provider.registerWithSecret({
+      encoded,
+      statsSecret,
+      publishableKey: pk
+    });
+    expect(registered).toMatchObject({ ok: true });
+
+    const refs = await d1
+      .prepare("select asset_id from asset_refs where test_id = ?")
+      .bind(testId)
+      .all();
+    const ids = (refs.results as { asset_id: string }[]).map(r => r.asset_id);
+    expect(ids.sort()).toEqual([hashA, hashB].sort());
+
+    // Removing the listing removes the attribution with it.
+    const removed = await flow.routes.request(
+      `${DASHBOARD}/account/tests/${testId}`,
+      { method: "DELETE", headers: { origin: DASHBOARD, cookie } }
+    );
+    expect(removed.status).toBe(200);
+    const after = await d1
+      .prepare("select count(*) as n from asset_refs where test_id = ?")
+      .bind(testId)
+      .all();
+    expect((after.results as { n: number }[])[0].n).toBe(0);
+  });
+});
