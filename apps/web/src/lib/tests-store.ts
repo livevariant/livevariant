@@ -11,6 +11,8 @@ export interface SavedTest {
   statsSecret: string;
   serverUrl: string;
   createdAt: number;
+  /** Which creation flow made it; older records predate the split. */
+  type?: "email" | "redirect" | "website";
 }
 
 const KEY = "lv:tests";
