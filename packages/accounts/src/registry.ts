@@ -110,6 +110,7 @@ export async function listKeys(db: Db, orgId: string) {
  */
 export async function registerTest(
   db: Db,
+  assetHosts: string[],
   input: {
     testId: string;
     orgId: string;
@@ -131,7 +132,7 @@ export async function registerTest(
       addedAt: new Date()
     })
     .onConflictDoNothing();
-  await recordAssetRefs(db, input);
+  await recordAssetRefs(db, assetHosts, input);
 }
 
 /**
@@ -144,9 +145,10 @@ export async function registerTest(
  */
 async function recordAssetRefs(
   db: Db,
+  assetHosts: string[],
   input: { testId: string; orgId: string; encoded?: string }
 ): Promise<void> {
-  if (!input.encoded) {
+  if (!input.encoded || assetHosts.length === 0) {
     return;
   }
   try {
@@ -155,7 +157,21 @@ async function recordAssetRefs(
     for (const variants of Object.values(config.slots)) {
       for (const variant of variants) {
         for (const value of [variant.url, variant.image]) {
-          const match = value?.match(/\/a\/([0-9a-f]{64})(?:[?#]|$)/);
+          if (!value) {
+            continue;
+          }
+          // The HOST decides whose asset this is; the path shape alone
+          // is spoofable (evil.example/a/<hash> must record nothing).
+          let url: URL;
+          try {
+            url = new URL(value);
+          } catch {
+            continue;
+          }
+          if (!assetHosts.includes(url.hostname.toLowerCase())) {
+            continue;
+          }
+          const match = url.pathname.match(/^\/a\/([0-9a-f]{64})$/);
           if (match) {
             hashes.add(match[1]);
           }

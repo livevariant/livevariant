@@ -70,7 +70,9 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
 
   constructor(
     private db: Db,
-    private auth: () => Auth
+    private auth: () => Auth,
+    /** Hosts whose /a/ URLs are this deployment's own assets. */
+    private assetHosts: string[] = []
   ) {}
 
   async keyPolicy(kh: string): Promise<KeyPolicy | null> {
@@ -207,7 +209,7 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
       }
       for (const candidate of parentDomains(host)) {
         if ((await this.domainOwner(candidate)) === orgId) {
-          await registerTest(this.db, {
+          await registerTest(this.db, this.assetHosts, {
             testId: input.testId,
             orgId,
             name: input.name,
@@ -291,7 +293,7 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
     // RETRY of the same call heals it (the same-org claim path falls
     // through to registerTest). The reverse order could list a test
     // whose keyring a concurrent claimer then took elsewhere.
-    await registerTest(this.db, {
+    await registerTest(this.db, this.assetHosts, {
       testId: decoded.testId,
       orgId,
       kh,

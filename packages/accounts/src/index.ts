@@ -33,11 +33,15 @@ export function createAccounts(config: AccountsConfig): Accounts {
   // The provider needs auth only for session lookups, which cannot
   // happen before a sign-in has happened through the routes; the lazy
   // thunk keeps construction off the serving path either way.
-  const provider = new RegistryProvider(db, lazyAuth);
+  const assetHosts = (
+    config.assetHosts ?? [new URL(config.baseUrl).hostname]
+  ).map(host => host.toLowerCase());
+  const provider = new RegistryProvider(db, lazyAuth, assetHosts);
   const routes = createAccountRoutes({
     db,
     auth: lazyAuth,
     provider,
+    assetHosts,
     baseUrl: config.baseUrl,
     renderPage: config.renderPage
   });

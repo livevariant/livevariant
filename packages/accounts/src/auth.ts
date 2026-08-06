@@ -34,6 +34,14 @@ export interface AccountsConfig {
   baseUrl: string;
   /** Signing secret for sessions and tokens (LV_AUTH_SECRET). */
   secret: string;
+  /**
+   * Hostnames whose /a/<hash> URLs are THIS deployment's uploaded
+   * assets (the dashboard host plus the serving host when separate).
+   * Asset attribution only records these: a foreign host merely using
+   * the same path shape must not create a reference to an internal
+   * asset. Defaults to the baseUrl host.
+   */
+  assetHosts?: string[];
   /** Delivers magic links and verification emails (Resend in prod). */
   sendEmail: SendEmail;
   /**

@@ -656,6 +656,7 @@ describe("asset attribution", () => {
     const flow = createAccounts({
       db: d1,
       baseUrl: DASHBOARD,
+      assetHosts: ["serve.example"],
       secret: "9".repeat(48),
       sendEmail: async email => {
         emails.push(email);
@@ -716,7 +717,9 @@ describe("asset attribution", () => {
         ],
         cta: [
           { name: "a", image: `https://serve.example/a/${hashA}` },
-          { name: "b", image: "https://cdn.elsewhere.example/own.png" }
+          // Foreign host, OUR path shape: must record nothing, or any
+          // config could forge references to internal assets.
+          { name: "b", image: `https://evil.example/a/${"c3".repeat(32)}` }
         ]
       },
       statsKeyHash: await hashStatsSecret(statsSecret)
