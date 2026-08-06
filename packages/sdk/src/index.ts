@@ -207,7 +207,13 @@ export interface LiveTest {
   trackConversion(amount?: number): Promise<void>;
   /** Serve/click/pixel URLs for this test on the configured server. */
   urls: TestUrls;
-  /** Stops the GA dataLayer watcher. */
+  /**
+   * Stops this test's own direct GA watcher (the storage:null mode).
+   * The PAGE-WIDE tracker deliberately survives: a conversion usually
+   * happens pages after the component that rendered the test is gone,
+   * and attribution through the storage cache must keep working, the
+   * same way the tag's tracker outlives any one view.
+   */
   dispose(): void;
 }
 
