@@ -251,18 +251,27 @@ size travel best.`;
 
 const OWNERSHIP_SECTION = `## Saving a test to an account
 
-Creating needs no account, ever. When a human wants a test in their
-dashboard ("My tests"), do NOT collect credentials or keys: hand them the
-\`manage\` URL from \`build_test\` and tell them that opening it (signed in)
-lets them save the test into their organization with one click. The manage
-URL carries the stats secret in its #fragment, so treat it like the secret
-it contains.
+Creating needs no account, ever. When a human wants tests in their
+dashboard ("My tests"), there are two paths; prefer the first:
 
-Publishable keys (\`pk_...\`) are separate and PUBLIC: they only make
-website-served tests register to the key's account automatically when the
-page's domain is verified there. It is safe for a user to paste one into
-chat for you to put in a tag snippet; it grants nothing beyond that
-registration.`;
+1. **Register at creation.** Ask once: "paste your publishable key from
+   Settings (pk_..., it is public and safe here)". Then pass it as
+   \`publishableKey\` to \`build_test\`: the test registers to their
+   organization the moment it exists, and the output confirms with
+   \`registeredTo\`. For a test you built EARLIER in this conversation,
+   \`register_test\` does the same with the config, the stats secret you
+   still hold, and the key.
+2. **The manage URL.** No key or no account yet? Hand them the \`manage\`
+   URL from \`build_test\`: opening it signed-in claims the test in one
+   click. It carries the stats secret in its #fragment, so treat it like
+   the secret it contains.
+
+Why this is safe to do in chat: the publishable key only NAMES the org
+and grants nothing alone; authority is always the stats secret, which
+\`build_test\` mints itself and you never ask the user for. Never collect
+credentials. Registration is what makes the dashboard useful for the
+test: My tests lists it, and its stats become readable there without the
+secret.`;
 
 function restSection(apiUrl: string): string {
   return `## If you cannot install the MCP server
@@ -375,9 +384,10 @@ are all there is.
 
 ## Ownership
 
-Creating requires no account. To save a test into a human's dashboard, hand
-them its manage URL: opening it signed-in claims the test in one click. Never
-collect credentials.
+Creating requires no account. To save a test into a human's dashboard, ask
+for their PUBLIC publishable key (pk_..., from Settings) and pass it to
+build_test, which registers the test at creation; or hand them the manage
+URL, which claims it in one signed-in click. Never collect credentials.
 
 ## Terms
 
@@ -409,9 +419,11 @@ export function renderMcpInstructions(): string {
     "to fixed-size PNGs (browser screenshot or your image tool), and " +
     "upload_image each; all variants of one element must share exact " +
     "dimensions.\n\n" +
-    "To save a test into a human's account, hand them build_test's " +
-    "manage URL (opening it signed-in claims the test); never collect " +
-    "credentials. The full recipes live in the livevariant skill, also " +
-    "served at /skills/livevariant/SKILL.md on every deployment."
+    "To save a test into a human's account, ask for their PUBLIC " +
+    "publishable key (pk_...) and pass it to build_test (registers at " +
+    "creation), or hand them build_test's manage URL (one signed-in " +
+    "click); never collect credentials. The full recipes live in the " +
+    "livevariant skill, also served at /skills/livevariant/SKILL.md on " +
+    "every deployment."
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
-import { CreateTest, type TestType } from "@livevariant/react";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { CreateTest, Snippet, type TestType } from "@livevariant/react";
 import "@livevariant/react/styles.css";
 import { useAccount } from "@/lib/account";
 import { saveTest } from "@/lib/tests-store";
@@ -62,13 +62,42 @@ export function Builder() {
         publishableKeys={publishableKeys}
         verifyDomainsHref="/settings"
         llmContent={
-          <div className="space-y-3">
+          <div className="space-y-4">
             <InstallCard />
-            <p className="text-sm text-muted-foreground">
-              Once installed, describe the test in plain language: your
-              assistant drafts the variants, builds any kind of test, and hands
-              back the links plus a manage URL that saves it here.
-            </p>
+            {publishableKeys[0] ? (
+              <div className="rounded-lg border border-border bg-card p-4">
+                <Snippet
+                  intro={
+                    "Then just ask. Your publishable key is prefilled " +
+                    "(it is public and safe to share with your agent); " +
+                    "registering makes the test appear under My tests:"
+                  }
+                  code={
+                    "Create a LiveVariant A/B test for my [newsletter " +
+                    "hero / landing page / homepage headline]: test " +
+                    "[describe the variants, or ask it to draft them]. " +
+                    "If images are needed and I have none, generate " +
+                    "on-brand variants yourself. Register the test to " +
+                    `my account with publishable key ${publishableKeys[0]} ` +
+                    "and hand back the ready-to-paste snippet plus the " +
+                    "manage link."
+                  }
+                />
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {account.me
+                  ? "Create a publishable key in "
+                  : "Sign in and create a publishable key in "}
+                <Link className="underline" to="/settings">
+                  Settings
+                </Link>{" "}
+                to get a copy-paste prompt with your key prefilled; your
+                assistant can then register tests straight into your account.
+                Without one, it hands back a manage link you open to save the
+                test.
+              </p>
+            )}
           </div>
         }
         onCreated={test => {
