@@ -95,12 +95,12 @@ export default {
         const accounts = createAccounts({
           db: env.LV_ACCOUNTS_DB,
           baseUrl: env.LV_APP_URL,
-          // Asset attribution trusts only these hosts' /a/ URLs: the
-          // dashboard origin and, when serving runs on its own domain
-          // (livevariant.link), that one too.
-          assetHosts: [env.LV_APP_URL, env.LV_SERVE_URL]
-            .filter((origin): origin is string => !!origin)
-            .map(origin => new URL(origin).hostname),
+          // Asset attribution trusts only these exact origins' /a/
+          // URLs: the dashboard origin and, when serving runs on its
+          // own domain (livevariant.link), that one too.
+          assetOrigins: [env.LV_APP_URL, env.LV_SERVE_URL].filter(
+            (origin): origin is string => !!origin
+          ),
           secret: env.LV_AUTH_SECRET,
           renderPage:
             env.LV_CF_ACCOUNT_ID && env.LV_CF_BROWSER_TOKEN

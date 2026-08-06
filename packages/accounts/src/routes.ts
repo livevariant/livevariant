@@ -40,8 +40,8 @@ export interface AccountRoutesDeps {
   db: Db;
   auth: () => Auth;
   provider: RegistryProvider;
-  /** Hosts whose /a/ URLs are this deployment's own assets. */
-  assetHosts: string[];
+  /** Origins whose /a/ URLs are this deployment's own assets. */
+  assetOrigins: string[];
   /** Dashboard origin; the only host these routes answer on. */
   baseUrl: string;
   /** JS-rendered fetch for the tag-manager verification path. */
@@ -307,7 +307,7 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
     if (!policy || policy.orgId !== orgId) {
       return c.json({ error: "claim this test's stats key first" }, 403);
     }
-    await registerTest(deps.db, deps.assetHosts, {
+    await registerTest(deps.db, deps.assetOrigins, {
       testId: decoded.testId,
       orgId,
       kh,

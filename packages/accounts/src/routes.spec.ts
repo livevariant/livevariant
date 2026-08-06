@@ -656,7 +656,7 @@ describe("asset attribution", () => {
     const flow = createAccounts({
       db: d1,
       baseUrl: DASHBOARD,
-      assetHosts: ["serve.example"],
+      assetOrigins: ["https://serve.example"],
       secret: "9".repeat(48),
       sendEmail: async email => {
         emails.push(email);
@@ -720,6 +720,15 @@ describe("asset attribution", () => {
           // Foreign host, OUR path shape: must record nothing, or any
           // config could forge references to internal assets.
           { name: "b", image: `https://evil.example/a/${"c3".repeat(32)}` }
+        ],
+        extra: [
+          // OUR host, wrong scheme or port: serving is origin-bound,
+          // so these are not our assets either.
+          { name: "a", image: `http://serve.example/a/${"d4".repeat(32)}` },
+          {
+            name: "b",
+            image: `https://serve.example:8443/a/${"e5".repeat(32)}`
+          }
         ]
       },
       statsKeyHash: await hashStatsSecret(statsSecret)

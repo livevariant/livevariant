@@ -110,7 +110,7 @@ export async function listKeys(db: Db, orgId: string) {
  */
 export async function registerTest(
   db: Db,
-  assetHosts: string[],
+  assetOrigins: string[],
   input: {
     testId: string;
     orgId: string;
@@ -132,7 +132,7 @@ export async function registerTest(
       addedAt: new Date()
     })
     .onConflictDoNothing();
-  await recordAssetRefs(db, assetHosts, input);
+  await recordAssetRefs(db, assetOrigins, input);
 }
 
 /**
@@ -145,10 +145,10 @@ export async function registerTest(
  */
 async function recordAssetRefs(
   db: Db,
-  assetHosts: string[],
+  assetOrigins: string[],
   input: { testId: string; orgId: string; encoded?: string }
 ): Promise<void> {
-  if (!input.encoded || assetHosts.length === 0) {
+  if (!input.encoded || assetOrigins.length === 0) {
     return;
   }
   try {
@@ -160,15 +160,17 @@ async function recordAssetRefs(
           if (!value) {
             continue;
           }
-          // The HOST decides whose asset this is; the path shape alone
-          // is spoofable (evil.example/a/<hash> must record nothing).
+          // The full ORIGIN decides whose asset this is: serving is
+          // bound to configured origins, so a foreign host, an http
+          // downgrade, or a nonstandard port of our own host all
+          // record nothing (the path shape alone is spoofable).
           let url: URL;
           try {
             url = new URL(value);
           } catch {
             continue;
           }
-          if (!assetHosts.includes(url.hostname.toLowerCase())) {
+          if (!assetOrigins.includes(url.origin)) {
             continue;
           }
           const match = url.pathname.match(/^\/a\/([0-9a-f]{64})$/);
