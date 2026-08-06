@@ -15,6 +15,7 @@ import { Settings } from "./pages/Settings";
 import { TestDetail } from "./pages/TestDetail";
 import { Terms } from "./pages/Terms";
 import { Privacy } from "./pages/Privacy";
+import { resetAccount } from "./lib/account";
 import { saveTest } from "./lib/tests-store";
 import { fetchDeploymentConfig, resetDeploymentConfig } from "./lib/serve-url";
 
@@ -44,6 +45,7 @@ afterEach(() => {
 beforeEach(() => {
   localStorage.clear();
   resetDeploymentConfig();
+  resetAccount();
 });
 
 const STATS_OK = () =>

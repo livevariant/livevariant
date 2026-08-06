@@ -57,6 +57,9 @@
     }
   },
   "analytics": false,
+  // Plain streamed logs, not the interactive terminal UI: dev runs two
+  // continuous servers whose output should scroll like a log.
+  "tui": { "enabled": false },
   "release": {
     "projectsRelationship": "fixed",
     "projects": [

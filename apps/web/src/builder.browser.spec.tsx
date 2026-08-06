@@ -6,6 +6,7 @@ import { AppLayout } from "./App";
 import { Builder } from "./pages/Builder";
 import { TestDetail } from "./pages/TestDetail";
 import { loadTests } from "./lib/tests-store";
+import { resetAccount } from "./lib/account";
 import { resetDeploymentConfig } from "./lib/serve-url";
 
 /**
@@ -22,6 +23,7 @@ let containers: HTMLElement[] = [];
 beforeEach(() => {
   localStorage.clear();
   resetDeploymentConfig();
+  resetAccount();
   stubServer();
 });
 
