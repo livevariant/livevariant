@@ -1246,7 +1246,9 @@ const registerTestTool = defineTool({
     "Prefer passing publishableKey to build_test directly: it registers at " +
     "creation in one step. Keyless tests cannot be registered this way " +
     "(nothing to prove with); they register through the tag on a verified " +
-    "domain.",
+    "domain. Because the key is public, an org's list is publicly " +
+    "writable by design, and the org can always remove a listing from " +
+    "its dashboard (the test itself keeps serving).",
   readOnly: false,
   reachesNetwork: true,
   scope: "account",

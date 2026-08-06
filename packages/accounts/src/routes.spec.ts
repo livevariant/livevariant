@@ -556,3 +556,95 @@ describe("agent registration: secret proves, publishable key names", () => {
     expect(refused).toEqual({ ok: false, reason: "bad-config" });
   });
 });
+
+describe("removing a registered test", () => {
+  it("the org can always take a listing off, and only its own", async () => {
+    const d1 = (proxy.env as { LV_ACCOUNTS_DB: D1Database }).LV_ACCOUNTS_DB;
+    const emails: Array<{ to: string; subject: string; text: string }> = [];
+    const flow = createAccounts({
+      db: d1,
+      baseUrl: DASHBOARD,
+      secret: "f".repeat(48),
+      sendEmail: async email => {
+        emails.push(email);
+      }
+    });
+    const post = (path: string, body: unknown, cookie?: string) =>
+      flow.routes.request(`${DASHBOARD}${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: DASHBOARD,
+          ...(cookie ? { cookie } : {})
+        },
+        body: JSON.stringify(body)
+      });
+    const cookieOf = (res: Response) =>
+      (res.headers.get("set-cookie") ?? "")
+        .split(",")
+        .map(part => part.split(";")[0].trim())
+        .filter(pair => pair.includes("="))
+        .join("; ");
+
+    await post("/auth/sign-up/email", {
+      name: "remover",
+      email: "remover@example.com",
+      password: "remover-password-long"
+    });
+    const verify = emails
+      .map(e => e.text.match(/https?:\/\/\S+/)?.[0])
+      .find(Boolean)!;
+    const parsed = new URL(verify);
+    await flow.routes.request(
+      `${DASHBOARD}${parsed.pathname}${parsed.search}`,
+      { headers: { origin: DASHBOARD } }
+    );
+    const cookie = cookieOf(
+      await post("/auth/sign-in/email", {
+        email: "remover@example.com",
+        password: "remover-password-long"
+      })
+    );
+    const { key: pk } = (await (
+      await post("/account/publishable-keys", {}, cookie)
+    ).json()) as { key: string };
+
+    // A stranger registers a test into the org using the PUBLIC key:
+    // exactly the spam vector removal exists for.
+    const strangerSecret = generateStatsSecret();
+    const spam = await encodeConfig({
+      v: 2,
+      name: "unwanted",
+      variants: [
+        { name: "a", url: "https://spam.example/a" },
+        { name: "b", url: "https://spam.example/b" }
+      ],
+      statsKeyHash: await hashStatsSecret(strangerSecret)
+    } as never);
+    const injected = await flow.provider.registerWithSecret({
+      encoded: spam.encoded,
+      statsSecret: strangerSecret,
+      publishableKey: pk
+    });
+    expect(injected).toMatchObject({ ok: true });
+
+    const removed = await flow.routes.request(
+      `${DASHBOARD}/account/tests/${spam.testId}`,
+      { method: "DELETE", headers: { origin: DASHBOARD, cookie } }
+    );
+    expect(removed.status).toBe(200);
+    const list = (await (
+      await flow.routes.request(`${DASHBOARD}/account/tests`, {
+        headers: { origin: DASHBOARD, cookie }
+      })
+    ).json()) as { tests: { testId: string }[] };
+    expect(list.tests.map(t => t.testId)).not.toContain(spam.testId);
+
+    // Removing something not on this org's list is a 404, not a leak.
+    const foreign = await flow.routes.request(
+      `${DASHBOARD}/account/tests/${"0".repeat(64)}`,
+      { method: "DELETE", headers: { origin: DASHBOARD, cookie } }
+    );
+    expect(foreign.status).toBe(404);
+  });
+});

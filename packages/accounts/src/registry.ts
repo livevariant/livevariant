@@ -274,6 +274,22 @@ export async function removePublishableKey(
   return result.meta.changes > 0;
 }
 
+/**
+ * Removes a test from an org's list. Org-scoped on purpose: a public
+ * publishable key lets anyone REGISTER a test into an org (that is the
+ * pk's job), so the org must symmetrically be able to remove what it
+ * did not ask for.
+ */
+export async function removeTest(
+  db: Db,
+  input: { testId: string; orgId: string }
+): Promise<boolean> {
+  const result = await db
+    .delete(tests)
+    .where(and(eq(tests.testId, input.testId), eq(tests.orgId, input.orgId)));
+  return (result as { meta?: { changes?: number } }).meta?.changes !== 0;
+}
+
 export async function publishableKeyOrg(
   db: Db,
   key: string

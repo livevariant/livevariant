@@ -269,14 +269,28 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
     if (!existing) {
       // Audit trail names the key that performed the claim; claimedBy
       // is deliberately not a user FK.
-      await claimKey(this.db, {
+      const claim = await claimKey(this.db, {
         kh,
         orgId,
         userId: `pk:${input.publishableKey}`,
         label: decoded.config.name
       });
       this.invalidateKey(kh);
+      if (claim.status === "conflict") {
+        // Lost a concurrent race for an unclaimed key: the winner is
+        // authoritative. Same org, proceed; different org, refuse
+        // rather than register a test whose keyring belongs elsewhere.
+        const winner = await this.keyPolicy(kh);
+        if (!winner || winner.orgId !== orgId) {
+          return { ok: false, reason: "claimed-elsewhere" };
+        }
+      }
     }
+    // Claim-then-register, deliberately in that order and not atomic:
+    // a failure here leaves a claimed key without a listed test, and a
+    // RETRY of the same call heals it (the same-org claim path falls
+    // through to registerTest). The reverse order could list a test
+    // whose keyring a concurrent claimer then took elsewhere.
     await registerTest(this.db, {
       testId: decoded.testId,
       orgId,

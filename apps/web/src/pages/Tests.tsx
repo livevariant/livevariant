@@ -215,6 +215,24 @@ export function Tests() {
                   <Trash2 />
                 </Button>
               )}
+              {!row.local && row.onAccount && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Remove from account"
+                  onClick={() => {
+                    // A public publishable key lets anyone REGISTER a
+                    // test here, so removal is the org's symmetric
+                    // right. The listing goes; the test keeps serving.
+                    void fetch(`/account/tests/${row.testId}`, {
+                      method: "DELETE",
+                      credentials: "include"
+                    }).then(() => loadServer(query));
+                  }}
+                >
+                  <Trash2 />
+                </Button>
+              )}
             </CardHeader>
           </Card>
         ))}
