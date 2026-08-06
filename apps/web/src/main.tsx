@@ -7,6 +7,8 @@ import "./index.css";
 import { AppLayout } from "./App.js";
 import { Landing } from "./pages/Landing.js";
 import { Builder } from "./pages/Builder.js";
+import { Terms } from "./pages/Terms.js";
+import { Privacy } from "./pages/Privacy.js";
 import { Tests } from "./pages/Tests.js";
 import { TestDetail } from "./pages/TestDetail.js";
 import { Login } from "./pages/Login.js";
@@ -27,6 +29,8 @@ const router = createBrowserRouter([
       { path: "/manage/:encoded", element: <TestDetail /> },
       { path: "/login", element: <Login /> },
       { path: "/settings", element: <Settings /> },
+      { path: "/terms", element: <Terms /> },
+      { path: "/privacy", element: <Privacy /> },
       { path: "/accept-invitation/:id", element: <AcceptInvitation /> }
     ]
   }

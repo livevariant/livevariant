@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet } from "react-router";
 import { LogOut, Moon, Sun, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
+import { hostedPoliciesApply } from "@/lib/policies";
 import { signOut, useAccount } from "@/lib/account";
 import { useGoogleTagManager } from "@/lib/gtm";
 import { useDeploymentConfig } from "@/lib/serve-url";
@@ -159,6 +160,23 @@ export function AppLayout() {
             Deploy your own
           </a>
           <span>on Cloudflare in one click.</span>
+          {hostedPoliciesApply() && (
+            <>
+              <span aria-hidden="true">·</span>
+              <Link
+                className="underline transition-colors hover:text-foreground"
+                to="/terms"
+              >
+                Terms
+              </Link>
+              <Link
+                className="underline transition-colors hover:text-foreground"
+                to="/privacy"
+              >
+                Privacy
+              </Link>
+            </>
+          )}
         </div>
       </footer>
     </div>
