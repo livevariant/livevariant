@@ -228,3 +228,17 @@
   background: #262626;
   border-radius: 3px;
 }
+
+/* @livevariant/react components follow the app theme instead of the OS
+   preference: map their variables onto the design system's. */
+.lv-root {
+  --lv-bg: var(--card);
+  --lv-fg: var(--card-foreground);
+  --lv-muted: var(--muted-foreground);
+  --lv-border: var(--border);
+  --lv-surface: var(--muted);
+  --lv-accent: var(--primary);
+  --lv-accent-fg: var(--primary-foreground);
+  --lv-danger: var(--destructive);
+  --lv-radius: var(--radius, 0.5rem);
+}

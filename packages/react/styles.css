@@ -1,0 +1,224 @@
+/**
+ * @livevariant/react styles. Everything lives under the lv- prefix and
+ * reads its colors from --lv-* custom properties, so a host app themes
+ * the components by setting variables, not by fighting selectors. The
+ * defaults below follow the OS light/dark preference; a host that
+ * manages its own theme overrides the variables on any ancestor.
+ */
+:root {
+  --lv-bg: #ffffff;
+  --lv-fg: #18181b;
+  --lv-muted: #6b7280;
+  --lv-border: #e4e4e7;
+  --lv-surface: #fafafa;
+  --lv-accent: #18181b;
+  --lv-accent-fg: #ffffff;
+  --lv-danger: #b91c1c;
+  --lv-warn: #b45309;
+  --lv-radius: 0.5rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --lv-bg: #18181b;
+    --lv-fg: #fafafa;
+    --lv-muted: #a1a1aa;
+    --lv-border: #3f3f46;
+    --lv-surface: #27272a;
+    --lv-accent: #fafafa;
+    --lv-accent-fg: #18181b;
+    --lv-danger: #f87171;
+    --lv-warn: #fbbf24;
+  }
+}
+
+.lv-root {
+  color: var(--lv-fg);
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.lv-root *,
+.lv-root *::before,
+.lv-root *::after {
+  box-sizing: border-box;
+}
+
+.lv-card {
+  border: 1px solid var(--lv-border);
+  border-radius: var(--lv-radius);
+  background: var(--lv-bg);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.lv-card-title {
+  font-weight: 600;
+  font-size: 1rem;
+  margin: 0;
+}
+.lv-card-description,
+.lv-hint {
+  color: var(--lv-muted);
+  font-size: 0.8125rem;
+  margin: 0;
+  line-height: 1.45;
+}
+
+.lv-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.lv-label {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.lv-input,
+.lv-select,
+.lv-textarea {
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--lv-fg);
+  background: var(--lv-bg);
+  border: 1px solid var(--lv-border);
+  border-radius: calc(var(--lv-radius) - 0.125rem);
+  padding: 0.4375rem 0.625rem;
+  width: 100%;
+}
+.lv-input:focus-visible,
+.lv-select:focus-visible,
+.lv-textarea:focus-visible,
+.lv-btn:focus-visible {
+  outline: 2px solid var(--lv-accent);
+  outline-offset: 1px;
+}
+
+.lv-btn {
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: calc(var(--lv-radius) - 0.125rem);
+  border: 1px solid transparent;
+  padding: 0.4375rem 0.875rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: var(--lv-accent);
+  color: var(--lv-accent-fg);
+}
+.lv-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.lv-btn--outline {
+  background: transparent;
+  color: var(--lv-fg);
+  border-color: var(--lv-border);
+}
+.lv-btn--ghost {
+  background: transparent;
+  color: var(--lv-muted);
+}
+.lv-btn--sm {
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.625rem;
+}
+.lv-btn--lg {
+  font-size: 0.9375rem;
+  padding: 0.625rem 1.25rem;
+}
+
+/* The type picker: three cards, one choice. */
+.lv-type-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+}
+.lv-type-card {
+  font: inherit;
+  text-align: left;
+  border: 1px solid var(--lv-border);
+  border-radius: var(--lv-radius);
+  background: var(--lv-bg);
+  padding: 1rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.lv-type-card:hover {
+  border-color: var(--lv-accent);
+}
+.lv-type-card[aria-pressed="true"] {
+  border-color: var(--lv-accent);
+  box-shadow: 0 0 0 1px var(--lv-accent);
+}
+.lv-type-card-title {
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+.lv-type-card-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--lv-muted);
+}
+.lv-type-card:hover .lv-type-card-icon,
+.lv-type-card[aria-pressed="true"] .lv-type-card-icon {
+  color: var(--lv-fg);
+}
+
+.lv-variant-row {
+  border: 1px solid var(--lv-border);
+  border-radius: var(--lv-radius);
+  padding: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.lv-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.lv-row > .lv-input {
+  flex: 1;
+}
+.lv-grow {
+  flex: 1;
+}
+
+.lv-snippet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.lv-snippet pre {
+  margin: 0;
+  background: var(--lv-surface);
+  border: 1px solid var(--lv-border);
+  border-radius: calc(var(--lv-radius) - 0.125rem);
+  padding: 0.75rem;
+  font-size: 0.75rem;
+  overflow-x: auto;
+}
+.lv-snippet code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.lv-error {
+  color: var(--lv-danger);
+  font-size: 0.875rem;
+  margin: 0;
+}
+.lv-warning {
+  color: var(--lv-warn);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+.lv-back {
+  align-self: flex-start;
+}

@@ -26,6 +26,9 @@
     },
     {
       "path": "./packages/accounts"
+    },
+    {
+      "path": "./packages/react"
     }
   ],
   "compilerOptions": {

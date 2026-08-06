@@ -135,6 +135,14 @@ export interface AppOptions {
   gtmId?: string;
   /** The deployment's own key. See ApiOptions.publishableKey. */
   publishableKey?: string;
+  /**
+   * First-party identity cookie for id-less serve/click NAVIGATIONS
+   * (LV_BROWSER_ID_COOKIE, "off" disables). Image fetches and ?auto=0
+   * links (email) never see it: proxies strip cookies there anyway,
+   * and minting one would be tracking theater. False = fully
+   * cookieless deployment.
+   */
+  browserIdCookie?: boolean;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -420,6 +428,14 @@ export function createApp(options: AppOptions): Hono {
     return c.req.header("accept")?.includes("text/html") ?? false;
   }
 
+  /** Attaches a Set-Cookie to a hand-built Response (mutable headers). */
+  function withCookie(res: Response, cookie?: string): Response {
+    if (cookie) {
+      res.headers.append("set-cookie", cookie);
+    }
+    return res;
+  }
+
   /** The interstitial response for an approved-but-unverified target. */
   function interstitialResponse(continueUrl: string): Response {
     let host: string;
@@ -487,6 +503,8 @@ export function createApp(options: AppOptions): Hono {
         params: ServingParams;
         identity: Awaited<ReturnType<typeof resolveIdentity>>;
         query: URLSearchParams;
+        /** A browser-id cookie to attach to whatever response goes out. */
+        setCookie?: string;
       }
   > {
     const query = new URL(c.req.raw.url).searchParams;
@@ -505,11 +523,11 @@ export function createApp(options: AppOptions): Hono {
     // The config is authoritative: it defines the test's real shape, so
     // it overwrites anything a JS-mode caller pinned earlier.
     await service.checkShape(params, true);
-    const externalId = c.req.query("id") ?? null;
+    const resolved = await resolveServeIdentity(c, decoded.testId);
     const identity = await resolveIdentity(
       decoded,
       params.dim,
-      externalId ? await externalIdHash(decoded.testId, externalId) : null,
+      resolved.idHash,
       ctxFromQuery(c.req.query()),
       await sourceHash(decoded.testId, clientIp(c), Date.now()),
       {
@@ -518,7 +536,65 @@ export function createApp(options: AppOptions): Hono {
         query
       }
     );
-    return { decoded, params, identity, query };
+    return { decoded, params, identity, query, setCookie: resolved.setCookie };
+  }
+
+  const BROWSER_ID_COOKIE = "lv_uid";
+  const BROWSER_ID_TTL_S = 180 * 24 * 60 * 60;
+
+  /**
+   * Who this serve/click is for, strongest source first:
+   *
+   *   1. ?id=     the caller's own identifier (email merge tags), hashed
+   *               per test here;
+   *   2. ?_lvid=  an already-hashed identity, which is how the tag reuses
+   *               a redirect handoff for the SAME test embedded on the
+   *               landing page (email and page then show one variant);
+   *   3. lv_uid   the first-party browser cookie, minted on id-less page
+   *               NAVIGATIONS so a shared redirect link is sticky and
+   *               rewardable for return visits. Never on image fetches
+   *               (mail proxies and cross-site embeds strip cookies) and
+   *               never on ?auto=0 links (email by declaration).
+   *
+   * The cookie's raw value never reaches storage: like ?id=, it is
+   * hashed per test, so one browser yields unlinkable identities across
+   * tests.
+   */
+  async function resolveServeIdentity(
+    c: {
+      req: {
+        query(name: string): string | undefined;
+        header(name: string): string | undefined;
+      };
+    },
+    testId: string
+  ): Promise<{ idHash: string | null; setCookie?: string }> {
+    const raw = c.req.query("id");
+    if (raw) {
+      return { idHash: await externalIdHash(testId, raw) };
+    }
+    const preHashed = c.req.query("_lvid");
+    if (preHashed && /^[0-9a-f]{64}$/.test(preHashed)) {
+      return { idHash: preHashed };
+    }
+    if (
+      options.browserIdCookie === false ||
+      !isNavigation(c) ||
+      autoContextDisabled(c.req.query("auto"))
+    ) {
+      return { idHash: null };
+    }
+    const existing = (c.req.header("cookie") ?? "").match(
+      /(?:^|;\s*)lv_uid=([A-Za-z0-9-]{8,64})/
+    )?.[1];
+    const uid = existing ?? crypto.randomUUID();
+    return {
+      idHash: await externalIdHash(testId, uid),
+      setCookie: existing
+        ? undefined
+        : `${BROWSER_ID_COOKIE}=${uid}; Max-Age=${BROWSER_ID_TTL_S}; ` +
+          `Path=/; Secure; HttpOnly; SameSite=Lax`
+    };
   }
 
   /**
@@ -750,8 +826,11 @@ export function createApp(options: AppOptions): Hono {
     // Unverified destinations show the continue screen, but only to a
     // human navigation headed for a page: an email client fetching an
     // image variant must always get its 302.
+    if (ctx.setCookie) {
+      c.header("set-cookie", ctx.setCookie);
+    }
     if (verdict === "interstitial" && variant.url && isNavigation(c)) {
-      return interstitialResponse(destination);
+      return withCookie(interstitialResponse(destination), ctx.setCookie);
     }
     c.header("cache-control", NO_STORE);
     return c.redirect(destination, 302);
@@ -805,7 +884,12 @@ export function createApp(options: AppOptions): Hono {
     const target = (to ??
       variant.redirectUrl ??
       decoded.config.redirectUrl) as string;
-    if (identity.idHash) {
+    // Never reward an identity BORN on this request: a crawler or link
+    // scanner presenting browser headers would otherwise mint a cookie
+    // and count a conversion in one hit. A real first-time visitor
+    // still gets their assignment and cookie here; their conversions
+    // count from the next identified touch (pixel, tag, later click).
+    if (identity.idHash && !ctx.setCookie) {
       await service.reward(
         decoded.testId,
         identity.idHash,
@@ -820,8 +904,11 @@ export function createApp(options: AppOptions): Hono {
     // The reward above is already recorded either way; abandonment at
     // the continue screen is uniform across variants, so it cannot bias
     // the comparison. Non-navigations (link scanners) still 302.
+    if (ctx.setCookie) {
+      c.header("set-cookie", ctx.setCookie);
+    }
     if (verdict === "interstitial" && isNavigation(c)) {
-      return interstitialResponse(destination);
+      return withCookie(interstitialResponse(destination), ctx.setCookie);
     }
     c.header("cache-control", NO_STORE);
     return c.redirect(destination, 302);
@@ -835,19 +922,25 @@ export function createApp(options: AppOptions): Hono {
     if (!("error" in result)) {
       const { decoded } = result;
       const externalId = c.req.query("id");
+      const preHashed = c.req.query("_lvid");
+      const idHash = externalId
+        ? await externalIdHash(decoded.testId, externalId)
+        : preHashed && /^[0-9a-f]{64}$/.test(preHashed)
+          ? preHashed
+          : null;
       const amount = Number(c.req.query("amount") ?? "1");
       // Same bound as /reward: the pixel URL is public (it carries the raw
       // recipient id in emails), so an unbounded amount lets any recipient
       // or link-scanner drive rewardTotal to Infinity.
       if (
-        externalId &&
+        idHash &&
         Number.isFinite(amount) &&
         amount > 0 &&
         amount <= MAX_REWARD_AMOUNT
       ) {
         await service.reward(
           decoded.testId,
-          await externalIdHash(decoded.testId, externalId),
+          idHash,
           amount,
           decoded.config.region
         );
