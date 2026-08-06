@@ -44,15 +44,18 @@ function CopyButton({
 
 function CommandRow({
   command,
+  prompt = true,
   onCopied
 }: {
   command: string;
+  /** False for values that are not shell commands (URLs). */
+  prompt?: boolean;
   onCopied?: () => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-1.5">
       <code className="overflow-x-auto whitespace-nowrap font-mono text-sm">
-        <span className="text-muted-foreground">$ </span>
+        {prompt && <span className="text-muted-foreground">$ </span>}
         {command}
       </code>
       <CopyButton text={command} onCopied={onCopied} />
@@ -109,14 +112,21 @@ export function InstallCard({ onConvert }: { onConvert?: () => void }) {
           </TabsContent>
           <TabsContent value="mcp" className="space-y-2">
             <CommandRow
+              command={`${window.location.origin}/mcp`}
+              prompt={false}
+              onCopied={onConvert}
+            />
+            <p className="text-sm text-muted-foreground">
+              The hosted endpoint: paste it into any MCP-capable agent. No API
+              keys; a test's config and stats secret carry all the authority
+              there is.
+            </p>
+            <CommandRow
               command="npx -y @livevariant/mcp"
               onCopied={onConvert}
             />
             <p className="text-sm text-muted-foreground">
-              Or connect to the hosted endpoint at{" "}
-              <code className="font-mono">https://livevariant.com/mcp</code>. No
-              API keys; a test's config and stats secret carry all the authority
-              there is.
+              Or run the same server locally over stdio.
             </p>
           </TabsContent>
         </Tabs>
