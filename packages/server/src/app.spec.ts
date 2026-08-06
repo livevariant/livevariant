@@ -1851,3 +1851,125 @@ describe("fresh-minted identities never reward", () => {
     expect(sumConversions(s)).toBe(1);
   });
 });
+
+describe("readable bucket labels", () => {
+  function cfRequest(path: string, cf: { country?: string }): Request {
+    const req = new Request(`http://localhost${path}`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    Object.defineProperty(req, "cf", { value: cf });
+    return req;
+  }
+
+  it("names enumerable buckets and leaves free-form ones opaque", async () => {
+    const { encoded } = await makeTest({
+      ctx: {
+        dims: [
+          { key: "country", from: "country", values: ["nl", "de"] },
+          { key: "persona" }
+        ]
+      }
+    });
+    await app.request(cfRequest(`/s/${encoded}?id=a`, { country: "NL" }));
+    await app.request(
+      cfRequest(`/s/${encoded}?id=b&c_persona=power`, { country: "DE" })
+    );
+    const s = await stats(encoded);
+    const buckets = Object.values(s.buckets) as Array<{ label?: string }>;
+    expect(buckets).toHaveLength(2);
+    const labels = buckets.map(b => b.label);
+    // The pure-geo bucket is recoverable; the one that mixes in a
+    // free-form persona is not, and stays honestly opaque.
+    expect(labels).toContain("country=nl");
+    expect(labels.filter(l => l === undefined)).toHaveLength(1);
+  });
+});
+
+describe("live stats stream", () => {
+  /** Reads SSE events off a streaming response until `count` arrive. */
+  async function readEvents(
+    res: Response,
+    count: number
+  ): Promise<Array<{ event: string; data: string }>> {
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    const events: Array<{ event: string; data: string }> = [];
+    let buffer = "";
+    while (events.length < count) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      let sep;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        const chunk = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        let event = "message";
+        let data = "";
+        for (const line of chunk.split("\n")) {
+          if (line.startsWith("event:")) {
+            event = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            data += line.slice(5).trim();
+          }
+        }
+        events.push({ event, data });
+      }
+    }
+    await reader.cancel();
+    return events;
+  }
+
+  it("requires the stats secret, exactly like /stats", async () => {
+    const { encoded } = await makeTest();
+    expect((await app.request(`/stats/${encoded}/stream`)).status).toBe(401);
+    const wrong = await app.request(`/stats/${encoded}/stream`, {
+      headers: { authorization: "Bearer not-the-secret" }
+    });
+    expect(wrong.status).toBe(401);
+  });
+
+  it("pushes the current stats immediately, then again on change", async () => {
+    // A short interval so the test measures behavior, not wall clock.
+    const fast = createApp({
+      store,
+      rng: mulberry32(42),
+      statsStreamIntervalMs: 20
+    });
+    const { encoded } = await makeTest();
+    await fast.request(`/s/${encoded}?id=viewer1`);
+    const res = await fast.request(`/stats/${encoded}/stream`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+
+    const reading = readEvents(res, 4);
+    // Land a conversion while the stream is open; one of the next reads
+    // must pick it up and push a second stats event.
+    await fast.request(`/px/${encoded}?id=viewer1`);
+    const events = await reading;
+    const statsEvents = events.filter(e => e.event === "stats");
+    expect(statsEvents.length).toBeGreaterThanOrEqual(1);
+    const first = JSON.parse(statsEvents[0].data);
+    expect(first.totalAssignments).toBe(1);
+    const last = JSON.parse(statsEvents[statsEvents.length - 1].data);
+    expect(sumConversions(last)).toBe(1);
+  });
+
+  it("keeps quiet connections alive with pings instead of re-sending", async () => {
+    const fast = createApp({
+      store,
+      rng: mulberry32(42),
+      statsStreamIntervalMs: 10
+    });
+    const { encoded } = await makeTest();
+    const res = await fast.request(`/stats/${encoded}/stream`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    const events = await readEvents(res, 3);
+    expect(events[0].event).toBe("stats");
+    expect(events.slice(1).every(e => e.event === "ping")).toBe(true);
+  });
+});

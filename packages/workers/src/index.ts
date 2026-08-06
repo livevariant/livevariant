@@ -3,6 +3,7 @@ import {
   mulberry32,
   randomSeed,
   type AssignmentRecord,
+  type CtxDim,
   type TestRegion
 } from "@livevariant/core";
 import {
@@ -136,9 +137,10 @@ export class TestStateDO extends DurableObject {
 
   stats(
     params: ServingParams,
-    labels?: Array<{ key: string; variants: string[] }>
+    labels?: Array<{ key: string; variants: string[] }>,
+    ctxDims?: CtxDim[]
   ) {
-    return this.service(params.testId).stats(params, labels);
+    return this.service(params.testId).stats(params, labels, ctxDims);
   }
 
   updatePolicy(testId: string, patch: TestPolicy): Promise<TestPolicy> {
@@ -325,9 +327,14 @@ class DurableObjectBackend implements TestBackend {
 
   stats(
     params: ServingParams,
-    labels?: Array<{ key: string; variants: string[] }>
+    labels?: Array<{ key: string; variants: string[] }>,
+    ctxDims?: CtxDim[]
   ) {
-    return this.stub(params.testId, params.region).stats(params, labels);
+    return this.stub(params.testId, params.region).stats(
+      params,
+      labels,
+      ctxDims
+    );
   }
 
   updatePolicy(testId: string, patch: TestPolicy, region?: TestRegion) {

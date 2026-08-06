@@ -124,6 +124,21 @@ function click(container: HTMLElement, text: string) {
   button!.click();
 }
 
+/**
+ * The deployment default arrives async from /config. Creating before it
+ * lands would freeze the fallback origin into the saved record, so the
+ * assertions on serve.example URLs afterwards could never come true;
+ * the "Serving server" field shows when the default is actually in.
+ */
+async function untilDeploymentDefault(container: HTMLElement) {
+  await until(() => {
+    const input = container.querySelector(
+      "#lv-server"
+    ) as HTMLInputElement | null;
+    return input?.value === "https://serve.example";
+  });
+}
+
 describe("creating each test type from the dashboard", () => {
   it("redirect: picker to saved record to detail page", async () => {
     const container = render("/builder");
@@ -136,6 +151,7 @@ describe("creating each test type from the dashboard", () => {
     );
     setByLabel(container, "Variant 1 destination URL", "https://example.com/a");
     setByLabel(container, "Variant 2 destination URL", "https://example.com/b");
+    await untilDeploymentDefault(container);
     click(container, "Create redirect test");
     await until(() => loadTests().length > 0);
     expect(loadTests()[0].type).toBe("redirect");
@@ -162,6 +178,7 @@ describe("creating each test type from the dashboard", () => {
       "Element 1 variant 2 image URL",
       "https://cdn.example/b.png"
     );
+    await untilDeploymentDefault(container);
     click(container, "Create email test");
     await until(() => loadTests().length > 0);
     expect(loadTests()[0].type).toBe("email");
@@ -175,6 +192,7 @@ describe("creating each test type from the dashboard", () => {
     await until(() => container.textContent?.includes("Variants") ?? false);
     setByLabel(container, "Element 1 variant 1 text", "Ship faster");
     setByLabel(container, "Element 1 variant 2 text", "Ship safer");
+    await untilDeploymentDefault(container);
     click(container, "Create website test");
     await until(() => loadTests().length > 0);
     expect(loadTests()[0].type).toBe("website");
