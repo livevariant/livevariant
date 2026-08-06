@@ -135,13 +135,22 @@ describe("derived analytics", () => {
   });
 
   it("finds each bucket's own winner, labeled or not", () => {
-    const buckets = summarizeBuckets(payload());
+    const { top, hidden } = summarizeBuckets(payload());
     // Sorted by pulls: the nl bucket (40) ahead of the opaque one (30).
-    expect(buckets[0].name).toBe("country=nl");
-    expect(buckets[0].leader).toBe("variant");
+    expect(top[0].name).toBe("country=nl");
+    expect(top[0].leader).toBe("variant");
     // The opaque bucket leans the OTHER way: control converts there.
-    expect(buckets[1].labeled).toBe(false);
-    expect(buckets[1].leader).toBe("control");
+    expect(top[1].labeled).toBe(false);
+    expect(top[1].leader).toBe("control");
+    expect(hidden).toBe(0);
+  });
+
+  it("spends the posterior work only on the buckets it will show", () => {
+    // Ranking is cheap totals; analysis past the display cap is waste.
+    const { top, hidden } = summarizeBuckets(payload(), 1);
+    expect(top).toHaveLength(1);
+    expect(top[0].name).toBe("country=nl");
+    expect(hidden).toBe(1);
   });
 });
 

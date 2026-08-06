@@ -391,7 +391,7 @@ export function StatsPanel({
 
               {/* Context buckets: where "a different winner per audience
                   segment" becomes visible. */}
-              {derived.buckets.length > 0 && (
+              {derived.buckets.top.length > 0 && (
                 <div className="space-y-2">
                   <div className="font-mono text-sm text-muted-foreground">
                     context buckets
@@ -410,7 +410,7 @@ export function StatsPanel({
                       </tr>
                     </thead>
                     <tbody className="font-mono tabular-nums">
-                      {derived.buckets.slice(0, 12).map(bucket => (
+                      {derived.buckets.top.map(bucket => (
                         <tr key={bucket.key} className="border-b last:border-0">
                           <td
                             className={
@@ -440,9 +440,9 @@ export function StatsPanel({
                       ))}
                     </tbody>
                   </table>
-                  {derived.buckets.length > 12 && (
+                  {derived.buckets.hidden > 0 && (
                     <p className="text-xs text-muted-foreground">
-                      and {derived.buckets.length - 12} smaller buckets
+                      and {derived.buckets.hidden} smaller buckets
                     </p>
                   )}
                 </div>

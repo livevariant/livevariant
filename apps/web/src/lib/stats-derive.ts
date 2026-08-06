@@ -123,16 +123,35 @@ export interface BucketSummary {
   probabilityBest: number;
 }
 
+export interface BucketSummaries {
+  /** The busiest buckets, fully analyzed, biggest first. */
+  top: BucketSummary[];
+  /** How many smaller buckets exist beyond `top`. */
+  hidden: number;
+}
+
 /**
  * Per-bucket leaders: the product's headline claim ("a different winner
- * can emerge per audience segment") made visible. Fewer Monte Carlo
- * draws than the headline analysis: dozens of buckets get analyzed per
- * payload, and per-bucket data is thin anyway.
+ * can emerge per audience segment") made visible. The posterior work is
+ * spent only on the buckets that will actually be shown: ranking needs
+ * nothing but pull totals, and a test with hundreds of buckets must not
+ * pay millions of Monte Carlo draws on the main thread per live update.
+ * Fewer draws than the headline analysis, too: per-bucket data is thin.
  */
-export function summarizeBuckets(stats: TestStats): BucketSummary[] {
-  const summaries = Object.entries(stats.buckets).map(([key, bucket]) => {
-    const arms: ArmOutcome[] = bucket.pulls.map((pulls, cell) => ({
-      pulls,
+export function summarizeBuckets(
+  stats: TestStats,
+  limit = 12
+): BucketSummaries {
+  const ranked = Object.entries(stats.buckets)
+    .map(([key, bucket]) => ({
+      key,
+      bucket,
+      pulls: bucket.pulls.reduce((sum, pulls) => sum + pulls, 0)
+    }))
+    .sort((a, b) => b.pulls - a.pulls);
+  const top = ranked.slice(0, limit).map(({ key, bucket, pulls }) => {
+    const arms: ArmOutcome[] = bucket.pulls.map((cellPulls, cell) => ({
+      pulls: cellPulls,
       conversions: bucket.conversions[cell] ?? 0
     }));
     const analysis = analyzeOutcomes(arms, { draws: 4000 });
@@ -142,7 +161,7 @@ export function summarizeBuckets(stats: TestStats): BucketSummary[] {
       key,
       name: bucket.label ?? `${key.slice(0, 8)}…`,
       labeled: bucket.label !== undefined,
-      pulls: arms.reduce((sum, arm) => sum + arm.pulls, 0),
+      pulls,
       conversions: arms.reduce((sum, arm) => sum + arm.conversions, 0),
       leader: combo ? combo.choice.join(" + ") : "–",
       leaderRate:
@@ -152,7 +171,7 @@ export function summarizeBuckets(stats: TestStats): BucketSummary[] {
       probabilityBest: analysis.probabilities[analysis.leader] ?? 0
     };
   });
-  return summaries.sort((a, b) => b.pulls - a.pulls);
+  return { top, hidden: Math.max(0, ranked.length - limit) };
 }
 
 export interface SignalBreakdown {
