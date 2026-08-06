@@ -6,6 +6,7 @@ import { AppLayout } from "./App";
 import { Builder } from "./pages/Builder";
 import { TestDetail } from "./pages/TestDetail";
 import { loadTests } from "./lib/tests-store";
+import { resetDeploymentConfig } from "./lib/serve-url";
 
 /**
  * The create flow inside the real dashboard, one E2E per test type:
@@ -20,6 +21,7 @@ let containers: HTMLElement[] = [];
 
 beforeEach(() => {
   localStorage.clear();
+  resetDeploymentConfig();
   stubServer();
 });
 

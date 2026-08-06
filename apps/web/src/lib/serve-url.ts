@@ -19,8 +19,33 @@ export interface DeploymentConfig {
   publishableKey: string | null;
 }
 
+/**
+ * One fetch per page load, not one per hook instance: every consumer
+ * (hero test, snippets, builder) shares the same promise. Injected
+ * fetches (tests) bypass the cache so stubs stay deterministic.
+ */
+let cached: Promise<DeploymentConfig> | null = null;
+
+/** Test hook: specs stub fetch per test, so the cache must not span them. */
+export function resetDeploymentConfig(): void {
+  cached = null;
+}
+
 export async function fetchDeploymentConfig(
-  fetchImpl: typeof fetch = fetch
+  fetchImpl?: typeof fetch
+): Promise<DeploymentConfig> {
+  if (fetchImpl) {
+    return fetchConfigWith(fetchImpl);
+  }
+  cached ??= fetchConfigWith(fetch).catch(err => {
+    cached = null;
+    throw err;
+  });
+  return cached;
+}
+
+async function fetchConfigWith(
+  fetchImpl: typeof fetch
 ): Promise<DeploymentConfig> {
   const fallback = {
     serveUrl: window.location.origin,

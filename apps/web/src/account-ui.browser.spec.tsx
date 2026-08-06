@@ -16,7 +16,7 @@ import { TestDetail } from "./pages/TestDetail";
 import { Terms } from "./pages/Terms";
 import { Privacy } from "./pages/Privacy";
 import { saveTest } from "./lib/tests-store";
-import { fetchDeploymentConfig } from "./lib/serve-url";
+import { fetchDeploymentConfig, resetDeploymentConfig } from "./lib/serve-url";
 
 /**
  * The account UI in a real browser: these flows silently hid themselves
@@ -43,6 +43,7 @@ afterEach(() => {
 
 beforeEach(() => {
   localStorage.clear();
+  resetDeploymentConfig();
 });
 
 const STATS_OK = () =>
