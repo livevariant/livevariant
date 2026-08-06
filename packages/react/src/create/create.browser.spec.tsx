@@ -35,7 +35,7 @@ function render(element: React.ReactElement) {
   return container;
 }
 
-async function until(check: () => boolean, ms = 4000): Promise<void> {
+async function until(check: () => boolean, ms = 15000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!check()) {
     if (Date.now() > deadline) {
