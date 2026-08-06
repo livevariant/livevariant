@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderLlmsTxt, renderMcpInstructions, renderSkillMd } from "./docs.js";
 import { TOOLS } from "./tools.js";
+import { IDENTITY_EXCLUDED } from "@livevariant/core";
 
 /**
  * The single source of truth renders complete and origin-correct: every
@@ -46,5 +47,29 @@ describe("the agent docs source", () => {
     expect(instructions).toContain("stats secret exactly once");
     expect(instructions).toContain("manage URL");
     expect(instructions).toContain("upload_image");
+  });
+});
+
+describe("the parameter table matches the identity hash", () => {
+  it("agrees with core's IDENTITY_EXCLUDED about every listed field", () => {
+    const skill = renderSkillMd();
+    const row = (field: string) => {
+      const match = skill.match(
+        // The priors row bolds its "no"; asterisks are cosmetic.
+        new RegExp(`^\\| \`${field}[^|]*\` \\| \\**(yes|no)\\** \\|`, "m")
+      );
+      expect(match, `table row for ${field}`).not.toBeNull();
+      return match![1];
+    };
+    for (const excluded of IDENTITY_EXCLUDED) {
+      if (skill.includes(`\`${excluded}\``)) {
+        expect(row(excluded), `${excluded} is identity-excluded`).toBe("no");
+      }
+    }
+    // Spot checks on the identity side, where a wrong "no" would cost
+    // an agent a test's history.
+    for (const identity of ["rewardEvents", "region", "name"]) {
+      expect(row(identity), `${identity} is in the identity hash`).toBe("yes");
+    }
   });
 });

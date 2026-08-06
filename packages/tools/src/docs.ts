@@ -97,15 +97,12 @@ const PARAMS_SECTION = `## Every config parameter, and when to use it
 | \`ctx.dims\` | yes | Audience dimensions the model learns separate winners for. \`{key}\` = caller-supplied value (hashed in the browser); \`{key, from}\` = filled automatically from the request. \`from\` may be: country, continent, region, city, timezone, device, language, organization, utm_source, utm_medium, utm_campaign, utm_content, utm_term. The utm ones survive email proxies; the network ones do not (see the email section). |
 | \`region\` | yes | Where the test's counters and model live. \`eu\` is a hard guarantee (data never leaves the EU); weur/eeur/wnam/enam/sam/apac/oc/afr/me are placement preferences. Unset = wherever the first request lands, which in email is often a mail provider's datacenter, so set it for email tests. Changing it later = a new test. |
 | \`redirectUrl\` | yes | Fallback click destination when neither \`?to=\` nor a per-variant redirectUrl says where to go. The click link REFUSES rather than 404s when all three are missing. |
-| \`rewardEvents\` | no* | GA4 event names the tag/SDK count as conversions (defaults: purchase, sign_up, generate_lead, conversion). |
-| \`variantParam\` | yes | Stamps the served variant's name into this query parameter on the redirect, so the destination's own analytics can segment by variant with zero integration. |
-| \`forwardParams\` | yes | Default true: unrecognized query params (utm_*, gclid...) are forwarded onto the destination. \`false\` turns that off. |
+| \`rewardEvents\` | yes | GA4 event names the tag/SDK count as conversions (defaults: purchase, sign_up, generate_lead, conversion). Part of identity: decide before launch, changing it later is a new test. |
+| \`variantParam\` | no | Stamps the served variant's name into this query parameter on the redirect, so the destination's own analytics can segment by variant with zero integration. Deliverability detail: safe to turn on mid-campaign. |
+| \`forwardParams\` | no | Default true: unrecognized query params (utm_*, gclid...) are forwarded onto the destination. \`false\` turns that off; safe to change mid-campaign. |
 | \`decorateRedirects\` | no | Default true: redirects carry the identity handoff (_lvt/_lvid/_lvvar) to the destination so its tag can keep attribution and consistency. |
 | \`priors\` | **no** | Warm-start beliefs via \`generate_priors\`. Deliberately OUTSIDE the identity hash: add or tune priors mid-test without losing history. |
-| \`statsKeyHash\` | yes | The sha256 of the stats secret. Safe in public links; the secret itself never appears in any URL except the manage link's #fragment. |
-
-*rewardEvents rides in the config but does not change serving, only what the
-page-side tracker listens for.`;
+| \`statsKeyHash\` | yes | The sha256 of the stats secret. Safe in public links; the secret itself never appears in any URL except the manage link's #fragment. |`;
 
 const URL_FORM_SECTION = `## Creating a test with nothing but a URL
 

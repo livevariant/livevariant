@@ -18,7 +18,7 @@ import {
  * semantic: changing it derives a fresh test with fresh state, which is
  * also what makes URL tampering self-isolating.
  */
-const IDENTITY_EXCLUDED = [
+export const IDENTITY_EXCLUDED = [
   // Tuning, not identity: the model rebuilds from the event log, so these
   // can change mid-test without resetting history.
   "priors",
