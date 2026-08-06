@@ -884,7 +884,12 @@ export function createApp(options: AppOptions): Hono {
     const target = (to ??
       variant.redirectUrl ??
       decoded.config.redirectUrl) as string;
-    if (identity.idHash) {
+    // Never reward an identity BORN on this request: a crawler or link
+    // scanner presenting browser headers would otherwise mint a cookie
+    // and count a conversion in one hit. A real first-time visitor
+    // still gets their assignment and cookie here; their conversions
+    // count from the next identified touch (pixel, tag, later click).
+    if (identity.idHash && !ctx.setCookie) {
       await service.reward(
         decoded.testId,
         identity.idHash,

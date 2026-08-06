@@ -1824,3 +1824,30 @@ describe("browser identity", () => {
     expect(sumConversions(s)).toBe(1);
   });
 });
+
+describe("fresh-minted identities never reward", () => {
+  const NAV = {
+    headers: { accept: "text/html", "sec-fetch-dest": "document" }
+  };
+
+  it("a first-contact click assigns and sets the cookie, but counts no conversion", async () => {
+    const { encoded } = await makeTest();
+    // A scanner (or first-time visitor) hits the bare click link.
+    const first = await app.request(`/c/${encoded}`, NAV);
+    expect(first.status).toBe(302);
+    const cookie = first.headers.get("set-cookie") ?? "";
+    const uid = cookie.match(/lv_uid=([A-Za-z0-9-]+)/)![1];
+    let s = await stats(encoded);
+    expect(s.totalAssignments).toBe(1);
+    expect(sumConversions(s)).toBe(0);
+    // The same browser returning with its cookie is a real visitor:
+    // this click rewards.
+    const back = await app.request(`/c/${encoded}`, {
+      headers: { ...NAV.headers, cookie: `lv_uid=${uid}` }
+    });
+    expect(back.status).toBe(302);
+    s = await stats(encoded);
+    expect(s.totalAssignments).toBe(1);
+    expect(sumConversions(s)).toBe(1);
+  });
+});

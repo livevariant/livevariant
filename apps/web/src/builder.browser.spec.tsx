@@ -93,11 +93,16 @@ function render(path: string) {
   return container;
 }
 
-async function until(check: () => boolean, ms = 15000): Promise<void> {
+async function until(
+  check: () => boolean,
+  what: string,
+  ms = 12000
+): Promise<void> {
   const deadline = Date.now() + ms;
   while (!check()) {
     if (Date.now() > deadline) {
-      throw new Error("condition never became true");
+      const page = document.body.textContent?.slice(0, 600) ?? "";
+      throw new Error(`never true: ${what}\npage: ${page}`);
     }
     await new Promise(resolve => setTimeout(resolve, 25));
   }
@@ -128,51 +133,65 @@ describe("creating each test type from the dashboard", () => {
   it("redirect: picker to saved record to detail page", async () => {
     const container = render("/builder");
     await until(
-      () => container.textContent?.includes("Page redirect test") ?? false
+      () => container.textContent?.includes("Page redirect test") ?? false,
+      "() => container.textContent?.includes('Page redirect test') ?? false"
     );
     click(container, "Page redirect test");
     await until(
-      () => container.textContent?.includes("Destination pages") ?? false
+      () => container.textContent?.includes("Destination pages") ?? false,
+      "() => container.textContent?.includes('Destination pages') ?? false"
     );
     setByLabel(container, "Variant 1 destination URL", "https://example.com/a");
     setByLabel(container, "Variant 2 destination URL", "https://example.com/b");
     click(container, "Create redirect test");
-    await until(() => loadTests().length > 0);
+    await until(() => loadTests().length > 0, "() => loadTests().length > 0");
     expect(loadTests()[0].type).toBe("redirect");
     // The deployment default flowed into the link.
     await until(
-      () => container.textContent?.includes("https://serve.example/s/") ?? false
+      () =>
+        container.textContent?.includes("https://serve.example/s/") ?? false,
+      "() => container.textContent?.includes('https://serve.example/s/') ?? false"
     );
     click(container, "View results");
-    await until(() => container.textContent?.includes(loadTests()[0].name));
+    await until(
+      () => container.textContent?.includes(loadTests()[0].name),
+      "() => container.textContent?.includes(loadTests()[0].name)"
+    );
   });
 
   it("email: arrives typed via ?type=, saves an email record", async () => {
     const container = render("/builder?type=email");
     await until(
-      () => container.textContent?.includes("Image variants") ?? false
+      () => container.textContent?.includes("Image variants") ?? false,
+      "() => container.textContent?.includes('Image variants') ?? false"
     );
     setByLabel(container, "Variant 1 image URL", "https://cdn.example/a.png");
     setByLabel(container, "Variant 2 image URL", "https://cdn.example/b.png");
     click(container, "Create email test");
-    await until(() => loadTests().length > 0);
+    await until(() => loadTests().length > 0, "() => loadTests().length > 0");
     expect(loadTests()[0].type).toBe("email");
     await until(
-      () => container.textContent?.includes("Put it in your email") ?? false
+      () => container.textContent?.includes("Put it in your email") ?? false,
+      "() => container.textContent?.includes('Put it in your email') ?? false"
     );
   });
 
   it("website: saves a website record and shows the tag snippet", async () => {
     const container = render("/builder?type=website");
-    await until(() => container.textContent?.includes("Variants") ?? false);
+    await until(
+      () => container.textContent?.includes("Variants") ?? false,
+      "() => container.textContent?.includes('Variants') ?? false"
+    );
     setByLabel(container, "Element 1 variant 1 text", "Ship faster");
     setByLabel(container, "Element 1 variant 2 text", "Ship safer");
     click(container, "Create website test");
-    await until(() => loadTests().length > 0);
+    await until(() => loadTests().length > 0, "() => loadTests().length > 0");
     expect(loadTests()[0].type).toBe("website");
     await until(
       () =>
-        container.textContent?.includes("https://serve.example/sdk.js") ?? false
+        container.textContent?.includes("https://serve.example/sdk.js") ??
+        false,
+      "() => container.textContent?.includes('https://serve.example/sdk.js') ?? false"
     );
   });
 });
