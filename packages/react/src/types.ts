@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { TestUrls } from "@livevariant/core";
 
 /**
@@ -39,4 +40,10 @@ export interface CreateTestProps {
   verifyDomainsHref?: string;
   /** Injectable for tests; used for image uploads. */
   fetch?: typeof globalThis.fetch;
+  /**
+   * Optional fourth picker card, "Use your LLM to do the heavy
+   * lifting": clicking it renders this node (the host's agent/MCP
+   * install instructions). Omitted, the card does not exist.
+   */
+  llmContent?: ReactNode;
 }

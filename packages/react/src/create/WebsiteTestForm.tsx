@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { cellCount, MAX_CELLS } from "@livevariant/core";
-import { Button, Card, Field, Input, Select, Snippet } from "../ui.js";
+import { Button, Field, Input, Select, Snippet } from "../ui.js";
 import type { CreatedTest, CreateTestProps } from "../types.js";
 import {
   AudienceCard,
   BasicsCard,
   finishTest,
   InstallStep,
+  SlotCards,
   useBasics,
+  useSlots,
   variantName
 } from "./shared.js";
 
@@ -25,11 +26,6 @@ interface TextVariant {
   text: string;
 }
 
-interface SlotDraft {
-  key: string;
-  variants: TextVariant[];
-}
-
 function fresh(index: number): TextVariant {
   return { name: variantName(index), text: "" };
 }
@@ -38,9 +34,7 @@ const PLACEHOLDER_KEY = "pk_YOUR_PUBLISHABLE_KEY";
 
 export function WebsiteTestForm(props: CreateTestProps) {
   const basics = useBasics(props);
-  const [slots, setSlots] = useState<SlotDraft[]>([
-    { key: "headline", variants: [fresh(0), fresh(1)] }
-  ]);
+  const elements = useSlots<TextVariant>(fresh, "headline");
   const [rewardEvents, setRewardEvents] = useState("");
   const keys = props.publishableKeys ?? [];
   const [pk, setPk] = useState<string | null>(null);
@@ -48,23 +42,6 @@ export function WebsiteTestForm(props: CreateTestProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<CreatedTest | null>(null);
-
-  const combinations = cellCount(slots.map(slot => slot.variants.length));
-
-  const patchSlot = (index: number, part: Partial<SlotDraft>) =>
-    setSlots(current =>
-      current.map((slot, i) => (i === index ? { ...slot, ...part } : slot))
-    );
-  const patchVariant = (
-    slotIndex: number,
-    index: number,
-    part: Partial<TextVariant>
-  ) =>
-    patchSlot(slotIndex, {
-      variants: slots[slotIndex].variants.map((v, j) =>
-        j === index ? { ...v, ...part } : v
-      )
-    });
 
   async function create() {
     setBusy(true);
@@ -74,7 +51,7 @@ export function WebsiteTestForm(props: CreateTestProps) {
         type: "website",
         basics,
         slots: Object.fromEntries(
-          slots.map(slot => [
+          elements.slots.map(slot => [
             slot.key.trim(),
             slot.variants.map(v => ({ name: v.name, text: v.text }))
           ])
@@ -96,7 +73,7 @@ export function WebsiteTestForm(props: CreateTestProps) {
   }
 
   if (created) {
-    const applyLines = slots
+    const applyLines = elements.slots
       .map(slot => {
         // Keys like "element-2" are not identifiers: dot access would
         // parse as subtraction in the pasted snippet.
@@ -156,121 +133,20 @@ export function WebsiteTestForm(props: CreateTestProps) {
   return (
     <div className="lv-root">
       <BasicsCard basics={basics} namePlaceholder="Homepage hero headline" />
-      {slots.map((slot, slotIndex) => (
-        <Card
-          key={slotIndex}
-          title={
-            slots.length > 1 ? (
-              <span className="lv-row">
-                Element
-                <Input
-                  aria-label={`Element ${slotIndex + 1} name`}
-                  value={slot.key}
-                  onChange={e =>
-                    patchSlot(slotIndex, {
-                      key: e.target.value
-                        .toLowerCase()
-                        .replace(/[^a-z0-9_-]/g, "")
-                    })
-                  }
-                />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label="Remove element"
-                  onClick={() =>
-                    setSlots(current =>
-                      current.filter((_, j) => j !== slotIndex)
-                    )
-                  }
-                >
-                  Remove
-                </Button>
-              </span>
-            ) : (
-              "Variants"
-            )
-          }
-          description="The text alternatives this element cycles through while the model learns."
-        >
-          {slot.variants.map((variant, i) => (
-            <div key={i} className="lv-variant-row">
-              <div className="lv-row">
-                <Input
-                  aria-label={`Element ${slotIndex + 1} variant ${i + 1} name`}
-                  value={variant.name}
-                  onChange={e =>
-                    patchVariant(slotIndex, i, { name: e.target.value })
-                  }
-                />
-                {slot.variants.length > 2 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label="Remove variant"
-                    onClick={() =>
-                      patchSlot(slotIndex, {
-                        variants: slot.variants.filter((_, j) => j !== i)
-                      })
-                    }
-                  >
-                    Remove
-                  </Button>
-                )}
-              </div>
-              <Input
-                placeholder="Ship faster with adaptive testing"
-                aria-label={`Element ${slotIndex + 1} variant ${i + 1} text`}
-                value={variant.text}
-                onChange={e =>
-                  patchVariant(slotIndex, i, { text: e.target.value })
-                }
-              />
-            </div>
-          ))}
-          <div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                patchSlot(slotIndex, {
-                  variants: [...slot.variants, fresh(slot.variants.length)]
-                })
-              }
-            >
-              Add variant
-            </Button>
-          </div>
-        </Card>
-      ))}
-      <div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            setSlots(current => [
-              ...current,
-              {
-                key: `element-${current.length + 1}`,
-                variants: [fresh(0), fresh(1)]
-              }
-            ])
-          }
-        >
-          Test another element at the same time
-        </Button>
-        <p className="lv-hint">
-          With several elements (a hero AND a call-to-action) one model
-          optimizes the combination.
-          {slots.length > 1 && ` Currently ${combinations} combinations.`}
-        </p>
-        {combinations > MAX_CELLS && (
-          <p className="lv-error">
-            {combinations} combinations exceeds the {MAX_CELLS} limit; use fewer
-            variants per element.
-          </p>
+      <SlotCards
+        state={elements}
+        description="The text alternatives this element cycles through while the model learns."
+        renderVariant={(variant, slotIndex, i) => (
+          <Input
+            placeholder="Ship faster with adaptive testing"
+            aria-label={`Element ${slotIndex + 1} variant ${i + 1} text`}
+            value={variant.text}
+            onChange={e =>
+              elements.patchVariant(slotIndex, i, { text: e.target.value })
+            }
+          />
         )}
-      </div>
+      />
       <AudienceCard basics={basics}>
         <Field
           label="Reward events (GA4, comma-separated)"

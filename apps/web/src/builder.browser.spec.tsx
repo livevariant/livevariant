@@ -152,8 +152,16 @@ describe("creating each test type from the dashboard", () => {
     await until(
       () => container.textContent?.includes("Image variants") ?? false
     );
-    setByLabel(container, "Variant 1 image URL", "https://cdn.example/a.png");
-    setByLabel(container, "Variant 2 image URL", "https://cdn.example/b.png");
+    setByLabel(
+      container,
+      "Element 1 variant 1 image URL",
+      "https://cdn.example/a.png"
+    );
+    setByLabel(
+      container,
+      "Element 1 variant 2 image URL",
+      "https://cdn.example/b.png"
+    );
     click(container, "Create email test");
     await until(() => loadTests().length > 0);
     expect(loadTests()[0].type).toBe("email");

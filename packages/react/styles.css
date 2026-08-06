@@ -160,6 +160,15 @@
   font-weight: 600;
   font-size: 0.9375rem;
 }
+.lv-type-card-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  color: var(--lv-muted);
+}
+.lv-type-card:hover .lv-type-card-icon,
+.lv-type-card[aria-pressed="true"] .lv-type-card-icon {
+  color: var(--lv-fg);
+}
 
 .lv-variant-row {
   border: 1px solid var(--lv-border);
