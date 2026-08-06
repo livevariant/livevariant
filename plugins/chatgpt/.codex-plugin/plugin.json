@@ -21,6 +21,9 @@
       "Experimentation"
     ],
     "websiteURL": "https://livevariant.com",
+    "termsOfServiceURL": "https://livevariant.com/terms",
+    "privacyPolicyURL": "https://livevariant.com/privacy",
+    "supportEmail": "hi@livevariant.com",
     "defaultPrompt": [
       "Set up an A/B test for two email hero images.",
       "What does this LiveVariant link do?",

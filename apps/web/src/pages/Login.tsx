@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,7 @@ import {
   requestMagicLink,
   signInWithPassword
 } from "@/lib/account";
+import { hostedPoliciesApply } from "@/lib/policies";
 
 /**
  * Sign-in and registration: email plus password, with a magic link as
@@ -29,6 +30,10 @@ export function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [linkSent, setLinkSent] = useState(false);
+  // Self-hosted dashboards must not ask users to agree to
+  // livevariant.com's policies; without them there is nothing to tick.
+  const policies = hostedPoliciesApply();
+  const [agreed, setAgreed] = useState(false);
   const [verifySent, setVerifySent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -116,7 +121,36 @@ export function Login() {
                     }
                   />
                 </div>
-                <Button type="submit" disabled={busy || !email || !password}>
+                {mode === "register" && policies && (
+                  <label className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 accent-primary"
+                      checked={agreed}
+                      onChange={e => setAgreed(e.target.checked)}
+                    />
+                    <span>
+                      I agree to the{" "}
+                      <Link className="underline" to="/terms" target="_blank">
+                        Terms of Service
+                      </Link>{" "}
+                      and the{" "}
+                      <Link className="underline" to="/privacy" target="_blank">
+                        Privacy Policy
+                      </Link>
+                      .
+                    </span>
+                  </label>
+                )}
+                <Button
+                  type="submit"
+                  disabled={
+                    busy ||
+                    !email ||
+                    !password ||
+                    (mode === "register" && policies && !agreed)
+                  }
+                >
                   {mode === "register" ? "Create account" : "Sign in"}
                 </Button>
               </form>
@@ -163,6 +197,20 @@ export function Login() {
               >
                 <Mail /> Email me a sign-in link instead
               </Button>
+            )}
+            {policies && (
+              <p className="text-muted-foreground mt-2 text-xs">
+                Signing in (or signing up) with a link also means you agree to
+                the{" "}
+                <Link className="underline" to="/terms" target="_blank">
+                  Terms
+                </Link>{" "}
+                and{" "}
+                <Link className="underline" to="/privacy" target="_blank">
+                  Privacy Policy
+                </Link>
+                .
+              </p>
             )}
           </div>
           {error && <p className="text-destructive text-sm">{error}</p>}
