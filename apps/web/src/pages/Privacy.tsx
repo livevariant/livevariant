@@ -84,8 +84,9 @@ export function Privacy() {
       <Section title="5. Cookies on this dashboard">
         <p>
           Signing in sets session cookies scoped to this site. The public site
-          may also load Google Tag Manager for our own basic analytics; it is
-          not loaded inside tests you create for your visitors.
+          also loads Google Tag Manager and Google Analytics for our own basic
+          analytics, which set their own cookies under Google's privacy terms.
+          Neither is loaded inside tests you create for your visitors.
         </p>
       </Section>
 
