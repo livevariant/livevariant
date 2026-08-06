@@ -144,11 +144,11 @@ describe("the email flow", () => {
       () => container.textContent?.includes("Image variants") ?? false
     );
     setValue(
-      byLabel(container, "Variant 1 image URL"),
+      byLabel(container, "Element 1 variant 1 image URL"),
       "https://cdn.example/a.png"
     );
     setValue(
-      byLabel(container, "Variant 2 image URL"),
+      byLabel(container, "Element 1 variant 2 image URL"),
       "https://cdn.example/b.png"
     );
     clickButton(container, "Create email test");
@@ -166,6 +166,9 @@ describe("the email flow", () => {
     expect(container.textContent).toContain(
       `${SERVER}/px/${created[0].encoded}`
     );
+    // The website embed: tag plus hide-until-upgraded style.
+    expect(container.textContent).toContain(`${SERVER}/sdk.js`);
+    expect(container.textContent).toContain("lv-reveal");
   });
 
   it("uploads an image through the deployment's asset store", async () => {
@@ -195,10 +198,81 @@ describe("the email flow", () => {
     input.dispatchEvent(new Event("change", { bubbles: true }));
     await until(
       () =>
-        byLabel(container, "Variant 1 image URL").value ===
+        byLabel(container, "Element 1 variant 1 image URL").value ===
         "https://serve.example/a/uploaded-hash"
     );
     expect(uploads[0]).toBe(`${SERVER}/assets`);
+  });
+});
+
+describe("multi-element email tests", () => {
+  it("hands out one ?slot= link per element, sharing one assignment", async () => {
+    const created: CreatedTest[] = [];
+    const container = render(
+      <CreateTest
+        serverUrl={SERVER}
+        defaultType="email"
+        onCreated={t => created.push(t)}
+      />
+    );
+    await until(
+      () => container.textContent?.includes("Image variants") ?? false
+    );
+    setValue(
+      byLabel(container, "Element 1 variant 1 image URL"),
+      "https://cdn.example/hero-a.png"
+    );
+    setValue(
+      byLabel(container, "Element 1 variant 2 image URL"),
+      "https://cdn.example/hero-b.png"
+    );
+    clickButton(container, "Test another element at the same time");
+    await until(
+      () =>
+        container.querySelector(
+          '[aria-label="Element 2 variant 1 image URL"]'
+        ) != null
+    );
+    setValue(
+      byLabel(container, "Element 2 variant 1 image URL"),
+      "https://cdn.example/cta-a.png"
+    );
+    setValue(
+      byLabel(container, "Element 2 variant 2 image URL"),
+      "https://cdn.example/cta-b.png"
+    );
+    clickButton(container, "Create email test");
+    await until(() => created.length > 0);
+    await until(
+      () => container.textContent?.includes("Put it in your email") ?? false
+    );
+    // One link per element; the reader's single sticky assignment
+    // decides the whole combination.
+    const text = container.textContent ?? "";
+    expect(text).toContain("slot=hero");
+    expect(text).toContain("slot=element-2");
+  });
+});
+
+describe("the LLM card", () => {
+  it("appears only with llmContent, and opens it", async () => {
+    const bare = render(<CreateTest serverUrl={SERVER} onCreated={ignore} />);
+    await until(() => bare.textContent?.includes("Email / image") ?? false);
+    expect(bare.textContent).not.toContain("heavy lifting");
+    const container = render(
+      <CreateTest
+        serverUrl={SERVER}
+        onCreated={ignore}
+        llmContent={<div>AGENT-INSTALL-CONTENT</div>}
+      />
+    );
+    await until(
+      () => container.textContent?.includes("heavy lifting") ?? false
+    );
+    clickButton(container, "Use your LLM to do the heavy lifting");
+    await until(
+      () => container.textContent?.includes("AGENT-INSTALL-CONTENT") ?? false
+    );
   });
 });
 

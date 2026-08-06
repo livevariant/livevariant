@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { encodeConfig } from "@livevariant/core";
 import { bootTag } from "./tag.js";
 import { createTest, whenTagReady } from "./index.js";
 import { resetAutoTrack } from "./auto-track.js";
@@ -173,6 +174,163 @@ describe("the tag", () => {
     const tag = bootTag(window, script);
     expect(tag?.config.serverUrl).toBe("https://preset.example");
     expect(tag?.config.publishableKey).toBe("pk_tagtagtagtagtagtagtagta");
+  });
+});
+
+describe("media decoration", () => {
+  async function encoded(): Promise<{ encoded: string; testId: string }> {
+    return encodeConfig({
+      v: 2,
+      name: "embedded image test",
+      variants: [
+        { name: "a", image: "https://cdn.example/a.png" },
+        { name: "b", image: "https://cdn.example/b.png" }
+      ]
+    } as never);
+  }
+
+  function el<K extends keyof HTMLElementTagNameMap>(
+    tag: K,
+    attrs: Record<string, string>
+  ): HTMLElementTagNameMap[K] {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs)) {
+      node.setAttribute(key, value);
+    }
+    document.body.appendChild(node);
+    return node;
+  }
+
+  async function until(check: () => boolean, ms = 4000): Promise<void> {
+    const deadline = Date.now() + ms;
+    while (!check()) {
+      if (Date.now() > deadline) {
+        throw new Error("condition never became true");
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  }
+
+  afterEach(() => {
+    document
+      .querySelectorAll("img[src], img[data-lv-src], a[href]")
+      .forEach(node => node.remove());
+  });
+
+  it("upgrades bare serve images and click links with the SDK id", async () => {
+    const { encoded: cfg } = await encoded();
+    const img = el("img", { src: `https://deploy.example/s/${cfg}` });
+    const link = el("a", { href: `https://deploy.example/c/${cfg}` });
+    const foreign = el("img", { src: `https://other.example/s/${cfg}` });
+    const already = el("img", {
+      src: `https://deploy.example/s/${cfg}?id=explicit`
+    });
+    bootTag(
+      window,
+      (() => {
+        const script = document.createElement("script");
+        script.setAttribute("src", "https://deploy.example/sdk.js");
+        script.setAttribute(
+          "data-publishable-key",
+          "pk_tagtagtagtagtagtagtagta"
+        );
+        document.head.appendChild(script);
+        return script;
+      })()
+    );
+    await until(() => img.src.includes("id="));
+    const assigned = new URL(img.src).searchParams.get("id")!;
+    expect(assigned.length).toBeGreaterThan(0);
+    // The click link carries the SAME identity: one visitor, one record.
+    await until(() => link.href.includes("id="));
+    expect(new URL(link.href).searchParams.get("id")).toBe(assigned);
+    // Foreign servers and already-identified URLs are left alone.
+    expect(foreign.src).toBe(`https://other.example/s/${cfg}`);
+    expect(new URL(already.src).searchParams.get("id")).toBe("explicit");
+  });
+
+  it("prefers a stored handoff for the SAME test: email keeps its variant", async () => {
+    const { encoded: cfg, testId } = await encoded();
+    localStorage.setItem(
+      `lv:h:${testId}`,
+      JSON.stringify({
+        testId,
+        idHash: "f".repeat(64),
+        cell: 1,
+        capturedAt: Date.now()
+      })
+    );
+    const img = el("img", { src: `https://deploy.example/s/${cfg}` });
+    bootTag(
+      window,
+      (() => {
+        const script = document.createElement("script");
+        script.setAttribute("src", "https://deploy.example/sdk.js");
+        script.setAttribute(
+          "data-publishable-key",
+          "pk_tagtagtagtagtagtagtagta"
+        );
+        document.head.appendChild(script);
+        return script;
+      })()
+    );
+    await until(() => img.src.includes("_lvid="));
+    expect(new URL(img.src).searchParams.get("_lvid")).toBe("f".repeat(64));
+  });
+
+  it("replays handoffs for servers mounted under a path prefix", async () => {
+    const { encoded: cfg, testId } = await encoded();
+    localStorage.setItem(
+      `lv:h:${testId}`,
+      JSON.stringify({
+        testId,
+        idHash: "e".repeat(64),
+        cell: 0,
+        capturedAt: Date.now()
+      })
+    );
+    (window as { livevariant?: unknown }).livevariant = {
+      config: { serverUrl: "https://deploy.example/lv" }
+    };
+    const img = el("img", { src: `https://deploy.example/lv/s/${cfg}` });
+    bootTag(
+      window,
+      (() => {
+        const script = document.createElement("script");
+        script.setAttribute("src", "https://deploy.example/lv/sdk.js");
+        script.setAttribute(
+          "data-publishable-key",
+          "pk_tagtagtagtagtagtagtagta"
+        );
+        document.head.appendChild(script);
+        return script;
+      })()
+    );
+    await until(() => img.src.includes("_lvid="));
+    expect(new URL(img.src).searchParams.get("_lvid")).toBe("e".repeat(64));
+  });
+
+  it("fills data-lv-src images with one identified fetch", async () => {
+    const { encoded: cfg } = await encoded();
+    const img = el("img", {
+      "data-lv-src": `https://deploy.example/s/${cfg}`
+    });
+    expect(img.getAttribute("src")).toBeNull();
+    bootTag(
+      window,
+      (() => {
+        const script = document.createElement("script");
+        script.setAttribute("src", "https://deploy.example/sdk.js");
+        script.setAttribute(
+          "data-publishable-key",
+          "pk_tagtagtagtagtagtagtagta"
+        );
+        document.head.appendChild(script);
+        return script;
+      })()
+    );
+    await until(() => img.src.includes("id="));
+    expect(img.src.startsWith(`https://deploy.example/s/${cfg}`)).toBe(true);
   });
 });
 

@@ -243,6 +243,8 @@ export interface Env {
   LV_GOOGLE_TAG_MANAGER?: string;
   /** The deployment's own publishable key, for the landing's test. */
   LV_PUBLISHABLE_KEY?: string;
+  /** "off" disables the first-party lv_uid cookie (cookieless mode). */
+  LV_BROWSER_ID_COOKIE?: string;
 }
 
 /** Counter keys arrive as c:{testId}:{scope}; the DO stores scopes. */
@@ -356,6 +358,7 @@ export function baseAppOptions(env: Env): AppOptions {
     apiToken: env.LV_API_TOKEN,
     gtmId: env.LV_GOOGLE_TAG_MANAGER,
     publishableKey: env.LV_PUBLISHABLE_KEY,
+    browserIdCookie: env.LV_BROWSER_ID_COOKIE !== "off",
     assets:
       env.ASSET_STORE && env.LV_ASSET_SECRET
         ? {

@@ -1,6 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
 import {
   buildTestUrls,
+  cellCount,
+  MAX_CELLS,
   encodeConfig,
   generateStatsSecret,
   hashStatsSecret,
@@ -256,4 +258,186 @@ export function variantName(index: number): string {
   return index === 0
     ? "control"
     : `variant-${index < 26 ? String.fromCharCode(96 + index) : index + 1}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Elements (slots): shared between every flow that tests one or more
+   page/email elements at once. One model optimizes the COMBINATION,
+   which is the whole point of multi-element tests; the per-type forms
+   differ only in what a variant row edits. */
+
+export interface SlotDraft<V> {
+  key: string;
+  variants: V[];
+}
+
+export interface SlotsState<V> {
+  slots: SlotDraft<V>[];
+  combinations: number;
+  patchSlot(slotIndex: number, part: Partial<SlotDraft<V>>): void;
+  patchVariant(slotIndex: number, index: number, part: Partial<V>): void;
+  addVariant(slotIndex: number): void;
+  removeVariant(slotIndex: number, index: number): void;
+  addSlot(): void;
+  removeSlot(slotIndex: number): void;
+}
+
+export function useSlots<V>(
+  freshVariant: (index: number) => V,
+  firstKey: string
+): SlotsState<V> {
+  const [slots, setSlots] = useState<SlotDraft<V>[]>([
+    { key: firstKey, variants: [freshVariant(0), freshVariant(1)] }
+  ]);
+  const patchSlot = (slotIndex: number, part: Partial<SlotDraft<V>>) =>
+    setSlots(current =>
+      current.map((slot, i) => (i === slotIndex ? { ...slot, ...part } : slot))
+    );
+  return {
+    slots,
+    combinations: cellCount(slots.map(slot => slot.variants.length)),
+    patchSlot,
+    patchVariant: (slotIndex, index, part) =>
+      patchSlot(slotIndex, {
+        variants: slots[slotIndex].variants.map((v, j) =>
+          j === index ? { ...v, ...part } : v
+        )
+      }),
+    addVariant: slotIndex =>
+      patchSlot(slotIndex, {
+        variants: [
+          ...slots[slotIndex].variants,
+          freshVariant(slots[slotIndex].variants.length)
+        ]
+      }),
+    removeVariant: (slotIndex, index) =>
+      patchSlot(slotIndex, {
+        variants: slots[slotIndex].variants.filter((_, j) => j !== index)
+      }),
+    addSlot: () =>
+      setSlots(current => [
+        ...current,
+        {
+          key: `element-${current.length + 1}`,
+          variants: [freshVariant(0), freshVariant(1)]
+        }
+      ]),
+    removeSlot: slotIndex =>
+      setSlots(current => current.filter((_, j) => j !== slotIndex))
+  };
+}
+
+/**
+ * The element cards plus the "test another element" control. Each
+ * variant row gets the shared shell (scoped name, remove) and the
+ * flow's own fields through renderVariant.
+ */
+export function SlotCards<V extends { name: string }>({
+  state,
+  description,
+  singleTitle = "Variants",
+  renderVariant
+}: {
+  state: SlotsState<V>;
+  description: string;
+  /** Card title while there is only one element. */
+  singleTitle?: string;
+  renderVariant: (variant: V, slotIndex: number, index: number) => ReactNode;
+}) {
+  const { slots } = state;
+  return (
+    <>
+      {slots.map((slot, slotIndex) => (
+        <Card
+          key={slotIndex}
+          title={
+            slots.length > 1 ? (
+              <span className="lv-row">
+                Element
+                <Input
+                  aria-label={`Element ${slotIndex + 1} name`}
+                  value={slot.key}
+                  onChange={e =>
+                    state.patchSlot(slotIndex, {
+                      key: e.target.value
+                        .toLowerCase()
+                        .replace(/[^a-z0-9_-]/g, "")
+                    })
+                  }
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Remove element"
+                  onClick={() => state.removeSlot(slotIndex)}
+                >
+                  Remove
+                </Button>
+              </span>
+            ) : (
+              singleTitle
+            )
+          }
+          description={description}
+        >
+          {slot.variants.map((variant, i) => (
+            <div key={i} className="lv-variant-row">
+              <div className="lv-row">
+                <Input
+                  aria-label={`Element ${slotIndex + 1} variant ${i + 1} name`}
+                  value={variant.name}
+                  onChange={e =>
+                    state.patchVariant(slotIndex, i, {
+                      name: e.target.value
+                    } as Partial<V>)
+                  }
+                />
+                {slot.variants.length > 2 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Remove variant"
+                    onClick={() => state.removeVariant(slotIndex, i)}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+              {renderVariant(variant, slotIndex, i)}
+            </div>
+          ))}
+          <div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => state.addVariant(slotIndex)}
+            >
+              Add variant
+            </Button>
+          </div>
+        </Card>
+      ))}
+      <div>
+        <Button variant="outline" size="sm" onClick={() => state.addSlot()}>
+          Test another element at the same time
+        </Button>
+        <p className="lv-hint">
+          With several elements (a hero AND a call-to-action) one model
+          optimizes the combination.
+          {slots.length > 1 && ` Currently ${state.combinations} combinations.`}
+        </p>
+        {state.combinations > MAX_CELLS && (
+          <p className="lv-error">
+            {state.combinations} combinations exceeds the {MAX_CELLS} limit; use
+            fewer variants per element.
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** Appends a query pair to a URL that may already carry a query. */
+export function withParam(url: string, pair: string): string {
+  return `${url}${url.includes("?") ? "&" : "?"}${pair}`;
 }

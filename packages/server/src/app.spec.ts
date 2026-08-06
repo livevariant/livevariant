@@ -1751,3 +1751,103 @@ describe("publishable-key registration on /choose", () => {
     ]);
   });
 });
+
+describe("browser identity", () => {
+  const NAV = {
+    headers: { accept: "text/html", "sec-fetch-dest": "document" }
+  };
+
+  it("mints a first-party cookie on id-less navigations and stays sticky", async () => {
+    const { encoded } = await makeTest();
+    const first = await app.request(`/s/${encoded}`, NAV);
+    expect(first.status).toBe(302);
+    const cookie = first.headers.get("set-cookie") ?? "";
+    expect(cookie).toMatch(/^lv_uid=[A-Za-z0-9-]+; Max-Age=/);
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Lax");
+    const target = first.headers.get("location");
+    const uid = cookie.match(/lv_uid=([A-Za-z0-9-]+)/)![1];
+    for (let visit = 0; visit < 4; visit++) {
+      const again = await app.request(`/s/${encoded}`, {
+        headers: { ...NAV.headers, cookie: `lv_uid=${uid}` }
+      });
+      // Known browser: same variant, and no re-minted cookie.
+      expect(again.headers.get("set-cookie")).toBeNull();
+      expect(again.headers.get("location")).toBe(target);
+    }
+    expect((await stats(encoded)).totalAssignments).toBe(1);
+  });
+
+  it("never mints for image fetches, auto=0 links, or cookieless mode", async () => {
+    const { encoded } = await makeTest();
+    const image = await app.request(`/s/${encoded}`, {
+      headers: { "sec-fetch-dest": "image" }
+    });
+    expect(image.headers.get("set-cookie")).toBeNull();
+    const optedOut = await app.request(`/s/${encoded}?auto=0`, NAV);
+    expect(optedOut.headers.get("set-cookie")).toBeNull();
+    const cookieless = createApp({
+      store,
+      rng: mulberry32(7),
+      browserIdCookie: false
+    });
+    const disabled = await cookieless.request(`/s/${encoded}`, NAV);
+    expect(disabled.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("?_lvid= joins the existing assignment: email, then the landing page", async () => {
+    const { encoded } = await makeTest();
+    // The email serve assigns the reader and decorates the redirect
+    // with their hashed identity.
+    const email = await app.request(`/s/${encoded}?id=reader@x`);
+    const location = new URL(email.headers.get("location")!);
+    const handoff = location.searchParams.get("_lvid")!;
+    expect(handoff).toMatch(/^[0-9a-f]{64}$/);
+    // The landing page embeds the same test; its tag replays the
+    // handoff. Same record, same variant, no second assignment.
+    const embedded = await app.request(`/s/${encoded}?_lvid=${handoff}`);
+    expect(embedded.headers.get("location")).toBe(
+      email.headers.get("location")
+    );
+    expect((await stats(encoded)).totalAssignments).toBe(1);
+  });
+
+  it("the pixel rewards a handoff identity", async () => {
+    const { encoded } = await makeTest();
+    const serve = await app.request(`/s/${encoded}?id=buyer@x`);
+    const handoff = new URL(serve.headers.get("location")!).searchParams.get(
+      "_lvid"
+    )!;
+    const pixel = await app.request(`/px/${encoded}?_lvid=${handoff}`);
+    expect(pixel.status).toBe(200);
+    const s = await stats(encoded);
+    expect(sumConversions(s)).toBe(1);
+  });
+});
+
+describe("fresh-minted identities never reward", () => {
+  const NAV = {
+    headers: { accept: "text/html", "sec-fetch-dest": "document" }
+  };
+
+  it("a first-contact click assigns and sets the cookie, but counts no conversion", async () => {
+    const { encoded } = await makeTest();
+    // A scanner (or first-time visitor) hits the bare click link.
+    const first = await app.request(`/c/${encoded}`, NAV);
+    expect(first.status).toBe(302);
+    const cookie = first.headers.get("set-cookie") ?? "";
+    const uid = cookie.match(/lv_uid=([A-Za-z0-9-]+)/)![1];
+    let s = await stats(encoded);
+    expect(s.totalAssignments).toBe(1);
+    expect(sumConversions(s)).toBe(0);
+    // The same browser returning with its cookie is a real visitor:
+    // this click rewards.
+    const back = await app.request(`/c/${encoded}`, {
+      headers: { ...NAV.headers, cookie: `lv_uid=${uid}` }
+    });
+    expect(back.status).toBe(302);
+    s = await stats(encoded);
+    expect(s.totalAssignments).toBe(1);
+    expect(sumConversions(s)).toBe(1);
+  });
+});

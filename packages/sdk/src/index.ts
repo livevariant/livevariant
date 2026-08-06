@@ -49,6 +49,7 @@ export {
   type AutoTracker
 } from "./auto-track.js";
 export { SDK_VERSION } from "./version.js";
+export { decorateMedia } from "./media.js";
 
 /**
  * LiveVariant browser SDK. Privacy contract: the raw external id and raw

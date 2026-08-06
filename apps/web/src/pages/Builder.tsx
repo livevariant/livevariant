@@ -5,6 +5,7 @@ import "@livevariant/react/styles.css";
 import { useAccount } from "@/lib/account";
 import { saveTest } from "@/lib/tests-store";
 import { useDeploymentConfig } from "@/lib/serve-url";
+import { InstallCard } from "@/components/InstallCard";
 
 /**
  * The create page: a thin host around @livevariant/react's CreateTest.
@@ -60,6 +61,16 @@ export function Builder() {
         defaultType={defaultType as TestType | undefined}
         publishableKeys={publishableKeys}
         verifyDomainsHref="/settings"
+        llmContent={
+          <div className="space-y-3">
+            <InstallCard />
+            <p className="text-sm text-muted-foreground">
+              Once installed, describe the test in plain language: your
+              assistant drafts the variants, builds any kind of test, and hands
+              back the links plus a manage URL that saves it here.
+            </p>
+          </div>
+        }
         onCreated={test => {
           saveTest({
             name: test.name,

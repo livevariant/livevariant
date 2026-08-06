@@ -43,7 +43,8 @@
     "LV_ALLOWED_ORIGINS": "",
     "LV_UNLISTED_DESTINATIONS": "",
     "LV_GOOGLE_TAG_MANAGER": "",
-    "LV_PUBLISHABLE_KEY": ""
+    "LV_PUBLISHABLE_KEY": "",
+    "LV_BROWSER_ID_COOKIE": ""
   },
   // Deliberately no routes here. This is the config a
   // stranger gets when they deploy their own copy, and it has to work on
