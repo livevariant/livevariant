@@ -6,7 +6,19 @@
   "private": true,
   "type": "module",
   "nx": {
-    "includedScripts": []
+    "includedScripts": [],
+    "targets": {
+      "dev": {
+        "dependsOn": [
+          {
+            "projects": [
+              "@livevariant/workers"
+            ],
+            "target": "dev"
+          }
+        ]
+      }
+    }
   },
   "dependencies": {
     "@fontsource/instrument-serif": "^5.3.0",

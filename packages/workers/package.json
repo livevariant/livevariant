@@ -12,7 +12,19 @@
   "type": "module",
   "scripts": {},
   "nx": {
-    "includedScripts": []
+    "includedScripts": [],
+    "targets": {
+      "dev": {
+        "command": "wrangler dev --env dev",
+        "options": {
+          "cwd": "{workspaceRoot}"
+        },
+        "dependsOn": [
+          "^build"
+        ],
+        "continuous": true
+      }
+    }
   },
   "dependencies": {
     "@livevariant/core": "0.0.2",

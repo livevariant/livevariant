@@ -19,7 +19,7 @@
     "release": "node scripts/release.mjs",
     "release:dry": "node scripts/release.mjs --dry-run",
     "dev": "nx run-many -t dev",
-    "dev:worker": "nx run @livevariant/accounts:build && wrangler dev --env dev",
+    "dev:worker": "nx run @livevariant/workers:dev",
     "deploy": "wrangler deploy --env=\"\"",
     "deploy:livevariant": "wrangler deploy --env production",
     "versions:livevariant": "wrangler versions upload --env production",
