@@ -45,13 +45,31 @@ jobs:
 
       - run: npm ci
 
-      # Browser-mode (vitest + playwright) tests for the SDK run in
-      # chromium; harmless while only node-environment packages exist.
+      # Chromium is a fresh ~130MB download per run; cache it keyed on
+      # the exact Playwright version (install is a no-op on a warm
+      # cache, and --with-deps still apt-installs shared libraries).
+      - name: Resolve Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # Browser-mode (vitest + playwright) tests run in chromium.
       - run: npx playwright install --with-deps chromium
 
       - run: npx nx format:check --all
 
-      - run: npx nx run-many -t build test lint typecheck
+      - run: npx nx run-many -t build lint typecheck
+
+      # Serialized on purpose: three vitest suites launch real Chromium
+      # instances, and nx's default parallelism time-slices them on the
+      # 2-vCPU runner until the slowest test (the last E2E of the
+      # biggest suite) starves past its timeout. One suite at a time
+      # gives each browser the whole machine.
+      - run: npx nx run-many -t test --parallel=1
 
       # The SKILL, the plugin bundles and the marketplace manifests are all
       # generated from the tool registry. Regenerating must be a no-op, or a
