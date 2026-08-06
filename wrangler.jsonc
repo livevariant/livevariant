@@ -81,6 +81,8 @@
       "/auth/*",
       "/account/*",
       "/.well-known/*",
+      "/llms.txt",
+      "/skills/*",
       "/health",
       "/config",
       "/assets",

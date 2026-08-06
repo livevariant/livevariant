@@ -1,3 +1,4 @@
+import { renderMcpInstructions } from "@livevariant/tools";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -108,20 +109,9 @@ export function createServer(options: McpServerOptions = {}): McpServer {
     { name: SERVER_NAME, version: SERVER_VERSION },
     {
       capabilities: { tools: {} },
-      instructions:
-        "LiveVariant runs A/B tests with multi-armed bandits, so traffic " +
-        "shifts toward the winner while the test runs instead of waiting for " +
-        "a frozen split to reach significance.\n\n" +
-        "There are no accounts. A test IS its config, encoded into its own " +
-        "URLs, and its identity is a hash of that config, so editing a " +
-        "variant produces a different test with its own empty history. " +
-        "build_test returns a stats secret exactly once; without it a test's " +
-        "results can never be read by anyone.\n\n" +
-        "Typical flow: variant_brief to learn the constraints, draft the " +
-        "variants yourself, build_test for the URLs, optionally " +
-        "generate_priors to warm-start from what you expect, then get_stats " +
-        "to read results. Trust get_stats's win probabilities over comparing " +
-        "conversion rates by eye."
+      // One source of truth: the same overview every other surface
+      // renders from (packages/tools/src/docs.ts).
+      instructions: renderMcpInstructions()
     }
   );
   registerTools(server, options);
