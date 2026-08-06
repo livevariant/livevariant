@@ -111,6 +111,19 @@ export function storeContract(
       expect(b?.rec.cell).toBe(2);
     });
 
+    it("backfills the sdk version once and never overwrites it", async () => {
+      // Redirect-created records carry no client version; the first
+      // rewarding client (the tag) names itself, and later rewards from
+      // other versions do not rewrite history.
+      const store = await getStore();
+      const testId = freshTestId();
+      await store.putAssignmentIfAbsent(testId, "id1", rec(1));
+      const a = await store.addReward(testId, "id1", 1, "0.0.2");
+      expect(a?.rec.sdk).toBe("0.0.2");
+      const b = await store.addReward(testId, "id1", 1, "9.9.9");
+      expect(b?.rec.sdk).toBe("0.0.2");
+    });
+
     it("loses no rewards under concurrency, and firsts exactly one", async () => {
       // A get-then-put adapter passes the sequential test above and fails
       // here: two reads of the same rewardTotal collapse two conversions

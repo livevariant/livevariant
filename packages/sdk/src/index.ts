@@ -27,6 +27,7 @@ import { resolveExternalId } from "./identity.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
 import { captureHandoff, getHandoff } from "./handoff.js";
 import { autoTrack } from "./auto-track.js";
+import { SDK_VERSION } from "./version.js";
 
 export { gaClientId, resolveExternalId } from "./identity.js";
 export {
@@ -47,6 +48,7 @@ export {
   type AutoTrackOptions,
   type AutoTracker
 } from "./auto-track.js";
+export { SDK_VERSION } from "./version.js";
 
 /**
  * LiveVariant browser SDK. Privacy contract: the raw external id and raw
@@ -436,6 +438,7 @@ export async function createTest(
       headers: { "content-type": "application/json" },
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       body: JSON.stringify({
+        sdk: SDK_VERSION,
         testId,
         slotSizes: sizes,
         dim,
@@ -518,6 +521,7 @@ export async function createTest(
           testId,
           idHash,
           amount,
+          sdk: SDK_VERSION,
           ...(resolved.region ? { region: resolved.region } : {})
         })
       });

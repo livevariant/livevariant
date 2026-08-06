@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { computeTestId, testConfigSchema } from "@livevariant/core";
 import { createTest } from "./index.js";
+import { SDK_VERSION } from "./version.js";
 import { autoTrack } from "./auto-track.js";
 import { captureHandoff, getHandoff, listHandoffs } from "./handoff.js";
 import { resetDataLayerInterception } from "./ga.js";
@@ -137,7 +138,12 @@ describe("createTest with a handoff", () => {
 
     await test.trackConversion(3);
     const reward = calls.find(c => c.url.endsWith("/reward"));
-    expect(reward?.body).toEqual({ testId, idHash: ID_HASH, amount: 3 });
+    expect(reward?.body).toEqual({
+      testId,
+      idHash: ID_HASH,
+      amount: 3,
+      sdk: SDK_VERSION
+    });
     test.dispose();
   });
 });
@@ -178,6 +184,7 @@ describe("autoTrack (GTM one-tag mode)", () => {
       expect(Object.keys(r.body).sort()).toEqual([
         "amount",
         "idHash",
+        "sdk",
         "testId"
       ]);
     }

@@ -9,6 +9,7 @@ import { createTest, type CreateTestOptions } from "./index.js";
 import { gaClientId } from "./identity.js";
 import { eventNameOf, resetDataLayerInterception } from "./ga.js";
 import { resetAutoTrack } from "./auto-track.js";
+import { SDK_VERSION } from "./version.js";
 
 /**
  * Real-browser tests (chromium via vitest browser mode): cookies, storage,
@@ -101,6 +102,9 @@ describe("assignment", () => {
     expect(test.variant.name).toBe("variant");
     expect(test.variant.text).toBe("Get started");
     expect(server.chooseCalls).toHaveLength(1);
+    // Every wire request names its sender's generation, imported
+    // straight from package.json so it can never drift.
+    expect(server.chooseCalls[0].sdk).toBe(SDK_VERSION);
     test.dispose();
   });
 
@@ -358,6 +362,7 @@ describe("assignment", () => {
     expect(server.chooseCalls[0].region).toBe("eu");
     await test.trackConversion(2);
     expect(server.rewardCalls[0].region).toBe("eu");
+    expect(server.rewardCalls[0].sdk).toBe(SDK_VERSION);
     test.dispose();
   });
 

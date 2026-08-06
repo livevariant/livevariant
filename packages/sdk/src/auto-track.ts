@@ -1,4 +1,5 @@
 import { captureHandoff, listHandoffs } from "./handoff.js";
+import { SDK_VERSION } from "./version.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
 
 /**
@@ -123,6 +124,7 @@ export function autoTrack(options: AutoTrackOptions): AutoTracker {
               testId: participation.testId,
               idHash: participation.idHash,
               amount,
+              sdk: SDK_VERSION,
               // Carried so an "eu" test's reward reaches its
               // jurisdictional home without this page ever holding the
               // config.

@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "@livevariant/mcp";
 import { regionHint, sha256Hex, type CloudflareGeo } from "@livevariant/core";
+import { SERVER_VERSION } from "./version.js";
 import type { AccountsProvider } from "./accounts-port.js";
 import {
   TOOLS,
@@ -194,7 +195,8 @@ export function createApi(options: ApiOptions): Hono {
         (c.req.raw as Request & { cf?: CloudflareGeo }).cf ?? null
       ),
       gtmId: options.gtmId?.trim() || null,
-      publishableKey: options.publishableKey?.trim() || null
+      publishableKey: options.publishableKey?.trim() || null,
+      server: SERVER_VERSION
     })
   );
 

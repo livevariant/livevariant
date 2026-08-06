@@ -66,7 +66,8 @@ export class TestStorage {
 
   async addReward(
     idHash: string,
-    amount: number
+    amount: number,
+    sdk?: string
   ): Promise<{ rec: AssignmentRecord; first: boolean } | null> {
     const rec = await this.getAssignment(idHash);
     if (!rec) {
@@ -74,6 +75,7 @@ export class TestStorage {
     }
     const first = rec.rewardTotal === 0;
     rec.rewardTotal += amount;
+    rec.sdk ??= sdk ?? null;
     await this.storage.put(ASSIGNMENT_PREFIX + idHash, rec);
     return { rec, first };
   }
