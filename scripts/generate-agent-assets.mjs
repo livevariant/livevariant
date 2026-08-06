@@ -47,7 +47,12 @@ export const PLUGIN = {
   category: "Productivity",
   license: "AGPL-3.0",
   apiUrl: "https://livevariant.com",
-  mcpUrl: "https://livevariant.com/mcp"
+  mcpUrl: "https://livevariant.com/mcp",
+  // Directory listings ask for these; they describe the HOSTED service
+  // the bundled MCP endpoint points at (apps/web/src/pages/Terms.tsx).
+  termsUrl: "https://livevariant.com/terms",
+  privacyUrl: "https://livevariant.com/privacy",
+  supportEmail: "hi@livevariant.com"
 };
 
 /**
@@ -150,6 +155,9 @@ function buildChatgpt(dir, skill) {
       category: PLUGIN.category,
       capabilities: ["MCP", "Analytics", "Experimentation"],
       websiteURL: PLUGIN.homepage,
+      termsOfServiceURL: PLUGIN.termsUrl,
+      privacyPolicyURL: PLUGIN.privacyUrl,
+      supportEmail: PLUGIN.supportEmail,
       defaultPrompt: [
         "Set up an A/B test for two email hero images.",
         "What does this LiveVariant link do?",
