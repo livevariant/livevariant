@@ -25,6 +25,7 @@ import {
   type LiveVariantGlobal
 } from "./index.js";
 import { autoTrack, type AutoTracker } from "./auto-track.js";
+import { decorateMedia } from "./media.js";
 
 /** The booted global: resolved config plus the callable sdk. */
 export interface LiveVariantTag extends LiveVariantGlobal {
@@ -33,6 +34,12 @@ export interface LiveVariantTag extends LiveVariantGlobal {
     createTest: typeof createTest;
     /** Rewards every test this visitor is known to be in. */
     trackConversion(amount?: number): Promise<void>;
+    /**
+     * Re-scans the page for serve images and click links to upgrade
+     * with the visitor's identity. Boot runs it once; SPAs call it
+     * again after injecting content. Resolves to the upgrade count.
+     */
+    decorate(): Promise<number>;
     /** Stops the GA watcher (mostly for tests and SPAs tearing down). */
     dispose(): void;
   };
@@ -73,6 +80,12 @@ export function bootTag(
     rewardEvents,
     window: win
   });
+  const decorate = () => decorateMedia(win, serverUrl, win.localStorage);
+  // Upgrade any serve images / click links already in the page. The
+  // preload scanner beat us to bare src images (their id-less fetch
+  // recorded nothing); data-lv-src images get their one identified
+  // fetch here.
+  void decorate();
   const tag: LiveVariantTag = {
     config: {
       serverUrl,
@@ -82,6 +95,7 @@ export function bootTag(
     sdk: {
       createTest,
       trackConversion: amount => tracker.trackConversion(amount),
+      decorate,
       dispose: () => tracker.dispose()
     }
   };

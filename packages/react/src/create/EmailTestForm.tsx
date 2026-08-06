@@ -31,6 +31,28 @@ function fresh(index: number): ImageVariant {
   return { name: variantName(index), image: "", url: "" };
 }
 
+/**
+ * The website embed for an image test. The [src*="id="] selector also
+ * matches _lvid=, so the image reveals whichever identity the tag
+ * attached, and reveals anyway after the timeout when no tag runs (the
+ * test then serves anonymously, exactly the no-setup floor).
+ */
+function websiteEmbed(created: CreatedTest, publishableKey?: string): string {
+  const origin = created.serverUrl;
+  return (
+    `<style>\n` +
+    `  img[src^="${origin}/s/"]:not([src*="id="]) {\n` +
+    `    visibility: hidden;\n` +
+    `    animation: lv-reveal 0s 2.5s forwards;\n` +
+    `  }\n` +
+    `  @keyframes lv-reveal { to { visibility: visible } }\n` +
+    `</style>\n` +
+    `<script defer src="${origin}/sdk.js"\n` +
+    `        data-publishable-key="${publishableKey ?? "pk_YOUR_PUBLISHABLE_KEY"}"></script>\n` +
+    `<a href="${created.urls.click}"><img src="${created.urls.serve}" alt="" /></a>`
+  );
+}
+
 export function EmailTestForm(props: CreateTestProps) {
   const basics = useBasics(props);
   const [variants, setVariants] = useState<ImageVariant[]>([
@@ -102,6 +124,10 @@ export function EmailTestForm(props: CreateTestProps) {
         <Snippet
           intro="Counting a conversion later (a thank-you page, for example) without any script:"
           code={`<img src="${created.urls.pixel}" width="1" height="1" alt="" />`}
+        />
+        <Snippet
+          intro="The same test on a website: the tag identifies visitors first-party and upgrades the image URL (readers who clicked through from the email keep the exact variant their email showed). The style keeps the image invisible until it is upgraded, revealing after 2.5s no matter what:"
+          code={websiteEmbed(created, props.publishableKeys?.[0])}
         />
       </InstallStep>
     );

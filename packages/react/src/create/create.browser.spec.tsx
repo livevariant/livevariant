@@ -166,6 +166,9 @@ describe("the email flow", () => {
     expect(container.textContent).toContain(
       `${SERVER}/px/${created[0].encoded}`
     );
+    // The website embed: tag plus hide-until-upgraded style.
+    expect(container.textContent).toContain(`${SERVER}/sdk.js`);
+    expect(container.textContent).toContain("lv-reveal");
   });
 
   it("uploads an image through the deployment's asset store", async () => {
