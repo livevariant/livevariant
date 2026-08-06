@@ -13,6 +13,8 @@ import { OrgSwitcher } from "./components/OrgSwitcher";
 import { Login } from "./pages/Login";
 import { Settings } from "./pages/Settings";
 import { TestDetail } from "./pages/TestDetail";
+import { Terms } from "./pages/Terms";
+import { Privacy } from "./pages/Privacy";
 import { saveTest } from "./lib/tests-store";
 import { fetchDeploymentConfig } from "./lib/serve-url";
 
@@ -92,7 +94,9 @@ function render(path: string) {
           { path: "/manage/:encoded", element: <TestDetail /> },
           { path: "/login", element: <Login /> },
           { path: "/settings", element: <Settings /> },
-          { path: "/accept-invitation/:id", element: <AcceptInvitation /> }
+          { path: "/accept-invitation/:id", element: <AcceptInvitation /> },
+          { path: "/terms", element: <Terms /> },
+          { path: "/privacy", element: <Privacy /> }
         ]
       }
     ],
@@ -314,6 +318,9 @@ describe("the login page", () => {
     );
     setValue(container.querySelector("#email")!, "new@example.com");
     setValue(container.querySelector("#password")!, "long-enough-pw");
+    (
+      container.querySelector('input[type="checkbox"]') as HTMLInputElement
+    ).click();
     [...container.querySelectorAll("button")]
       .find(button => button.textContent?.trim() === "Create account")!
       .click();
@@ -716,5 +723,61 @@ describe("domain verification feedback", () => {
           "no TXT record matched the verification token"
         ) ?? false
     );
+  });
+});
+
+describe("terms and privacy", () => {
+  it("registration requires agreeing to the terms", async () => {
+    stubServer({
+      "/account/me": () =>
+        Response.json({ error: "sign in required" }, { status: 401 })
+    });
+    const container = render("/login");
+    await until(() => container.textContent?.includes("Sign in") ?? false);
+    [...container.querySelectorAll("button")]
+      .find(b => b.textContent?.includes("No account yet"))!
+      .click();
+    await until(
+      () => container.textContent?.includes("Create an account") ?? false
+    );
+    // Fill credentials; the button must STILL be disabled until the
+    // terms are agreed to.
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value"
+    )!.set!;
+    for (const [id, value] of [
+      ["#email", "new@example.com"],
+      ["#password", "longenoughpw"]
+    ] as const) {
+      const input = container.querySelector(id) as HTMLInputElement;
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    const submit = [...container.querySelectorAll("button")].find(b =>
+      b.textContent?.includes("Create account")
+    ) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(container.querySelector('a[href="/terms"]')).not.toBeNull();
+    expect(container.querySelector('a[href="/privacy"]')).not.toBeNull();
+    const checkbox = container.querySelector(
+      'input[type="checkbox"]'
+    ) as HTMLInputElement;
+    checkbox.click();
+    await until(() => !submit.disabled);
+  });
+
+  it("serves the terms and privacy pages with the liability language", async () => {
+    stubServer({
+      "/account/me": () =>
+        Response.json({ error: "sign in required" }, { status: 401 })
+    });
+    const terms = render("/terms");
+    await until(() => terms.textContent?.includes("Terms of Service") ?? false);
+    expect(terms.textContent).toContain("NO WARRANTY FOR THE SERVICE");
+    expect(terms.textContent).toContain("hi@livevariant.com");
+    const privacy = render("/privacy");
+    await until(() => privacy.textContent?.includes("Privacy Policy") ?? false);
+    expect(privacy.textContent).toContain("hashed");
   });
 });

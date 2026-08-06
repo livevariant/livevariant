@@ -159,6 +159,19 @@ export function AppLayout() {
             Deploy your own
           </a>
           <span>on Cloudflare in one click.</span>
+          <span aria-hidden="true">·</span>
+          <Link
+            className="underline transition-colors hover:text-foreground"
+            to="/terms"
+          >
+            Terms
+          </Link>
+          <Link
+            className="underline transition-colors hover:text-foreground"
+            to="/privacy"
+          >
+            Privacy
+          </Link>
         </div>
       </footer>
     </div>
