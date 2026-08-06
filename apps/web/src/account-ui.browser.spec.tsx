@@ -352,7 +352,7 @@ describe("the settings page", () => {
       .map(pre => pre.textContent ?? "")
       .join("\n");
     expect(snippets).toContain(`data-publishable-key="${PK}"`);
-    expect(snippets).toContain("window.livevariant.createTest");
+    expect(snippets).toContain("window.livevariant.sdk.createTest");
   });
 });
 

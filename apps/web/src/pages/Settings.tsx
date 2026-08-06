@@ -153,7 +153,7 @@ function SdkSnippet({ pk }: { pk: string }) {
           "the tag installed, createTest reads the server and key from the " +
           "page config (or pass them explicitly with npm i @livevariant/sdk)."
         }
-        code={`const test = await window.livevariant.createTest({
+        code={`const test = await window.livevariant.sdk.createTest({
   slots: { headline: ["Ship faster", "Ship safer"] }
 });
 element.textContent = test.slots.headline.text;`}

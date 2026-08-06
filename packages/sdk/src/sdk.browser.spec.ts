@@ -8,6 +8,7 @@ import {
 import { createTest, type CreateTestOptions } from "./index.js";
 import { gaClientId } from "./identity.js";
 import { eventNameOf, resetDataLayerInterception } from "./ga.js";
+import { resetAutoTrack } from "./auto-track.js";
 
 /**
  * Real-browser tests (chromium via vitest browser mode): cookies, storage,
@@ -88,6 +89,9 @@ beforeEach(() => {
   localStorage.clear();
   document.cookie = "_ga=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
   clearDataLayer();
+  // Release the page-wide watcher claim an earlier test's tracker took.
+  resetAutoTrack(window);
+  delete (window as { livevariant?: unknown }).livevariant;
 });
 
 describe("assignment", () => {
@@ -613,8 +617,10 @@ describe("the page-wide global config", () => {
   it("lets createTest run with no options at all", async () => {
     const server = fakeServer(1);
     (window as { livevariant?: unknown }).livevariant = {
-      serverUrl: "https://global.example",
-      publishableKey: "pk_globalglobalglobalglobal"
+      config: {
+        serverUrl: "https://global.example",
+        publishableKey: "pk_globalglobalglobalglobal"
+      }
     };
     // fetch has to come from somewhere injectable: stash it on the
     // global too? No: the global carries config only. Patch fetch.
@@ -636,8 +642,10 @@ describe("the page-wide global config", () => {
   it("explicit options beat the global", async () => {
     const server = fakeServer(1);
     (window as { livevariant?: unknown }).livevariant = {
-      serverUrl: "https://global.example",
-      publishableKey: "pk_globalglobalglobalglobal"
+      config: {
+        serverUrl: "https://global.example",
+        publishableKey: "pk_globalglobalglobalglobal"
+      }
     };
     const test = await createTest(
       { ...CONFIG, name: "explicit wins" },
@@ -671,7 +679,7 @@ describe("createTest waits for a late tag", () => {
     // first must not lose the race.
     setTimeout(() => {
       (window as { livevariant?: unknown }).livevariant = {
-        serverUrl: "https://late.example"
+        config: { serverUrl: "https://late.example" }
       };
     }, 50);
     const test = await createTest(CONFIG, {

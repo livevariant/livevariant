@@ -26,6 +26,7 @@ import {
 import { resolveExternalId } from "./identity.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
 import { captureHandoff, getHandoff } from "./handoff.js";
+import { autoTrack } from "./auto-track.js";
 
 export { gaClientId, resolveExternalId } from "./identity.js";
 export {
@@ -67,16 +68,36 @@ export {
  */
 
 /**
- * Deployment-wide configuration a page can set once, usually by the
- * LiveVariant tag in <head> (which also enables reward-only tracking).
- * createTest reads it as the fallback for its options, so page code
- * can call `createTest({ slots: ... })` with nothing else.
+ * Deployment-wide configuration a page carries once, usually set by the
+ * LiveVariant tag in <head>. createTest reads it as the fallback for
+ * its options, so page code can call `createTest({ slots: ... })` with
+ * nothing else. A page may also preset it BEFORE the tag loads
+ * (`window.livevariant = { config: {...} }`); the tag keeps it.
  */
-export interface LiveVariantGlobal {
+export interface LiveVariantConfig {
   serverUrl?: string;
   publishableKey?: string;
-  /** GA4 event names the tag treats as conversions. */
+  /** GA4 event names treated as conversions by automatic tracking. */
   rewardEvents?: string[];
+}
+
+/** The tag's callable surface, for pages without an npm install. */
+export interface LiveVariantSdk {
+  createTest: typeof createTest;
+  /** Rewards every test this visitor is known to be in. */
+  trackConversion(amount?: number): Promise<void>;
+  /** Stops the tag's GA watcher (mostly SPAs tearing down). */
+  dispose(): void;
+}
+
+/**
+ * window.livevariant: plain-data `config` (the only cross-version
+ * contract, so its fields never change meaning) and, once the tag has
+ * booted, the callable `sdk`.
+ */
+export interface LiveVariantGlobal {
+  config?: LiveVariantConfig;
+  sdk?: LiveVariantSdk;
 }
 
 /**
@@ -199,6 +220,10 @@ interface CachedAssignment {
   /** Signatures for the combination's hosted assets, and when they die. */
   assetSignatures?: Record<string, string>;
   assetsExpireAt?: number;
+  /** Reward routing for the page-wide tracker (regional tests). */
+  region?: string;
+  /** rewardEvents:false at create time: skip automatic rewarding. */
+  noAuto?: boolean;
 }
 
 /** Refresh signatures this long before they expire, not after. */
@@ -224,14 +249,15 @@ export async function createTest(
           typeof options.tagWaitMs === "number" ? options.tagWaitMs : 3000
       })) ?? undefined;
   }
-  const serverUrl = options.serverUrl ?? pageGlobal?.serverUrl;
+  const serverUrl = options.serverUrl ?? pageGlobal?.config?.serverUrl;
   if (!serverUrl) {
     throw new Error(
       "createTest needs a serverUrl: pass it in options, or install the " +
         "LiveVariant tag so the page carries a global config"
     );
   }
-  const publishableKey = options.publishableKey ?? pageGlobal?.publishableKey;
+  const publishableKey =
+    options.publishableKey ?? pageGlobal?.config?.publishableKey;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const storage =
     options.storage === undefined ? win.localStorage : options.storage;
@@ -459,7 +485,12 @@ export async function createTest(
         cell: chosen,
         idHash,
         assetSignatures: sigs,
-        assetsExpireAt
+        assetsExpireAt,
+        // For the page-wide auto-tracker (auto-track.ts), which rewards
+        // this assignment from storage: the test's region routes the
+        // reward, and noAuto keeps rewardEvents:false tests out.
+        ...(resolved.region ? { region: resolved.region } : {}),
+        ...(options.rewardEvents === false ? { noAuto: true } : {})
       } satisfies CachedAssignment)
     );
     return { cell: chosen, fallback: false, assetSignatures: sigs };
@@ -496,12 +527,30 @@ export async function createTest(
       ? null
       : (options.rewardEvents ??
         resolved.rewardEvents ??
+        pageGlobal?.config?.rewardEvents ??
         DEFAULT_REWARD_EVENTS);
   if (rewardEvents && rewardEvents.length > 0) {
-    watcher = watchDataLayer(win, rewardEvents, () => {
-      // Fire-and-forget: a lost reward must never break the host page.
-      void trackConversion().catch(() => undefined);
-    });
+    if (storage) {
+      // The cached assignment above makes this test visible to the
+      // page-wide tracker, so ensure one exists rather than adding a
+      // second watcher: autoTrack's window-level claim makes this a
+      // no-op when the tag (or an earlier createTest) already runs one,
+      // in either load order.
+      autoTrack({
+        serverUrl,
+        rewardEvents,
+        storage,
+        fetch: fetchImpl,
+        window: win
+      });
+    } else {
+      // No storage means no cache entry for the tracker to find: this
+      // test rewards itself the direct way.
+      watcher = watchDataLayer(win, rewardEvents, () => {
+        // Fire-and-forget: a lost reward must never break the host page.
+        void trackConversion().catch(() => undefined);
+      });
+    }
   }
 
   const chosenSlots: Record<string, Variant> = {};
