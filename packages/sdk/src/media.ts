@@ -111,9 +111,14 @@ export async function decorateMedia(
   return upgraded;
 }
 
-/** The testId of a /s/<cfg> or /c/<cfg> path, null for the param form. */
+/**
+ * The testId of a /s/<cfg> or /c/<cfg> path, null for the param form.
+ * Unanchored at the start: a self-hosted server may live under a path
+ * prefix (https://host/lv/s/...), and the caller has already verified
+ * the URL belongs to this tag's server.
+ */
 async function testIdOf(pathname: string): Promise<string | null> {
-  const encoded = pathname.match(/^\/[sc]\/([^/]+)$/)?.[1];
+  const encoded = pathname.match(/\/[sc]\/([^/]+)$/)?.[1];
   if (!encoded) {
     return null;
   }

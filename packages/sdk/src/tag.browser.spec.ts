@@ -278,6 +278,38 @@ describe("media decoration", () => {
     expect(new URL(img.src).searchParams.get("_lvid")).toBe("f".repeat(64));
   });
 
+  it("replays handoffs for servers mounted under a path prefix", async () => {
+    const { encoded: cfg, testId } = await encoded();
+    localStorage.setItem(
+      `lv:h:${testId}`,
+      JSON.stringify({
+        testId,
+        idHash: "e".repeat(64),
+        cell: 0,
+        capturedAt: Date.now()
+      })
+    );
+    (window as { livevariant?: unknown }).livevariant = {
+      config: { serverUrl: "https://deploy.example/lv" }
+    };
+    const img = el("img", { src: `https://deploy.example/lv/s/${cfg}` });
+    bootTag(
+      window,
+      (() => {
+        const script = document.createElement("script");
+        script.setAttribute("src", "https://deploy.example/lv/sdk.js");
+        script.setAttribute(
+          "data-publishable-key",
+          "pk_tagtagtagtagtagtagtagta"
+        );
+        document.head.appendChild(script);
+        return script;
+      })()
+    );
+    await until(() => img.src.includes("_lvid="));
+    expect(new URL(img.src).searchParams.get("_lvid")).toBe("e".repeat(64));
+  });
+
   it("fills data-lv-src images with one identified fetch", async () => {
     const { encoded: cfg } = await encoded();
     const img = el("img", {
