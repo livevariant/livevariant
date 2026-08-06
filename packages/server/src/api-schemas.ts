@@ -102,7 +102,9 @@ export const chooseRequestSchema = z
       .string()
       .regex(/^pk_[a-z0-9]{24}$/)
       .optional(),
-    encoded: z.string().max(8192).optional()
+    encoded: z.string().max(8192).optional(),
+    /** The sender's SDK version, stored on the record for later compat. */
+    sdk: z.string().max(32).optional()
   })
   .superRefine((body, issues) => {
     const cells = cellCount(body.slotSizes);
@@ -159,7 +161,9 @@ export const rewardRequestSchema = z.object({
   idHash: hex64,
   amount: z.number().positive().max(MAX_REWARD_AMOUNT).default(1),
   /** See chooseRequestSchema.region; carried by SDK and handoff callers. */
-  region: z.enum(TEST_REGIONS).optional()
+  region: z.enum(TEST_REGIONS).optional(),
+  /** See chooseRequestSchema.sdk; backfills records rewarded tag-only. */
+  sdk: z.string().max(32).optional()
 });
 
 export type ChooseRequest = z.infer<typeof chooseRequestSchema>;

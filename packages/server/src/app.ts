@@ -60,6 +60,7 @@ import {
   type TestBackend
 } from "./service.js";
 import type { AccountsProvider } from "./accounts-port.js";
+import { SERVER_VERSION } from "./version.js";
 import type { StateStore } from "./store/types.js";
 
 export interface AppOptions {
@@ -906,13 +907,17 @@ export function createApp(options: AppOptions): Hono {
     // they do not run scripts.
     const signals = requestSignals(requestContext(c));
     const autoCtx = deriveAutoCtx(r.autoDims, signals, r.autoCtx ?? null);
-    const { cell } = await service.assign(params, {
-      idHash: r.idHash ?? null,
-      ctxKey: await composeBucketKey(r.testId, r.ctxKey ?? null, autoCtx),
-      featIdx: mergeFeatureIndices(r.featIdx ?? [0], autoCtx, r.dim),
-      srcHash: await sourceHash(r.testId, clientIp(c), Date.now()),
-      signals
-    });
+    const { cell } = await service.assign(
+      params,
+      {
+        idHash: r.idHash ?? null,
+        ctxKey: await composeBucketKey(r.testId, r.ctxKey ?? null, autoCtx),
+        featIdx: mergeFeatureIndices(r.featIdx ?? [0], autoCtx, r.dim),
+        srcHash: await sourceHash(r.testId, clientIp(c), Date.now()),
+        signals
+      },
+      { sdk: r.sdk }
+    );
     const choice = decodeCell(r.slotSizes, cell);
     // First-sight registration, entirely off the response path: a
     // publishable key plus a verified page origin may register this
@@ -955,7 +960,15 @@ export function createApp(options: AppOptions): Hono {
         expiresAt
       );
     }
-    return c.json({ cell, choice, assetSignatures, assetsExpireAt: expiresAt });
+    return c.json({
+      cell,
+      choice,
+      assetSignatures,
+      assetsExpireAt: expiresAt,
+      // The deployment's version, so clients can adapt to older
+      // self-hosted servers without a second request.
+      server: SERVER_VERSION
+    });
   });
 
   app.post("/reward", async c => {
@@ -973,8 +986,18 @@ export function createApp(options: AppOptions): Hono {
     if (denied) {
       return denied;
     }
-    const result = await service.reward(r.testId, r.idHash, r.amount, r.region);
-    return c.json({ rewarded: result !== null, first: result?.first ?? false });
+    const result = await service.reward(
+      r.testId,
+      r.idHash,
+      r.amount,
+      r.region,
+      r.sdk
+    );
+    return c.json({
+      rewarded: result !== null,
+      first: result?.first ?? false,
+      server: SERVER_VERSION
+    });
   });
 
   // Creator-only endpoints, gated by the stats secret.

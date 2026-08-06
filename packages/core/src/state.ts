@@ -53,6 +53,14 @@ export interface AssignmentRecord {
   ctxKey: string | null;
   /** Accumulated reward; only the first reward updates derived state. */
   rewardTotal: number;
+  /**
+   * The client SDK version that created (or, backfilled on reward,
+   * rewarded) this record; null for server-created records (redirects)
+   * whose visitor never spoke SDK wire. Diagnostic only today; exists
+   * so "which sites run an outdated SDK" is answerable later without
+   * asking anyone to re-instrument.
+   */
+  sdk?: string | null;
   /** ms epoch; also the replay order for recompute. */
   firstSeen: number;
   /**

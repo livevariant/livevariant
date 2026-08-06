@@ -64,7 +64,8 @@ export class TestStateDO extends DurableObject {
       getAssignment: (_t, idHash) => store.getAssignment(idHash),
       putAssignmentIfAbsent: (_t, idHash, rec) =>
         store.putAssignmentIfAbsent(idHash, rec),
-      addReward: (_t, idHash, amount) => store.addReward(idHash, amount),
+      addReward: (_t, idHash, amount, sdk) =>
+        store.addReward(idHash, amount, sdk),
       async *scanAssignments() {
         let startAfter: string | null = null;
         do {
@@ -114,17 +115,19 @@ export class TestStateDO extends DurableObject {
 
   assign(
     params: ServingParams,
-    identity: RequestIdentity
+    identity: RequestIdentity,
+    meta?: { sdk?: string }
   ): Promise<{ cell: number; created: boolean }> {
-    return this.service(params.testId).assign(params, identity);
+    return this.service(params.testId).assign(params, identity, meta);
   }
 
   rewardAssignment(
     testId: string,
     idHash: string,
-    amount: number
+    amount: number,
+    sdk?: string
   ): Promise<{ cell: number; first: boolean } | null> {
-    return this.service(testId).reward(testId, idHash, amount);
+    return this.service(testId).reward(testId, idHash, amount, undefined, sdk);
   }
 
   recompute(params: ServingParams): Promise<number> {
@@ -287,12 +290,31 @@ class DurableObjectBackend implements TestBackend {
     );
   }
 
-  assign(params: ServingParams, identity: RequestIdentity) {
-    return this.stub(params.testId, params.region).assign(params, identity);
+  assign(
+    params: ServingParams,
+    identity: RequestIdentity,
+    meta?: { sdk?: string }
+  ) {
+    return this.stub(params.testId, params.region).assign(
+      params,
+      identity,
+      meta
+    );
   }
 
-  reward(testId: string, idHash: string, amount: number, region?: TestRegion) {
-    return this.stub(testId, region).rewardAssignment(testId, idHash, amount);
+  reward(
+    testId: string,
+    idHash: string,
+    amount: number,
+    region?: TestRegion,
+    sdk?: string
+  ) {
+    return this.stub(testId, region).rewardAssignment(
+      testId,
+      idHash,
+      amount,
+      sdk
+    );
   }
 
   recompute(params: ServingParams) {

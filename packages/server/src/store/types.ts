@@ -138,7 +138,9 @@ export interface StateStore {
   addReward(
     testId: string,
     idHash: string,
-    amount: number
+    amount: number,
+    /** Backfills rec.sdk when the record has none (tag-only visitors). */
+    sdk?: string
   ): Promise<{ rec: AssignmentRecord; first: boolean } | null>;
 
   /** Streams every assignment of a test, for stats and recompute. */

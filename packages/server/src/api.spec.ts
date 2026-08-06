@@ -3,6 +3,7 @@ import type { Hono } from "hono";
 import { TOOLS, toolPath } from "@livevariant/tools";
 import { mulberry32 } from "@livevariant/core";
 import { createApp } from "./app.js";
+import { SERVER_VERSION } from "./version.js";
 import { MemoryStore } from "./store/memory.js";
 
 /**
@@ -119,7 +120,8 @@ describe("the tool API", () => {
       serveUrl: "https://ab.internal",
       region: null,
       gtmId: null,
-      publishableKey: null
+      publishableKey: null,
+      server: SERVER_VERSION
     });
   });
 
@@ -133,7 +135,8 @@ describe("the tool API", () => {
       serveUrl: "https://ab.internal",
       region: null,
       gtmId: null,
-      publishableKey: null
+      publishableKey: null,
+      server: SERVER_VERSION
     });
 
     const split = createApp({
@@ -146,7 +149,8 @@ describe("the tool API", () => {
       serveUrl: "https://livevariant.link",
       region: null,
       gtmId: null,
-      publishableKey: null
+      publishableKey: null,
+      server: SERVER_VERSION
     });
   });
 

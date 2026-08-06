@@ -184,7 +184,8 @@ export interface TestBackend {
   checkShape(params: ServingParams, authoritative: boolean): Promise<boolean>;
   assign(
     params: ServingParams,
-    identity: RequestIdentity
+    identity: RequestIdentity,
+    meta?: { sdk?: string }
   ): Promise<{ cell: number; created: boolean }>;
   /**
    * Region rides along because reward is deliberately config-free: the
@@ -195,7 +196,9 @@ export interface TestBackend {
     testId: string,
     idHash: string,
     amount: number,
-    region?: TestRegion
+    region?: TestRegion,
+    /** Sender's SDK version; stored (or backfilled) on the record. */
+    sdk?: string
   ): Promise<{ cell: number; first: boolean } | null>;
   recompute(params: ServingParams): Promise<number>;
   updatePolicy(
@@ -265,7 +268,8 @@ export class TestService implements TestBackend {
    */
   async assign(
     params: ServingParams,
-    identity: RequestIdentity
+    identity: RequestIdentity,
+    meta?: { sdk?: string }
   ): Promise<{ cell: number; created: boolean }> {
     const { idHash } = identity;
     if (idHash) {
@@ -301,7 +305,8 @@ export class TestService implements TestBackend {
       rewardTotal: 0,
       firstSeen: Date.now(),
       srcHash: identity.srcHash ?? null,
-      signals: identity.signals ?? null
+      signals: identity.signals ?? null,
+      sdk: meta?.sdk ?? null
     };
     const result = await this.store.putAssignmentIfAbsent(
       params.testId,
@@ -327,9 +332,10 @@ export class TestService implements TestBackend {
     testId: string,
     idHash: string,
     amount: number,
-    _region?: TestRegion
+    _region?: TestRegion,
+    sdk?: string
   ): Promise<{ cell: number; first: boolean } | null> {
-    const result = await this.store.addReward(testId, idHash, amount);
+    const result = await this.store.addReward(testId, idHash, amount, sdk);
     if (!result) {
       return null;
     }

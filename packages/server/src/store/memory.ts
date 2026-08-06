@@ -70,7 +70,8 @@ export class MemoryStore implements StateStore {
   async addReward(
     testId: string,
     idHash: string,
-    amount: number
+    amount: number,
+    sdk?: string
   ): Promise<{ rec: AssignmentRecord; first: boolean } | null> {
     const rec = this.assignments.get(testId)?.get(idHash);
     if (!rec) {
@@ -78,6 +79,7 @@ export class MemoryStore implements StateStore {
     }
     const first = rec.rewardTotal === 0;
     rec.rewardTotal += amount;
+    rec.sdk ??= sdk ?? null;
     return { rec, first };
   }
 

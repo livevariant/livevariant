@@ -13,6 +13,7 @@ import {
   type TestConfigInput
 } from "@livevariant/core";
 import { createApp } from "./app.js";
+import { SERVER_VERSION } from "./version.js";
 import { paramsFromConfig } from "./service.js";
 import { MemoryStore } from "./store/memory.js";
 
@@ -300,7 +301,11 @@ describe("handoff (email -> landing page -> SDK reward flow)", () => {
       body: JSON.stringify({ testId, idHash, amount: 5 }),
       headers: { "content-type": "application/json" }
     });
-    expect(await reward.json()).toEqual({ rewarded: true, first: true });
+    expect(await reward.json()).toEqual({
+      rewarded: true,
+      first: true,
+      server: SERVER_VERSION
+    });
     expect(sumRewards(await stats(encoded))).toBe(5);
   });
 });
@@ -368,13 +373,21 @@ describe("JS mode (choose/reward)", () => {
       body: JSON.stringify({ testId, idHash, amount: 2 }),
       headers: { "content-type": "application/json" }
     });
-    expect(await r1.json()).toEqual({ rewarded: true, first: true });
+    expect(await r1.json()).toEqual({
+      rewarded: true,
+      first: true,
+      server: SERVER_VERSION
+    });
     const r2 = await app.request("/reward", {
       method: "POST",
       body: JSON.stringify({ testId, idHash }),
       headers: { "content-type": "application/json" }
     });
-    expect(await r2.json()).toEqual({ rewarded: true, first: false });
+    expect(await r2.json()).toEqual({
+      rewarded: true,
+      first: false,
+      server: SERVER_VERSION
+    });
   });
 
   it("decodes multi-slot choices", async () => {
