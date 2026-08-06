@@ -217,8 +217,8 @@ describe("the website flow", () => {
       />
     );
     await until(() => container.textContent?.includes("Variants") ?? false);
-    setValue(byLabel(container, "Variant 1 text"), "Ship faster");
-    setValue(byLabel(container, "Variant 2 text"), "Ship safer");
+    setValue(byLabel(container, "Element 1 variant 1 text"), "Ship faster");
+    setValue(byLabel(container, "Element 1 variant 2 text"), "Ship safer");
     clickButton(container, "Create website test");
     await until(() => created.length > 0);
     expect(created[0].type).toBe("website");
@@ -235,13 +235,41 @@ describe("the website flow", () => {
     expect(text).toContain('import { createTest } from "@livevariant/sdk"');
   });
 
+  it("bracket-accesses slots whose keys are not identifiers", async () => {
+    const container = render(
+      <CreateTest serverUrl={SERVER} defaultType="website" onCreated={ignore} />
+    );
+    await until(() => container.textContent?.includes("Variants") ?? false);
+    setValue(byLabel(container, "Element 1 variant 1 text"), "A");
+    setValue(byLabel(container, "Element 1 variant 2 text"), "B");
+    clickButton(container, "Test another element at the same time");
+    // The second element keeps its default dashed key, element-2.
+    await until(
+      () =>
+        (
+          container.querySelector(
+            '[aria-label="Element 2 name"]'
+          ) as HTMLInputElement | null
+        )?.value === "element-2"
+    );
+    setValue(byLabel(container, "Element 2 variant 1 text"), "C");
+    setValue(byLabel(container, "Element 2 variant 2 text"), "D");
+    clickButton(container, "Create website test");
+    await until(
+      () => container.textContent?.includes("Install it on your site") ?? false
+    );
+    // Dot access on a dashed key would be subtraction, not a slot.
+    expect(container.textContent).toContain('test.slots["element-2"].text');
+    expect(container.textContent).toContain("test.slots.headline.text");
+  });
+
   it("shows the placeholder key hint when the account has none", async () => {
     const container = render(
       <CreateTest serverUrl={SERVER} defaultType="website" onCreated={ignore} />
     );
     await until(() => container.textContent?.includes("Variants") ?? false);
-    setValue(byLabel(container, "Variant 1 text"), "A");
-    setValue(byLabel(container, "Variant 2 text"), "B");
+    setValue(byLabel(container, "Element 1 variant 1 text"), "A");
+    setValue(byLabel(container, "Element 1 variant 2 text"), "B");
     clickButton(container, "Create website test");
     await until(
       () => container.textContent?.includes("pk_YOUR_PUBLISHABLE_KEY") ?? false

@@ -97,10 +97,14 @@ export function WebsiteTestForm(props: CreateTestProps) {
 
   if (created) {
     const applyLines = slots
-      .map(
-        slot =>
-          `document.querySelector("#${slot.key}").textContent =\n  test.slots.${slot.key}.text;`
-      )
+      .map(slot => {
+        // Keys like "element-2" are not identifiers: dot access would
+        // parse as subtraction in the pasted snippet.
+        const access = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(slot.key)
+          ? `test.slots.${slot.key}.text`
+          : `test.slots["${slot.key}"].text`;
+        return `document.querySelector("#${slot.key}").textContent =\n  ${access};`;
+      })
       .join("\n");
     return (
       <InstallStep
@@ -193,7 +197,7 @@ export function WebsiteTestForm(props: CreateTestProps) {
             <div key={i} className="lv-variant-row">
               <div className="lv-row">
                 <Input
-                  aria-label={`Variant ${i + 1} name`}
+                  aria-label={`Element ${slotIndex + 1} variant ${i + 1} name`}
                   value={variant.name}
                   onChange={e =>
                     patchVariant(slotIndex, i, { name: e.target.value })
@@ -216,7 +220,7 @@ export function WebsiteTestForm(props: CreateTestProps) {
               </div>
               <Input
                 placeholder="Ship faster with adaptive testing"
-                aria-label={`Variant ${i + 1} text`}
+                aria-label={`Element ${slotIndex + 1} variant ${i + 1} text`}
                 value={variant.text}
                 onChange={e =>
                   patchVariant(slotIndex, i, { text: e.target.value })

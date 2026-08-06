@@ -165,8 +165,8 @@ describe("creating each test type from the dashboard", () => {
   it("website: saves a website record and shows the tag snippet", async () => {
     const container = render("/builder?type=website");
     await until(() => container.textContent?.includes("Variants") ?? false);
-    setByLabel(container, "Variant 1 text", "Ship faster");
-    setByLabel(container, "Variant 2 text", "Ship safer");
+    setByLabel(container, "Element 1 variant 1 text", "Ship faster");
+    setByLabel(container, "Element 1 variant 2 text", "Ship safer");
     click(container, "Create website test");
     await until(() => loadTests().length > 0);
     expect(loadTests()[0].type).toBe("website");
