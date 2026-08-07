@@ -33,7 +33,46 @@ our own homepage with our own product.
 
 ## Let your LLM run it
 
-Install the toolkit. Skills (recommended, works with Claude Code and
+The whole setup is one conversation, and there is nothing to install:
+naming the site in any AI chat is enough for the agent to discover the
+tools and take it from there.
+
+> "I want to A/B test my next 'Daily brew' newsletter with
+> livevariant.com. Give me some ideas and set it up."
+
+Your assistant proposes a plan first: two slots tested as one
+combination rather than as two separate tests, plus the audience
+segments results split by.
+
+```
+slot hero: packshot / cafe / fireside    (three drafted scenes, one product)
+slot cta:  "Shop the roast" / "Start your ritual" / "Brew better today"
+ctx:       utm_source · country (merge tag)
+```
+
+> "Looks good!"
+
+It builds the test and hands back three links for the template (one
+image link per slot, plus the click link that records the win and
+redirects) and your manage link with live results:
+
+```
+img hero  livevariant.link/s/<config>?slot=hero&id={{email}}&auto=0
+img cta   livevariant.link/s/<config>?slot=cta&id={{email}}&auto=0
+click     livevariant.link/c/<config>?id={{email}}
+manage    livevariant.com/manage/<config>#<stats-secret>
+```
+
+Nine combinations, every recipient sticks to their own, traffic shifts
+toward whatever combination is winning while the campaign runs, and a
+different combination can win per audience. Ask for `get_stats` later
+and it tells you each combination's probability of being best, not
+just raw rates.
+
+### Give your agent the toolkit
+
+Installing buys deeper integration: the full skill in context, tools
+without discovery. Skills (recommended, works with Claude Code and
 Cowork):
 
 ```bash
@@ -59,14 +98,6 @@ Any other agent: MCP hosted at `https://livevariant.com/mcp`, stdio via
 `npx -y @livevariant/mcp`, or plain HTTP at `POST /api/v1/<tool>`
 (interactive docs at `/docs`, spec at `/openapi.json`). No API keys: a
 test's config and its stats secret carry all the authority there is.
-
-Then just ask your assistant:
-
-> "A/B test these two hero images in tomorrow's newsletter."
-
-It uploads the images, builds the test, and returns one URL. Ask it for
-`get_stats` later and it tells you the win probability per combination,
-not just raw rates.
 
 ## Or do it yourself
 
@@ -102,9 +133,15 @@ For audience segments in email, use what survives mail proxies: campaign
 tags (`ctx=source:utm_source`) or your ESP's merge fields
 (`&c_country={{country}}`).
 
-### Test copy inline with the SDK
+### Test your website, too
 
-The config is readable on purpose; this is the whole test:
+Landing pages are tests as well: images and content served directly on
+the page. Developers and LLM coding agents wire one up by installing
+the SDK; the config is readable on purpose, and this is the whole test:
+
+```bash
+npm i @livevariant/sdk
+```
 
 ```js
 import { createTest } from "@livevariant/sdk";
@@ -112,8 +149,12 @@ import { createTest } from "@livevariant/sdk";
 const test = await createTest(
   {
     slots: {
-      headline: ["Ship faster", "Ship safer", "Ship happier"],
-      cta: ["Buy now", "Try free", "See pricing"]
+      headline: [
+        "The daily cup, perfected",
+        "Mornings, upgraded",
+        "Coffee worth waking for"
+      ],
+      cta: ["Shop the roast", "Start your ritual", "See the blends"]
     },
     ctx: {
       dims: [
@@ -132,7 +173,9 @@ cta.textContent = test.slots.cta.text;
 
 Two slots, nine combinations, a different winner per country and device,
 and the test is scoped to your domain automatically. If the server is
-unreachable, visitors get your control and nothing breaks.
+unreachable, visitors get your control and nothing breaks. The headline
+on [livevariant.com](https://livevariant.com) runs exactly this way; the
+page shows its own snippet.
 
 ## Read your results
 

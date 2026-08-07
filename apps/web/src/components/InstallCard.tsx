@@ -5,9 +5,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /**
- * The agent-first install card: skills, Claude Code / Cowork plugin,
- * Codex plugin, or bare MCP. Shared between the landing page's
- * "let your LLM run it" section and the create flow's "use your LLM
+ * The agent-first install card, prompt-first: the default tab is a
+ * paste-into-any-AI prompt that points the agent at this deployment
+ * (zero install; the agent discovers the tools itself), with skills,
+ * Claude Code / Cowork plugin, Codex plugin and bare MCP one tab away.
+ * Shared between the landing page and the create flow's "use your LLM
  * to do the heavy lifting" card.
  */
 function CopyButton({
@@ -45,16 +47,27 @@ function CopyButton({
 function CommandRow({
   command,
   prompt = true,
+  wrap = false,
   onCopied
 }: {
   command: string;
   /** False for values that are not shell commands (URLs). */
   prompt?: boolean;
+  /** True for prose (a chat prompt): wraps instead of scrolling. */
+  wrap?: boolean;
   onCopied?: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-background px-3 py-1.5">
-      <code className="overflow-x-auto whitespace-nowrap font-mono text-sm">
+    <div
+      className={`flex justify-between gap-2 rounded-md border border-border bg-background px-3 py-1.5 ${
+        wrap ? "items-start" : "items-center"
+      }`}
+    >
+      <code
+        className={`font-mono text-sm ${
+          wrap ? "py-1" : "overflow-x-auto whitespace-nowrap"
+        }`}
+      >
         {prompt && <span className="text-muted-foreground">$ </span>}
         {command}
       </code>
@@ -67,13 +80,29 @@ export function InstallCard({ onConvert }: { onConvert?: () => void }) {
   return (
     <Card className="border-border bg-card shadow-none">
       <CardContent className="pt-6">
-        <Tabs defaultValue="skills">
-          <TabsList>
+        <Tabs defaultValue="ask">
+          {/* Five tabs outgrow a phone: the strip swipes within itself
+              (no visible scrollbar) instead of widening the page. */}
+          <TabsList className="max-w-full overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <TabsTrigger value="ask">ask any AI agent</TabsTrigger>
             <TabsTrigger value="skills">skills</TabsTrigger>
             <TabsTrigger value="claude">Claude Code / Cowork</TabsTrigger>
             <TabsTrigger value="codex">Codex</TabsTrigger>
             <TabsTrigger value="mcp">any agent (MCP)</TabsTrigger>
           </TabsList>
+          <TabsContent value="ask" className="space-y-2">
+            <CommandRow
+              command={`I want to A/B test my next "Daily brew" newsletter with ${window.location.host}. Give me some ideas and set it up.`}
+              prompt={false}
+              wrap
+              onCopied={onConvert}
+            />
+            <p className="text-sm text-muted-foreground">
+              Nothing to install: paste this into any AI chat, and naming the
+              site is enough for the agent to discover the tools and take it
+              from there.
+            </p>
+          </TabsContent>
           <TabsContent value="skills" className="space-y-2">
             <CommandRow
               command="npx skills add livevariant/livevariant"

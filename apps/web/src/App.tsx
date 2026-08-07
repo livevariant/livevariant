@@ -73,7 +73,9 @@ export function AppLayout() {
         "flex min-h-screen flex-col font-sans"
       )}
     >
-      <header className="mx-auto flex h-16 w-full max-w-6xl items-center gap-6 px-6">
+      {/* Wraps to a second row on phones instead of overflowing the
+          viewport; nothing is hidden behind a menu. */}
+      <header className="mx-auto flex min-h-16 w-full max-w-6xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 sm:flex-nowrap sm:gap-6 sm:px-6 sm:py-0">
         <Link to="/" className="font-display flex items-center gap-2 text-2xl">
           {/* Decorative next to the wordmark, so no alt text; the pair
               switches with the site's own theme toggle, which a CSS
@@ -86,7 +88,7 @@ export function AppLayout() {
           />
           LiveVariant
         </Link>
-        <nav className="flex items-center gap-4">
+        <nav className="flex items-center gap-3 sm:gap-4">
           <NavLink to="/builder" className={navClass}>
             Create a test
           </NavLink>
@@ -99,7 +101,7 @@ export function AppLayout() {
             </NavLink>
           )}
         </nav>
-        <nav className="ml-auto flex items-center gap-5 text-sm">
+        <nav className="ml-auto flex items-center gap-3 text-sm sm:gap-5">
           <a
             href="https://github.com/livevariant/livevariant"
             className="text-muted-foreground transition-colors hover:text-foreground"
@@ -149,7 +151,8 @@ export function AppLayout() {
                 </Link>
               </Button>
             ))}
-          <Button variant="outline" asChild>
+          {/* The footer repeats this link, so phones lose no path. */}
+          <Button variant="outline" className="hidden sm:inline-flex" asChild>
             <a href="https://deploy.workers.cloudflare.com/?url=https://github.com/livevariant/livevariant">
               Deploy your own
             </a>
@@ -161,14 +164,16 @@ export function AppLayout() {
       </main>
       <footer className="border-t border-border">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-2 gap-y-1 px-6 py-8 text-sm text-muted-foreground">
-          <span>AGPL open source.</span>
-          <a
-            className="underline transition-colors hover:text-foreground"
-            href="https://deploy.workers.cloudflare.com/?url=https://github.com/livevariant/livevariant"
-          >
-            Deploy your own
-          </a>
-          <span>on Cloudflare in one click.</span>
+          <span>
+            AGPL open source.{" "}
+            <a
+              className="underline transition-colors hover:text-foreground"
+              href="https://deploy.workers.cloudflare.com/?url=https://github.com/livevariant/livevariant"
+            >
+              Deploy your own
+            </a>{" "}
+            on Cloudflare in one click.
+          </span>
           {hostedPoliciesApply() && (
             <>
               <span aria-hidden="true">·</span>
