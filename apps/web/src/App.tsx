@@ -82,7 +82,7 @@ export function AppLayout() {
             src={theme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
             alt=""
             aria-hidden="true"
-            className="h-6 w-auto"
+            className="h-5 w-auto"
           />
           LiveVariant
         </Link>
