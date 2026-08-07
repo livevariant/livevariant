@@ -209,9 +209,12 @@ export function createApi(options: ApiOptions): Hono {
 
   // Agent discovery: the same single-source docs the skill and MCP
   // serve, rendered with THIS deployment's origin so a self-host
-  // describes itself. Markdown, because the readers are LLMs.
+  // describes itself. Markdown, because the readers are LLMs. Doc,
+  // MCP and legal links belong to the origin the request arrived on;
+  // only campaign-carried links (/s example, sdk.js) use the serve
+  // domain when one is configured.
   app.get("/llms.txt", c =>
-    c.text(renderLlmsTxt(serveUrl ?? new URL(c.req.url).origin), 200, {
+    c.text(renderLlmsTxt(new URL(c.req.url).origin, serveUrl), 200, {
       "content-type": "text/markdown; charset=utf-8"
     })
   );

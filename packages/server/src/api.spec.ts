@@ -351,6 +351,26 @@ describe("GTM through /config", () => {
 });
 
 describe("agent discovery routes", () => {
+  it("keeps llms.txt doc links on the REQUEST origin, serve links on LV_SERVE_URL", async () => {
+    // The hosted deployment sets a second campaign domain; that must
+    // never swallow the documentation links (the bug this pins: every
+    // llms.txt link once rendered against the serve domain).
+    const twoDomain = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      serveUrl: "https://serve.example"
+    });
+    const txt = await (
+      await twoDomain.request("https://main.example/llms.txt")
+    ).text();
+    expect(txt).toContain("https://main.example/skills/livevariant/SKILL.md");
+    expect(txt).toContain("https://main.example/mcp");
+    expect(txt).toContain("https://main.example/terms");
+    expect(txt).toContain("https://serve.example/s?v=");
+    expect(txt).toContain("https://serve.example/sdk.js");
+    expect(txt).not.toContain("https://serve.example/mcp");
+  });
+
   it("serves llms.txt and the skill, rendered for this origin", async () => {
     const res = await app.request("https://self.example/llms.txt");
     expect(res.status).toBe(200);
