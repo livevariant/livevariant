@@ -5,7 +5,8 @@ import {
   configFromParams,
   encodeConfig,
   hashStatsSecret,
-  mulberry32
+  mulberry32,
+  sha256Hex
 } from "@livevariant/core";
 import { createApp } from "./app.js";
 import { SERVER_VERSION } from "./version.js";
@@ -545,5 +546,111 @@ describe("a Settings-minted stats key, end to end", () => {
       0
     );
     expect(conversions).toBe(1);
+  });
+});
+
+describe("agent discovery well-knowns", () => {
+  it("publishes an RFC 9727 API catalog for this origin", async () => {
+    const res = await app.request(
+      "https://self.example/.well-known/api-catalog"
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain(
+      "application/linkset+json"
+    );
+    const body = (await res.json()) as Record<string, any>;
+    const entry = body.linkset[0];
+    expect(entry.anchor).toBe("https://self.example/api/v1/");
+    expect(entry["service-desc"][0].href).toBe(
+      "https://self.example/openapi.json"
+    );
+    expect(entry["service-doc"][0].href).toBe("https://self.example/docs");
+  });
+
+  it("publishes an MCP server card naming the /mcp transport", async () => {
+    for (const path of [
+      "/.well-known/mcp/server-card.json",
+      "/.well-known/mcp.json"
+    ]) {
+      const res = await app.request(`https://self.example${path}`);
+      expect(res.status).toBe(200);
+      const card = (await res.json()) as Record<string, any>;
+      expect(card.serverInfo.name).toBe("livevariant");
+      expect(card.transport).toEqual({
+        type: "streamable-http",
+        url: "https://self.example/mcp"
+      });
+      expect(card.documentation).toBe(
+        "https://self.example/skills/livevariant/SKILL.md"
+      );
+    }
+  });
+
+  it("indexes the skill with a digest of the exact served bytes", async () => {
+    const res = await app.request(
+      "https://self.example/.well-known/agent-skills/index.json"
+    );
+    expect(res.status).toBe(200);
+    const index = (await res.json()) as Record<string, any>;
+    expect(index.$schema).toContain("agentskills.io");
+    const [skill] = index.skills;
+    expect(skill.name).toBe("livevariant");
+    expect(skill.type).toBe("skill-md");
+    expect(skill.url).toBe("/skills/livevariant/SKILL.md");
+    // The digest must be the hash of what the URL actually serves, so
+    // an agent verifying the download always agrees.
+    const served = await (
+      await app.request("https://self.example/skills/livevariant/SKILL.md")
+    ).text();
+    expect(skill.digest).toBe(`sha256:${await sha256Hex(served)}`);
+  });
+
+  it("serves auth.md as markdown telling the truth: nothing to register", async () => {
+    const res = await app.request("https://self.example/auth.md");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/markdown");
+    const text = await res.text();
+    expect(text).toContain("NO registration");
+    expect(text).toContain("https://self.example/api/v1/");
+    // No aspirational OAuth: the honest story is the whole story.
+    expect(text).not.toContain("authorization_endpoint");
+  });
+
+  it("serves a sitemap of the public pages", async () => {
+    const res = await app.request("https://self.example/sitemap.xml");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("xml");
+    const xml = await res.text();
+    expect(xml).toContain("<loc>https://self.example/</loc>");
+    expect(xml).toContain("<loc>https://self.example/builder</loc>");
+    expect(xml).not.toContain("/settings");
+  });
+
+  it("negotiates the homepage: markdown for agents, the shell for browsers", async () => {
+    const withShell = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      spaFetch: async () =>
+        new Response("<html>shell</html>", {
+          headers: { "content-type": "text/html" }
+        })
+    });
+    const markdown = await withShell.request("https://self.example/", {
+      headers: { accept: "text/markdown" }
+    });
+    expect(markdown.status).toBe(200);
+    expect(markdown.headers.get("content-type")).toContain("text/markdown");
+    expect(await markdown.text()).toContain("# LiveVariant");
+
+    const html = await withShell.request("https://self.example/", {
+      headers: { accept: "text/html" }
+    });
+    expect(html.status).toBe(200);
+    expect(await html.text()).toContain("shell");
+    // RFC 8288 discovery on the HTML response too.
+    expect(html.headers.get("link")).toContain(
+      '</.well-known/api-catalog>; rel="api-catalog"'
+    );
+    expect(markdown.headers.get("link")).toContain("api-catalog");
   });
 });
