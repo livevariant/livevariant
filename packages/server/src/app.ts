@@ -136,6 +136,8 @@ export interface AppOptions {
   gtmId?: string;
   /** The deployment's own key. See ApiOptions.publishableKey. */
   publishableKey?: string;
+  /** OpenAI Apps domain-verification token. See ApiOptions.openaiAppsChallengeToken. */
+  openaiAppsChallengeToken?: string;
   /**
    * First-party identity cookie for id-less serve/click NAVIGATIONS
    * (LV_BROWSER_ID_COOKIE, "off" disables). Image fetches and ?auto=0
@@ -756,6 +758,7 @@ export function createApp(options: AppOptions): Hono {
       provider: options.provider,
       gtmId: options.gtmId,
       publishableKey: options.publishableKey,
+      openaiAppsChallengeToken: options.openaiAppsChallengeToken,
       spaFetch: options.spaFetch,
       fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
         app.fetch(new Request(input as RequestInfo, init))) as typeof fetch

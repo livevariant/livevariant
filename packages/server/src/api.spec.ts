@@ -627,6 +627,26 @@ describe("agent discovery well-knowns", () => {
     expect(skill.digest).toBe(`sha256:${await sha256Hex(served)}`);
   });
 
+  it("serves the OpenAI Apps challenge only when configured", async () => {
+    const unconfigured = await app.request(
+      "https://self.example/.well-known/openai-apps-challenge"
+    );
+    expect(unconfigured.status).toBe(404);
+
+    const configured = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      openaiAppsChallengeToken: "challenge-token"
+    });
+    const res = await configured.request(
+      "https://self.example/.well-known/openai-apps-challenge"
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.text()).toBe("challenge-token");
+  });
+
   it("serves auth.md as markdown telling the truth: nothing to register", async () => {
     const res = await app.request("https://self.example/auth.md");
     expect(res.status).toBe(200);

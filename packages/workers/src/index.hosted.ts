@@ -132,6 +132,11 @@ export default {
                 );
               }
         });
+        // Hosted ChatGPT app submission: domain verification for
+        // https://livevariant.com/.well-known/openai-apps-challenge. This is
+        // deliberately not a self-host/deploy-button option.
+        options.openaiAppsChallengeToken =
+          "-13GCHt6Kh8OK2vKJPDS_ylqWHHSrLj3jDxFcHCNe_s";
         options.accounts = accounts.routes;
         options.provider = accounts.provider;
         // The registry IS the hosted trust policy: verified domains
