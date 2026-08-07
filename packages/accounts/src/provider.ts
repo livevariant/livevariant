@@ -220,8 +220,9 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
           return;
         }
       }
-    } catch {
+    } catch (err) {
       // Registration is best-effort by design.
+      console.error("registerFromSdk failed", err);
     }
   }
 
