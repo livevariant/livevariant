@@ -213,6 +213,33 @@ export async function claimAndRegister(input: {
   );
 }
 
+export interface TestStatus {
+  testId: string;
+  claimed: boolean;
+  org: { name: string; mine: boolean } | null;
+  destinations: Array<{ host: string; verified: boolean }>;
+}
+
+/**
+ * What the registry knows about one test, proven by its stats secret:
+ * claimed (by whose org) and destination verification. The manage page
+ * asks on load so a reload shows "already in your account" instead of
+ * re-offering the claim button.
+ */
+export async function fetchTestStatus(input: {
+  encoded: string;
+  statsSecret: string;
+}): Promise<TestStatus> {
+  return json(
+    await fetch("/account/tests/status", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input)
+    })
+  ) as Promise<TestStatus>;
+}
+
 export async function listServerTests(options: {
   q?: string;
   cursor?: string;

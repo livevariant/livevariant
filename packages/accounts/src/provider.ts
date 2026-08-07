@@ -313,6 +313,68 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
     };
   }
 
+  /**
+   * What the registry knows about one test, for whoever can prove they
+   * administer it: the stats secret is the authority, exactly as it is
+   * for stats. Answers the two questions an agent (or the manage page)
+   * cannot otherwise see: is this test claimed, and will its redirect
+   * destinations get the interstitial. "Verified" uses the same rule
+   * as serving: ANY org's verified domain skips the continue screen.
+   */
+  async testStatusWithSecret(input: {
+    encoded: string;
+    statsSecret: string;
+  }): Promise<
+    | { ok: false; reason: "bad-config" | "bad-secret" }
+    | {
+        ok: true;
+        testId: string;
+        claimed: boolean;
+        org: { id: string; name: string } | null;
+        destinations: Array<{ host: string; verified: boolean }>;
+      }
+  > {
+    let decoded;
+    try {
+      decoded = await decodeConfig(input.encoded);
+    } catch {
+      return { ok: false, reason: "bad-config" };
+    }
+    const kh = decoded.config.statsKeyHash;
+    if (!kh) {
+      return { ok: false, reason: "bad-config" };
+    }
+    if (!(await verifyStatsSecret(input.statsSecret, kh))) {
+      return { ok: false, reason: "bad-secret" };
+    }
+    const orgId = await this.testOrg(decoded.testId);
+    let org: { id: string; name: string } | null = null;
+    if (orgId) {
+      const row = await this.db.query.organization.findFirst({
+        where: eq(organization.id, orgId)
+      });
+      org = { id: orgId, name: row?.name ?? "an organization" };
+    }
+    const destinations: Array<{ host: string; verified: boolean }> = [];
+    for (const host of destinationHosts(decoded.config)) {
+      let verified = false;
+      for (const candidate of parentDomains(host)) {
+        if ((await this.domainOwner(candidate)) !== null) {
+          verified = true;
+          break;
+        }
+      }
+      destinations.push({ host, verified });
+    }
+    return {
+      ok: true,
+      testId: decoded.testId,
+      claimed: orgId !== null,
+      org,
+      destinations
+    };
+  }
+
   /** Invalidate after a claim/verify so the acting isolate sees it now. */
   invalidateKey(kh: string): void {
     this.keyPolicies.delete(kh);
@@ -355,6 +417,41 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
  * walk is bounded and never yields a bare TLD because domains.ts
  * refuses to store one.
  */
+/**
+ * Every host a visitor can be REDIRECTED to by this test: variant
+ * destination pages, per-variant click destinations, and the config's
+ * shared redirectUrl. Image URLs are excluded on purpose: an <img>
+ * fetch renders inline and never shows an interstitial.
+ */
+export function destinationHosts(config: {
+  slots?: Record<string, Array<{ url?: string; redirectUrl?: string }>>;
+  redirectUrl?: string;
+}): string[] {
+  const urls: string[] = [];
+  for (const variants of Object.values(config.slots ?? {})) {
+    for (const variant of variants) {
+      if (variant.url) {
+        urls.push(variant.url);
+      }
+      if (variant.redirectUrl) {
+        urls.push(variant.redirectUrl);
+      }
+    }
+  }
+  if (config.redirectUrl) {
+    urls.push(config.redirectUrl);
+  }
+  const hosts = new Set<string>();
+  for (const url of urls) {
+    try {
+      hosts.add(new URL(url).hostname.toLowerCase());
+    } catch {
+      // Not a parseable URL: nothing to verify.
+    }
+  }
+  return [...hosts];
+}
+
 export function parentDomains(host: string): string[] {
   const parts = host.split(".");
   const out: string[] = [];

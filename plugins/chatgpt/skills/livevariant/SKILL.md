@@ -35,6 +35,7 @@ Two consequences that will bite you if you skip them:
 | `inspect_test`    | Decode any test URL and report what it will actually do, with warnings    |
 | `generate_priors` | Turn your predictions into capped priors and embed them                   |
 | `get_stats`       | Live results plus win probabilities and a stop/continue call              |
+| `get_test_status` | Is the test claimed, and will its destinations show the interstitial      |
 | `list_tests`      | Lists the tests saved to the caller's account, with search.               |
 | `register_test`   | Puts an existing test under an organization's My tests                    |
 | `upload_image`    | Store an image and get back a protected URL to use as a variant           |
@@ -128,14 +129,56 @@ rather than showing an error to a full recipient list.
 
 ## Working flow
 
-1. `variant_brief` for the constraints that apply to the channel and format.
-2. Draft the variants yourself against that brief.
-3. `build_test` to get the URLs and the stats secret. Store the secret.
-4. `generate_priors`, optionally, to warm-start from what you expect.
-5. `get_stats` to read results.
+Plan, confirm, build, deliver. Building is cheap, but a test's identity
+is the hash of its config: every edit afterwards is a NEW test with an
+empty history. So iteration happens on the PLAN, never on a live test.
+
+1. `variant_brief` for the constraints that apply to the channel and
+   format.
+2. **Plan the test with the human.** When the goal, elements or variants
+   are not already pinned down, propose them: which element(s) to test
+   (slots), what hypothesis each variant carries, and how many. Default
+   to assets the human already has (their images, pages, copy): ask what
+   exists before creating anything. Offer to GENERATE image variants
+   (see "No image variants yet? Make them") as a proposal, not as the
+   silent default.
+3. **Show the plan before building.** With a human in the loop, present
+   the proposed test in full (per slot: variant names and their content
+   or asset; plus context dimensions, destination, and what counts as a
+   conversion) and let them iterate until it is what they meant. Only
+   then build. Running unattended, skip the pause but still put the plan
+   in your output.
+4. `build_test` to get the URLs and the stats secret. Store the secret.
+5. `generate_priors`, optionally, to warm-start from what you expect.
+6. `get_stats` to read results.
 
 `inspect_test` answers "what does this link do?" for any LiveVariant URL, and
 lints it for the mistakes that only surface once a campaign has gone out.
+`get_test_status` reports whether a test is claimed into an account and
+whether its destinations are verified (you hold the secret, so you may ask).
+
+## What your final answer must include
+
+After building a test, the human should never have to ask a follow-up to
+use it. Always include:
+
+- **The manage URL**, every time. Say what it is: live results in the
+  browser, and signed in one click ("Add to my account") claims the test
+  into their dashboard. It carries the stats secret in its #fragment, so
+  they should share it only with people who may see results.
+- **The exact links or HTML for their channel**, composed for THIS test.
+  For email that means the serve URL in the `<img src>` wrapped in the
+  click URL as `<a href>`, with the platform's real merge tag in `id=`
+  and the `auto=0` spelling; for a multi-slot test use the per-slot
+  links (`slotLinks`), one image+link pair per element; the pixel goes
+  on the thank-you page. If the test learns per context dimension you
+  configured (`ctx`), merge the value in as `c_<dim>` wherever the
+  sending platform knows it (like `&c_plan={{plan}}`); auto-derived
+  dims (country, device) need nothing in email links beyond what the
+  auto=0 note says. When you know the platform, write the finished HTML
+  yourself instead of listing raw URLs.
+- **Any warnings**, especially unverified destinations: relay what the
+  visitor will see and how to fix it (next section).
 
 ## Reading results honestly
 
@@ -168,6 +211,10 @@ Email is where this is most useful and most easily got wrong.
   learn a different winner per traffic source.
 - **Clicks and on-site conversions are the trustworthy signals.** Raw opens
   are not, in any email tool.
+
+- **Multi-slot tests need `slot=` on every serve/click link.** The bare
+  serve URL returns an error for them; `build_test`'s `slotLinks` has the
+  per-element pair ready.
 
 `build_test` also returns an `emailTemplate`: the query-parameter spelling of
 the same test (see "Creating a test with nothing but a URL"), for wiring into
@@ -212,10 +259,13 @@ loop yourself instead of handing snippets to a human:
 
 ## No image variants yet? Make them
 
-Missing creative is not a blocker: `upload_image` stores an image on the
-deployment and returns a protected URL to use as a variant (it only serves
-inside the test's flow, so hotlinking is a non-issue). Get pixels however
-your environment allows, in this order:
+Missing creative is not a blocker, but generating it is a PROPOSAL you
+make during planning, never a silent default: the human's existing
+assets always come first, so ask what they have before creating
+anything. When generating is the agreed path, `upload_image` stores an
+image on the deployment and returns a protected URL to use as a variant
+(it only serves inside the test's flow, so hotlinking is a non-issue).
+Get pixels however your environment allows, in this order:
 
 1. **Your own image generation tool**, if you have one: generate the
    variations, then `upload_image` each.
@@ -255,6 +305,33 @@ and grants nothing alone; authority is always the stats secret, which
 credentials. Registration is what makes the dashboard useful for the
 test: My tests lists it, and its stats become readable there without the
 secret.
+
+Either way, ALWAYS hand over the manage URL and say what claiming does;
+an unregistered test whose manage URL the user never saw is effectively
+lost to them. `get_test_status` tells you later whether a test ended up
+claimed and by which organization.
+
+## Verified domains and the interstitial
+
+On the hosted service a redirect to a domain nobody has verified shows the
+visitor an explicit "Redirecting you to…" continue screen before landing
+(anti-abuse for a public redirector). Verified domains redirect instantly.
+
+`build_test` and `get_test_status` report `verified` per destination
+host. When a destination shows `verified: false`, tell the user their
+links WORK but click-throughs see the continue screen, and that verifying
+removes it: on the dashboard under Settings, Verified domains, prove
+control with a DNS TXT record, by serving the well-known file, or by
+having the LiveVariant tag with their publishable key live in the site's
+page source (tag-manager installs count: verification renders the page).
+
+Recommend the tag install whenever the user owns the destination site:
+one `<script>` with their PUBLIC publishable key means conversions are
+tracked automatically from their existing GA events (clicks stop being
+the only signal), the domain verifies from the snippet itself, tests
+served from it register into their account on their own, and on-page
+website tests become possible with the same install. It is the single
+highest-leverage step to suggest after a first email or redirect test.
 
 ## If you cannot install the MCP server
 

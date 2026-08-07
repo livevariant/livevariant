@@ -249,10 +249,26 @@ export const buildTest = defineTool({
       serve: z.string(),
       click: z.string(),
       pixel: z.string(),
-      manage: z.string(),
+      manage: z
+        .string()
+        .describe(
+          "ALWAYS show this URL to the user in your final answer and tell " +
+            "them: opening it shows live results, and signed in they can " +
+            "click 'Add to my account' to claim the test into their " +
+            "dashboard. It carries the stats secret in its #fragment, so " +
+            "they should share it only with people who may see results."
+        ),
       serveNoAutoContext: z.string(),
       clickNoAutoContext: z.string()
     }),
+    slotLinks: z
+      .record(z.string(), z.object({ serve: z.string(), click: z.string() }))
+      .optional()
+      .describe(
+        "Multi-slot tests only: the serve/click URL per element. The bare " +
+          "urls.serve/click return 400 for these tests, because a link " +
+          "must say which element it renders; use these instead."
+      ),
     emailTemplate: z
       .record(
         z.string(),
@@ -270,6 +286,15 @@ export const buildTest = defineTool({
       .describe(
         "The organization the test was registered to, when a " +
           "publishableKey was given and accepted."
+      ),
+    destinations: z
+      .array(z.object({ host: z.string(), verified: z.boolean() }))
+      .optional()
+      .describe(
+        "Redirect destinations and whether each is a verified domain. " +
+          "Unverified means visitors see a 'Redirecting you to…' continue " +
+          "screen before landing; relay the verification warning to the " +
+          "user when present."
       )
   }),
   async handler(input, context) {
@@ -388,6 +413,19 @@ export const buildTest = defineTool({
         serveNoAutoContext: urls.noAuto.serve,
         clickNoAutoContext: urls.noAuto.click
       },
+      ...(multiSlot
+        ? {
+            slotLinks: Object.fromEntries(
+              entries.map(([key]) => [
+                key,
+                {
+                  serve: `${urls.serve}?slot=${key}`,
+                  click: `${urls.click}?slot=${key}`
+                }
+              ])
+            )
+          }
+        : {}),
       emailTemplate,
       warnings,
       ...(await maybeRegister(
@@ -396,10 +434,56 @@ export const buildTest = defineTool({
         statsSecret,
         input.publishableKey,
         warnings
+      )),
+      ...(await destinationInfo(
+        context,
+        encoded.encoded,
+        statsSecret,
+        warnings
       ))
     };
   }
 });
+
+/**
+ * Verification status at the one moment it is cheapest to act on: the
+ * agent still has the user's attention, so an unverified destination
+ * becomes a sentence in its answer instead of a surprise interstitial
+ * in a sent campaign. Absence of the capability (self-host without
+ * accounts, stdio MCP) is silent: there is no registry to consult.
+ */
+async function destinationInfo(
+  context: ToolContext,
+  encoded: string,
+  statsSecret: string,
+  warnings: string[]
+): Promise<{ destinations?: Array<{ host: string; verified: boolean }> }> {
+  if (!context.accounts?.testStatus) {
+    return {};
+  }
+  try {
+    const status = await context.accounts.testStatus({ encoded, statsSecret });
+    if (!status.ok || status.destinations.length === 0) {
+      return {};
+    }
+    const unverified = status.destinations.filter(d => !d.verified);
+    if (unverified.length > 0) {
+      warnings.push(
+        `Unverified destination${unverified.length > 1 ? "s" : ""} ` +
+          `${unverified.map(d => d.host).join(", ")}: visitors clicking ` +
+          "through will first see a 'Redirecting you to…' continue screen. " +
+          "Tell the user to verify the domain under Settings on the " +
+          "dashboard (DNS TXT record, the well-known file, or having the " +
+          "SDK tag with their publishable key live on the site); verified " +
+          "domains redirect instantly."
+      );
+    }
+    return { destinations: status.destinations };
+  } catch {
+    // Status is advisory; a failure must never fail the build.
+    return {};
+  }
+}
 
 /**
  * Registration at creation: build_test holds the secret it just
@@ -1316,12 +1400,103 @@ const registerTestTool = defineTool({
   }
 });
 
+export const getTestStatus = defineTool({
+  name: "get_test_status",
+  title: "Check a test's account and domain status",
+  summary:
+    "Is the test claimed, and will its destinations show the interstitial",
+  description:
+    "Reports what the deployment's registry knows about a test: whether it " +
+    "is claimed into an account (and by which organization), and whether " +
+    "each redirect destination is a verified domain.\n\n" +
+    "Unverified destinations work, but visitors see a 'Redirecting you " +
+    "to…' continue screen first. When you see verified: false, tell the " +
+    "user to verify the domain under Settings on the dashboard; the three " +
+    "ways are a DNS TXT record, serving the well-known file, or having " +
+    "the SDK tag with their publishable key live in the site's source. " +
+    "If the test is unclaimed, remind them the manage URL claims it in " +
+    "one click when opened signed in.\n\n" +
+    "Authority is the stats secret, same as get_stats: holding it proves " +
+    "you administer the test. A manage URL's #fragment is used " +
+    "automatically.",
+  readOnly: true,
+  reachesNetwork: true,
+  scope: "account",
+  input: z.object({
+    test: testRef,
+    statsSecret: z
+      .string()
+      .optional()
+      .describe(
+        "Omit when passing a manage URL that carries it in the fragment."
+      )
+  }),
+  output: z.object({
+    testId: z.string(),
+    claimed: z
+      .boolean()
+      .describe("Whether the test is registered to an organization."),
+    org: z
+      .string()
+      .nullable()
+      .describe("The claiming organization's name; null when unclaimed."),
+    destinations: z
+      .array(z.object({ host: z.string(), verified: z.boolean() }))
+      .describe(
+        "Every host this test can redirect a visitor to. verified: false " +
+          "means the continue screen shows before landing there."
+      )
+  }),
+  async handler(input, context) {
+    if (!context.accounts?.testStatus) {
+      throw new ToolInputError(
+        "this deployment has no account registry to consult",
+        404
+      );
+    }
+    const resolved = await resolveTest(input.test);
+    const secret = input.statsSecret ?? resolved.statsSecret;
+    if (!secret) {
+      throw new ToolInputError(
+        "no stats secret: pass statsSecret, or the manage URL whose " +
+          "#fragment holds it"
+      );
+    }
+    let encodedConfig: string;
+    try {
+      encodedConfig = (await encodeConfig(resolved.config)).encoded;
+    } catch {
+      throw new ToolInputError("that test will not encode");
+    }
+    const status = await context.accounts.testStatus({
+      encoded: encodedConfig,
+      statsSecret: secret
+    });
+    if (!status.ok) {
+      throw new ToolInputError(
+        status.reason === "bad-secret"
+          ? "the stats secret does not match this test"
+          : "keyless tests have no secret to prove with, so their status " +
+              "is not readable this way",
+        status.reason === "bad-secret" ? 401 : 400
+      );
+    }
+    return {
+      testId: status.testId,
+      claimed: status.claimed,
+      org: status.org?.name ?? null,
+      destinations: status.destinations
+    };
+  }
+});
+
 /** Every tool, in the order a person meets them. */
 export const TOOLS = [
   buildTest,
   inspectTest,
   generatePriors,
   getStats,
+  getTestStatus,
   listTests,
   registerTestTool,
   uploadImage,

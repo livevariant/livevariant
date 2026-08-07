@@ -55,6 +55,11 @@ const claimSchema = z.object({
 
 const lockSchema = z.object({ lockReads: z.boolean() });
 
+const statusSchema = z.object({
+  encoded: z.string().min(1).max(8192),
+  statsSecret: z.string().min(8).max(256)
+});
+
 const registerSchema = z.object({
   encoded: z.string().min(1).max(8192),
   name: z.string().max(200).optional()
@@ -317,6 +322,33 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
     });
     deps.provider.invalidateTest(decoded.testId);
     return c.json({ testId: decoded.testId, orgId }, 201);
+  });
+
+  // Status for the manage page: the stats secret is the authority (no
+  // session required), and a session, when present, additionally says
+  // whether the claiming org is the caller's own. This is what lets a
+  // reloaded manage page render "already in your account" instead of
+  // offering a claim button for a test claimed long ago.
+  app.post("/account/tests/status", async c => {
+    const body = statusSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) {
+      return c.json({ error: "invalid request" }, 400);
+    }
+    const status = await deps.provider.testStatusWithSecret(body.data);
+    if (!status.ok) {
+      return status.reason === "bad-secret"
+        ? c.json({ error: "wrong stats secret" }, 401)
+        : c.json({ error: "that is not a claimable test config" }, 400);
+    }
+    const orgIds = await deps.provider.sessionOrgIds(c.req.raw);
+    return c.json({
+      testId: status.testId,
+      claimed: status.claimed,
+      org: status.org
+        ? { name: status.org.name, mine: orgIds.includes(status.org.id) }
+        : null,
+      destinations: status.destinations
+    });
   });
 
   app.post("/account/publishable-keys", async c => {

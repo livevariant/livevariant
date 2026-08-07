@@ -1128,6 +1128,40 @@ export function createApp(options: AppOptions): Hono {
   });
 
   /**
+   * Signed preview URLs for the config's own hosted assets, so a manage
+   * page can SHOW image variants whose canonical /a/ URLs answer 403 on
+   * their own. Authorization is exactly /stats: whoever may read the
+   * results may see the creative. Foreign-hosted images need no signing
+   * and are not listed; without an asset store the map is just empty.
+   */
+  app.get("/stats/:cfg/assets", async c => {
+    const result = await decodeOr404(c.req.param("cfg"));
+    if ("error" in result) {
+      return result.error;
+    }
+    const { decoded } = result;
+    if (!(await authorized(c, decoded))) {
+      return c.json({ error: "stats secret required" }, 401);
+    }
+    const assets: Record<string, string> = {};
+    if (options.assets) {
+      for (const variants of Object.values(decoded.config.slots ?? {})) {
+        for (const variant of variants) {
+          const target = variant.image;
+          if (!target || target in assets) {
+            continue;
+          }
+          const id = ownAssetId(target, c.req.url);
+          if (id) {
+            assets[target] = await signAssetUrl(target, id, options.assets);
+          }
+        }
+      }
+    }
+    return c.json({ assets });
+  });
+
+  /**
    * Live stats over Server-Sent Events: the full /stats payload as a
    * `stats` event immediately, then again whenever it changes, with a
    * `ping` between unchanged reads so proxies keep the connection.

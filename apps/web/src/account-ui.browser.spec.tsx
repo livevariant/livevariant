@@ -210,9 +210,12 @@ describe("claiming from the test page", () => {
     );
     const container = render(`/manage/${encoded}`);
     // Nothing claims on its own: with several orgs an automatic claim
-    // would silently pick one.
+    // would silently pick one. The status READ on load is fine; writes
+    // are not.
     await until(() => container.textContent?.includes("Add to") ?? false);
-    expect(calls.filter(c => c.startsWith("POST /account"))).toEqual([]);
+    expect(
+      calls.filter(c => c.startsWith("POST /account") && !c.endsWith("/status"))
+    ).toEqual([]);
     // Choose the second org, then claim: the switch happens first.
     const select = container.querySelector(
       'select[aria-label="Organization to add this test to"]'
@@ -261,7 +264,129 @@ describe("claiming from the test page", () => {
     await until(
       () => container.textContent?.includes("Add to my account") ?? false
     );
-    expect(calls.filter(c => c.startsWith("POST /account"))).toEqual([]);
+    expect(
+      calls.filter(c => c.startsWith("POST /account") && !c.endsWith("/status"))
+    ).toEqual([]);
+  });
+
+  it("renders a claimed test as already saved, not claimable again", async () => {
+    const { encoded, testId, statsSecret } = await makeSavedTest();
+    window.location.hash = `#${statsSecret}`;
+    stubServer({
+      "/account/me": () =>
+        Response.json({
+          userId: "u1",
+          activeOrgId: "org-1",
+          orgs: [{ id: "org-1", name: "Personal" }]
+        }),
+      "/account/tests/status": () =>
+        Response.json({
+          testId,
+          claimed: true,
+          org: { name: "Personal", mine: true },
+          destinations: []
+        }),
+      "/stats/": STATS_OK
+    });
+    const container = render(`/manage/${encoded}`);
+    await until(
+      () =>
+        container.textContent?.includes("In your account (Personal)") ?? false
+    );
+    expect(container.textContent).not.toContain("Add to my account");
+  });
+});
+
+describe("the manage page for a multi-slot test", () => {
+  async function slottedTest() {
+    const statsSecret = generateStatsSecret();
+    const { encoded, testId } = await encodeConfig({
+      v: 2,
+      name: "slotted",
+      slots: {
+        hero: [
+          { name: "warm", image: "https://cdn.example/warm.png" },
+          { name: "cool", image: "https://cdn.example/cool.png" }
+        ],
+        cta: [{ text: "Buy now" }, { text: "Try free" }]
+      },
+      statsKeyHash: await hashStatsSecret(statsSecret)
+    } as never);
+    return { encoded, testId, statsSecret };
+  }
+
+  it("previews every slot's variants by type and slots the URLs", async () => {
+    const { encoded, statsSecret } = await slottedTest();
+    window.location.hash = `#${statsSecret}`;
+    stubServer({ "/stats/": STATS_OK });
+    const container = render(`/manage/${encoded}`);
+    await until(() => container.textContent?.includes("Variants") ?? false);
+
+    // Foreign image variants render inside a fully sandboxed iframe
+    // (no scripts, opaque origin, no referrer): the config arrived in
+    // an attacker-authorable URL, so nothing in it may touch our JS.
+    await until(
+      () =>
+        container.querySelector('iframe[title="Variant warm image"]') !== null
+    );
+    const frame = container.querySelector(
+      'iframe[title="Variant warm image"]'
+    ) as HTMLIFrameElement;
+    expect(frame.getAttribute("sandbox")).toBe("");
+    expect(frame.getAttribute("srcdoc")).toContain("cdn.example/warm.png");
+    expect(frame.getAttribute("srcdoc")).toContain(
+      'name="referrer" content="no-referrer"'
+    );
+    expect(container.textContent).toContain("warm");
+    expect(container.textContent).toContain("Buy now");
+    expect(container.textContent).toContain("control");
+
+    // Every serve/click link names its element: the bare form 400s.
+    const serveInputs = [
+      ...container.querySelectorAll("input[aria-label^='Serve (']")
+    ] as HTMLInputElement[];
+    expect(serveInputs.length).toBeGreaterThan(0);
+    for (const input of serveInputs) {
+      expect(input.value).toContain("slot=");
+    }
+    expect(container.querySelector("input[aria-label='Serve']")).toBeNull();
+  });
+
+  it("previews protected assets through signed URLs, or says why not", async () => {
+    const statsSecret = generateStatsSecret();
+    const own = `${window.location.origin}/a/${"c".repeat(64)}`;
+    const { encoded } = await encodeConfig({
+      v: 2,
+      variants: [
+        { name: "locked", image: own },
+        { name: "open", image: "https://cdn.example/open.png" }
+      ],
+      statsKeyHash: await hashStatsSecret(statsSecret)
+    } as never);
+    window.location.hash = `#${statsSecret}`;
+
+    // Without a signing answer the protected tile explains itself.
+    stubServer({ "/stats/": STATS_OK });
+    const locked = render(`/manage/${encoded}`);
+    await until(
+      () => locked.textContent?.includes("Protected image asset") ?? false
+    );
+
+    // With one, the tile renders the SIGNED URL, still sandboxed.
+    stubServer({
+      [`/stats/${encoded}/assets`]: () =>
+        Response.json({ assets: { [own]: `${own}?e=99&s=sig` } }),
+      "/stats/": STATS_OK
+    });
+    const signed = render(`/manage/${encoded}`);
+    await until(
+      () =>
+        signed.querySelector('iframe[title="Variant locked image"]') !== null
+    );
+    const frame = signed.querySelector(
+      'iframe[title="Variant locked image"]'
+    ) as HTMLIFrameElement;
+    expect(frame.getAttribute("srcdoc")).toContain("?e=99&amp;s=sig");
   });
 });
 

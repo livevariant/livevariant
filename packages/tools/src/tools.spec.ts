@@ -7,6 +7,7 @@ import {
   findTool,
   generatePriors,
   getStats,
+  getTestStatus,
   inspectTest,
   variantBrief
 } from "./tools.js";
@@ -53,7 +54,17 @@ describe("the registry itself", () => {
     const registerTest = TOOLS.find(t => t.name === "register_test")!;
     expect(registerTest.reachesNetwork).toBe(true);
     expect(registerTest.readOnly).toBe(false);
-    const writers = new Set(["get_stats", "upload_image", "register_test"]);
+    // get_test_status reads the registry over the network but writes
+    // nothing.
+    const getTestStatus = TOOLS.find(t => t.name === "get_test_status")!;
+    expect(getTestStatus.reachesNetwork).toBe(true);
+    expect(getTestStatus.readOnly).toBe(true);
+    const writers = new Set([
+      "get_stats",
+      "get_test_status",
+      "upload_image",
+      "register_test"
+    ]);
     for (const tool of TOOLS.filter(t => !writers.has(t.name))) {
       expect(tool.reachesNetwork).toBe(false);
       expect(tool.readOnly).toBe(true);
@@ -106,6 +117,58 @@ describe("build_test", () => {
     expect(out.emailTemplate.hero.imageSrc).toContain("slot=hero");
     expect(out.emailTemplate.cta.imageSrc).toContain("slot=cta");
     expect(out.emailTemplate.hero.imageSrc).toContain("s=hero");
+    // The bare serve URL 400s for multi-slot tests, so ready per-slot
+    // links must be part of the answer.
+    expect(out.slotLinks).toEqual({
+      hero: {
+        serve: `${out.urls.serve}?slot=hero`,
+        click: `${out.urls.click}?slot=hero`
+      },
+      cta: {
+        serve: `${out.urls.serve}?slot=cta`,
+        click: `${out.urls.click}?slot=cta`
+      }
+    });
+  });
+
+  it("keeps slotLinks absent for single-element tests", async () => {
+    const out = await twoVariantTest();
+    expect(out.slotLinks).toBeUndefined();
+  });
+
+  it("reports destination verification and warns on unverified hosts", async () => {
+    const statusCalls: Array<{ encoded: string; statsSecret: string }> = [];
+    const out = await buildTest.handler(
+      { variants: [{ url: A }, { url: B }] },
+      {
+        ...ctx,
+        accounts: {
+          listTests: () => Promise.reject(new Error("not needed")),
+          testStatus: async input => {
+            statusCalls.push(input);
+            return {
+              ok: true as const,
+              testId: "x".repeat(64),
+              claimed: false,
+              org: null,
+              destinations: [{ host: "cdn.example.com", verified: false }]
+            };
+          }
+        }
+      }
+    );
+    // Status was asked with the freshly minted pair, never a lookalike.
+    expect(statusCalls).toEqual([
+      { encoded: out.config, statsSecret: out.statsSecret }
+    ]);
+    expect(out.destinations).toEqual([
+      { host: "cdn.example.com", verified: false }
+    ]);
+    expect(
+      out.warnings.some(
+        w => w.includes("cdn.example.com") && w.includes("continue screen")
+      )
+    ).toBe(true);
   });
 
   it("refuses both spellings at once, and neither", async () => {
@@ -581,5 +644,68 @@ describe("variant_brief", () => {
       ctx
     );
     expect(out.hosting).toMatch(/host the assets yourself/i);
+  });
+});
+
+describe("get_test_status", () => {
+  it("takes the secret from a manage URL and relays the registry", async () => {
+    const built = await twoVariantTest();
+    const calls: Array<{ encoded: string; statsSecret: string }> = [];
+    const out = await getTestStatus.handler(
+      { test: built.urls.manage },
+      {
+        ...ctx,
+        accounts: {
+          listTests: () => Promise.reject(new Error("not needed")),
+          testStatus: async input => {
+            calls.push(input);
+            return {
+              ok: true as const,
+              testId: built.testId,
+              claimed: true,
+              org: { id: "org-1", name: "Acme" },
+              destinations: [{ host: "cdn.example.com", verified: true }]
+            };
+          }
+        }
+      }
+    );
+    // The re-encoded config is canonical, so the registry is asked about
+    // the SAME test the manage URL named.
+    expect(calls).toEqual([
+      { encoded: built.config, statsSecret: built.statsSecret }
+    ]);
+    expect(out).toEqual({
+      testId: built.testId,
+      claimed: true,
+      org: "Acme",
+      destinations: [{ host: "cdn.example.com", verified: true }]
+    });
+  });
+
+  it("rejects without a registry, a secret, or with the wrong secret", async () => {
+    const built = await twoVariantTest();
+    await expect(
+      getTestStatus.handler(
+        { test: built.config, statsSecret: built.statsSecret },
+        ctx
+      )
+    ).rejects.toThrow(/no account registry/);
+    const accounts = {
+      listTests: () => Promise.reject(new Error("not needed")),
+      testStatus: async () => ({
+        ok: false as const,
+        reason: "bad-secret" as const
+      })
+    };
+    await expect(
+      getTestStatus.handler({ test: built.config }, { ...ctx, accounts })
+    ).rejects.toThrow(/no stats secret/);
+    await expect(
+      getTestStatus.handler(
+        { test: built.config, statsSecret: "wrong-but-long-enough" },
+        { ...ctx, accounts }
+      )
+    ).rejects.toThrow(/does not match/);
   });
 });
