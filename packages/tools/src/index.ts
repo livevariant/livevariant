@@ -9,7 +9,13 @@ export {
   variantBrief,
   type ToolName
 } from "./tools.js";
-export { renderLlmsTxt, renderMcpInstructions, renderSkillMd } from "./docs.js";
+export {
+  renderAuthMd,
+  renderLlmsTxt,
+  renderMcpInstructions,
+  renderSkillMd,
+  SKILL_DESCRIPTION
+} from "./docs.js";
 export {
   ToolInputError,
   defineTool,

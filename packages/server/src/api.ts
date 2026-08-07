@@ -4,7 +4,12 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { createServer } from "@livevariant/mcp";
 import { regionHint, sha256Hex, type CloudflareGeo } from "@livevariant/core";
 import { SERVER_VERSION } from "./version.js";
-import { renderLlmsTxt, renderSkillMd } from "@livevariant/tools";
+import {
+  renderAuthMd,
+  renderLlmsTxt,
+  renderSkillMd,
+  SKILL_DESCRIPTION
+} from "@livevariant/tools";
 import type { AccountsProvider } from "./accounts-port.js";
 import {
   TOOLS,
@@ -75,6 +80,14 @@ export interface ApiOptions {
    * the landing waits briefly for a tag-set global instead.
    */
   publishableKey?: string;
+  /**
+   * Fetches the static app shell, for the homepage route that runs
+   * worker-first to offer agents markdown negotiation and Link headers
+   * while browsers still get the SPA. On Workers this is the ASSETS
+   * binding; absent (tests, hosts without an asset store) the homepage
+   * 404s rather than pretending to have a shell.
+   */
+  spaFetch?: (request: Request) => Promise<Response>;
 }
 
 export function createApi(options: ApiOptions): Hono {
@@ -228,6 +241,122 @@ export function createApi(options: ApiOptions): Hono {
     c.json(buildOpenApiDocument({ serverUrl: new URL(c.req.url).origin }))
   );
   app.get("/docs", c => c.html(swaggerPage("/openapi.json")));
+
+  /* ------------------------------------------------------------------ */
+  // Agent discovery well-knowns. Everything renders against the request
+  // origin so a self-host describes itself, and everything advertised
+  // actually exists on this deployment. Deliberately absent: OAuth/OIDC
+  // discovery metadata, because these APIs are open by design and
+  // advertising an authorization server nobody runs would send agents
+  // hunting for a flow that does not exist (/auth.md says so instead).
+
+  // RFC 9727: the API catalog, pointing at the OpenAPI document, the
+  // interactive docs and the health endpoint.
+  app.get("/.well-known/api-catalog", c => {
+    const base = new URL(c.req.url).origin;
+    return c.body(
+      JSON.stringify({
+        linkset: [
+          {
+            anchor: `${base}/api/v1/`,
+            "service-desc": [
+              { href: `${base}/openapi.json`, type: "application/json" }
+            ],
+            "service-doc": [{ href: `${base}/docs`, type: "text/html" }],
+            status: [{ href: `${base}/health` }],
+            describedby: [{ href: `${base}/llms.txt`, type: "text/markdown" }]
+          }
+        ]
+      }),
+      200,
+      { "content-type": "application/linkset+json" }
+    );
+  });
+
+  // MCP Server Card (SEP-1649): what /mcp is, without connecting first.
+  const mcpServerCard = (c: { req: { url: string } }) => {
+    const base = new URL(c.req.url).origin;
+    return {
+      serverInfo: { name: "livevariant", version: SERVER_VERSION },
+      description:
+        "Adaptive A/B testing tools: build tests that live in URLs, " +
+        "inspect links, warm-start with priors, and read results with " +
+        "win probabilities. No authentication; authority travels in " +
+        "tool arguments.",
+      transport: { type: "streamable-http", url: `${base}/mcp` },
+      capabilities: { tools: {}, resources: {} },
+      documentation: `${base}/skills/livevariant/SKILL.md`
+    };
+  };
+  app.get("/.well-known/mcp/server-card.json", c => c.json(mcpServerCard(c)));
+  app.get("/.well-known/mcp.json", c => c.json(mcpServerCard(c)));
+
+  // Agent Skills Discovery (v0.2.0). The digest is computed live from
+  // the exact document /skills/livevariant/SKILL.md serves for this
+  // origin, so it can never drift from the content.
+  app.get("/.well-known/agent-skills/index.json", async c => {
+    const base = new URL(c.req.url).origin;
+    const digest = await sha256Hex(renderSkillMd(base));
+    return c.json({
+      $schema: "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+      skills: [
+        {
+          name: "livevariant",
+          type: "skill-md",
+          description: SKILL_DESCRIPTION,
+          url: "/skills/livevariant/SKILL.md",
+          digest: `sha256:${digest}`
+        }
+      ]
+    });
+  });
+
+  // auth.md (workos.com/auth-md): the honest registration story.
+  app.get("/auth.md", c =>
+    c.text(renderAuthMd(new URL(c.req.url).origin), 200, {
+      "content-type": "text/markdown; charset=utf-8"
+    })
+  );
+
+  // The dashboard's public pages; app routes behind sign-in stay out.
+  app.get("/sitemap.xml", c => {
+    const base = new URL(c.req.url).origin;
+    const pages = ["/", "/builder", "/terms", "/privacy"];
+    const xml =
+      `<?xml version="1.0" encoding="UTF-8"?>\n` +
+      `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+      pages.map(page => `  <url><loc>${base}${page}</loc></url>`).join("\n") +
+      `\n</urlset>\n`;
+    return c.body(xml, 200, {
+      "content-type": "application/xml; charset=utf-8"
+    });
+  });
+
+  // The homepage, worker-first for two agent affordances: markdown
+  // negotiation (Accept: text/markdown answers with the same document
+  // as /llms.txt) and RFC 8288 Link headers on the HTML. Browsers get
+  // the SPA shell from the host-injected asset fetcher, untouched
+  // except for the added Link header.
+  const AGENT_LINKS =
+    '</.well-known/api-catalog>; rel="api-catalog", ' +
+    '</openapi.json>; rel="service-desc", ' +
+    '</docs>; rel="service-doc", ' +
+    '</llms.txt>; rel="describedby"';
+  app.get("/", async c => {
+    if ((c.req.header("accept") ?? "").includes("text/markdown")) {
+      return c.text(renderLlmsTxt(new URL(c.req.url).origin, serveUrl), 200, {
+        "content-type": "text/markdown; charset=utf-8",
+        link: AGENT_LINKS
+      });
+    }
+    if (!options.spaFetch) {
+      return c.notFound();
+    }
+    const shell = await options.spaFetch(c.req.raw);
+    const page = new Response(shell.body, shell);
+    page.headers.append("link", AGENT_LINKS);
+    return page;
+  });
 
   // MCP over HTTP. No authentication, for the same reason the rest of this
   // has none: a test is its config, and reading results needs the stats

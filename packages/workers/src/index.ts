@@ -202,6 +202,12 @@ export class TestStateDO extends DurableObject {
 
 export interface Env {
   TEST_STATE: DurableObjectNamespace<TestStateDO>;
+  /**
+   * The static site (wrangler's assets binding). The worker runs first
+   * on "/" to give agents markdown negotiation and Link headers; this
+   * is how browsers still get the app shell.
+   */
+  ASSETS?: Fetcher;
   /** Comma-separated destination hosts; a host admits its subdomains. */
   LV_ALLOWED_DESTINATIONS?: string;
   /**
@@ -366,6 +372,9 @@ export function baseAppOptions(env: Env): AppOptions {
     gtmId: env.LV_GOOGLE_TAG_MANAGER,
     publishableKey: env.LV_PUBLISHABLE_KEY,
     browserIdCookie: env.LV_BROWSER_ID_COOKIE !== "off",
+    spaFetch: env.ASSETS
+      ? (request: Request) => env.ASSETS!.fetch(request)
+      : undefined,
     assets:
       env.ASSET_STORE && env.LV_ASSET_SECRET
         ? {

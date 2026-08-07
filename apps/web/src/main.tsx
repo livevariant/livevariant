@@ -14,6 +14,7 @@ import { TestDetail } from "./pages/TestDetail.js";
 import { Login } from "./pages/Login.js";
 import { Settings } from "./pages/Settings.js";
 import { AcceptInvitation } from "./pages/AcceptInvitation.js";
+import { registerWebMcpTools } from "./lib/webmcp.js";
 
 const router = createBrowserRouter([
   {
@@ -35,6 +36,10 @@ const router = createBrowserRouter([
     ]
   }
 ]);
+
+// Browser-driven agents get the site's key actions as WebMCP tools;
+// browsers without navigator.modelContext skip this silently.
+registerWebMcpTools();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
