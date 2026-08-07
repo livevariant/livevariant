@@ -1,0 +1,1 @@
+CREATE INDEX `keys_org_named_idx` ON `keys` (`org_id`,`claimed_at`) WHERE "label" is not null;

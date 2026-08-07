@@ -11,6 +11,7 @@
  * entirely the key's, except for keyless SDK tests, which are owned by
  * the org that registered them (kh NULL).
  */
+import { sql } from "drizzle-orm";
 import {
   index,
   integer,
@@ -22,31 +23,43 @@ import { organization } from "./auth-schema.js";
 
 export * from "./auth-schema.js";
 
-export const keys = sqliteTable("keys", {
-  /**
-   * The public statsKeyHash (64 hex). As primary key it makes claiming
-   * race-free on D1, which has no cross-request transactions: the claim
-   * is one INSERT .. ON CONFLICT DO NOTHING plus a read-back, so
-   * concurrent claims yield exactly one winner.
-   */
-  kh: text("kh").primaryKey(),
-  orgId: text("org_id")
-    .notNull()
-    .references(() => organization.id, { onDelete: "cascade" }),
-  label: text("label"),
-  /**
-   * Off: the stats secret keeps working as a bearer capability. On:
-   * creator-only endpoints additionally require a session in the owning
-   * org. The containment story for a leaked secret; rotation is
-   * impossible by construction (kh is inside the identity hash).
-   */
-  lockReads: integer("lock_reads", { mode: "boolean" })
-    .default(false)
-    .notNull(),
-  claimedAt: integer("claimed_at", { mode: "timestamp_ms" }).notNull(),
-  /** Audit only, deliberately not a foreign key: users may come and go. */
-  claimedBy: text("claimed_by").notNull()
-});
+export const keys = sqliteTable(
+  "keys",
+  {
+    /**
+     * The public statsKeyHash (64 hex). As primary key it makes claiming
+     * race-free on D1, which has no cross-request transactions: the claim
+     * is one INSERT .. ON CONFLICT DO NOTHING plus a read-back, so
+     * concurrent claims yield exactly one winner.
+     */
+    kh: text("kh").primaryKey(),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    label: text("label"),
+    /**
+     * Off: the stats secret keeps working as a bearer capability. On:
+     * creator-only endpoints additionally require a session in the owning
+     * org. The containment story for a leaked secret; rotation is
+     * impossible by construction (kh is inside the identity hash).
+     */
+    lockReads: integer("lock_reads", { mode: "boolean" })
+      .default(false)
+      .notNull(),
+    claimedAt: integer("claimed_at", { mode: "timestamp_ms" }).notNull(),
+    /** Audit only, deliberately not a foreign key: users may come and go. */
+    claimedBy: text("claimed_by").notNull()
+  },
+  table => [
+    // Serves listKeys (named keys per org, newest claim first). Partial
+    // on purpose: accounts accrete one unnamed key per individually
+    // claimed test, and this index stays proportional to the DELIBERATE
+    // (named) keys instead.
+    index("keys_org_named_idx")
+      .on(table.orgId, table.claimedAt)
+      .where(sql`"label" is not null`)
+  ]
+);
 
 export const tests = sqliteTable(
   "tests",

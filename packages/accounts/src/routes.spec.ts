@@ -162,6 +162,11 @@ describe("the whole sign-in and claim flow, end to end", () => {
     expect(claim.status).toBe(201);
     const claimed = (await claim.json()) as { kh: string; orgId: string };
     expect(claimed.kh).toMatch(/^[0-9a-f]{64}$/);
+    // The template contract: the kh returned here is exactly the value
+    // a newsletter template carries (`kh=<your-stats-key>`), and it is
+    // nothing but the hash of the secret the caller chose. No builder
+    // involved anywhere in this flow.
+    expect(claimed.kh).toBe(await hashStatsSecret("e2e-flow-secret"));
 
     const list = await flow.routes.request(`${DASHBOARD}/account/keys`, {
       headers: { cookie }
@@ -169,6 +174,50 @@ describe("the whole sign-in and claim flow, end to end", () => {
     expect(list.status).toBe(200);
     const keys = (await list.json()) as { keys: Array<{ kh: string }> };
     expect(keys.keys.some(k => k.kh === claimed.kh)).toBe(true);
+
+    // Renaming through PATCH: naming (or renaming) a key is what
+    // promotes an incidentally-claimed one into the Settings list, so
+    // the label must be editable after the claim.
+    const rename = await flow.routes.request(
+      `${DASHBOARD}/account/keys/${claimed.kh}`,
+      {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+          cookie,
+          origin: DASHBOARD
+        },
+        body: JSON.stringify({ label: "renamed" })
+      }
+    );
+    expect(rename.status).toBe(200);
+    const relisted = (await (
+      await flow.routes.request(`${DASHBOARD}/account/keys`, {
+        headers: { cookie }
+      })
+    ).json()) as { keys: Array<{ kh: string; label: string | null }> };
+    expect(relisted.keys.find(k => k.kh === claimed.kh)?.label).toBe("renamed");
+
+    // A key claimed WITHOUT a name (the manage-link path) never appears
+    // in the list: accounts accrete one such key per claimed test, and
+    // the listing must not grow with them. Filtered in SQL, not client
+    // code, so the payload stays proportional to named keys.
+    const incidental = await flow.routes.request(`${DASHBOARD}/account/keys`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie,
+        origin: DASHBOARD
+      },
+      body: JSON.stringify({ statsSecret: "incidental-manage-claim" })
+    });
+    expect(incidental.status).toBe(201);
+    const named = (await (
+      await flow.routes.request(`${DASHBOARD}/account/keys`, {
+        headers: { cookie }
+      })
+    ).json()) as { keys: Array<{ kh: string }> };
+    expect(named.keys.map(k => k.kh)).toEqual([claimed.kh]);
   });
 });
 
@@ -327,7 +376,7 @@ describe("multiple organizations, end to end", () => {
     // Claim under the auto-created personal org.
     const claimA = await post(
       "/account/keys",
-      { statsSecret: "org-switch-secret-a" },
+      { statsSecret: "org-switch-secret-a", label: "switch-a" },
       ownerCookie
     );
     expect(claimA.status).toBe(201);
@@ -357,7 +406,7 @@ describe("multiple organizations, end to end", () => {
     ).toHaveLength(0);
     const claimB = await post(
       "/account/keys",
-      { statsSecret: "org-switch-secret-b" },
+      { statsSecret: "org-switch-secret-b", label: "switch-b" },
       ownerCookie
     );
     expect(claimB.status).toBe(201);

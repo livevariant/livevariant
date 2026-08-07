@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router";
 import {
+  BarChart3,
   Check,
   Copy,
   Globe,
+  Info,
   KeyRound,
   Plus,
   Trash2,
   Users,
   X
 } from "lucide-react";
+import { generateStatsSecret } from "@livevariant/core";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,7 +38,8 @@ import {
 import { useServeUrl } from "@/lib/serve-url";
 
 /**
- * Account settings: verified domains (which remove the redirect
+ * Account settings: stats keys (the kh a template carries; generate,
+ * claim, lock, release), verified domains (which remove the redirect
  * interstitial and unlock SDK registration) and publishable keys (which
  * let the SDK register tests from those domains). Nothing here exists
  * on a deployment without accounts.
@@ -159,6 +163,215 @@ function SdkSnippet({ pk }: { pk: string }) {
 element.textContent = test.slots.headline.text;`}
       />
     </div>
+  );
+}
+
+interface KeyRow {
+  kh: string;
+  label: string | null;
+  lockReads: boolean;
+  claimedAt: number;
+  testCount: number;
+}
+
+/**
+ * The stats keys card: the `kh` a newsletter template carries is the
+ * public hash of a stats secret, and this is the one stable place to
+ * find, mint and manage those keys. Generation happens CLIENT-side
+ * (the same generator the builder uses) and the secret is shown
+ * exactly once, per the product's no-recovery doctrine; claiming only
+ * ever sends the secret to be hashed, never stored.
+ */
+function StatsKeysCard() {
+  const [keys, setKeys] = useState<KeyRow[]>([]);
+  const [minted, setMinted] = useState<{ secret: string; kh: string } | null>(
+    null
+  );
+  const [claimSecret, setClaimSecret] = useState("");
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const reload = useCallback(() => {
+    void fetch("/account/keys", { credentials: "include" })
+      .then(res => json<{ keys: KeyRow[] }>(res))
+      .then(body => setKeys(body.keys))
+      .catch(() => setKeys([]));
+  }, []);
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const surface = (err: unknown) =>
+    setNotice(err instanceof Error ? err.message : String(err));
+
+  const claim = (secret: string, generated: boolean) => {
+    setBusy(true);
+    setNotice(null);
+    void fetch("/account/keys", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        statsSecret: secret,
+        ...(label ? { label } : {})
+      })
+    })
+      .then(res => json<{ kh: string }>(res))
+      .then(row => {
+        if (generated) {
+          setMinted({ secret, kh: row.kh });
+        }
+        setClaimSecret("");
+        setLabel("");
+        reload();
+      })
+      .catch(surface)
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          <BarChart3 className="mr-1 inline size-5" /> Stats keys
+        </CardTitle>
+        <CardDescription>
+          A stats key is the <code>kh</code> in your links: the public hash of a
+          stats secret. Wire it into an email template once and every campaign
+          built from it appears under My tests and stays readable with that one
+          secret. Name and generate a key here, or claim one you already hold by
+          pasting its secret (hashed in the request, never stored). Keys claimed
+          alongside individual tests stay on those tests' pages; only named keys
+          are managed here.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={label}
+            onChange={event => setLabel(event.target.value)}
+            placeholder="Name, e.g. newsletter"
+            className="max-w-xs"
+            aria-label="Key label"
+          />
+          <Button
+            disabled={busy || !label}
+            onClick={() => claim(generateStatsSecret(), true)}
+          >
+            <Plus /> Generate key
+          </Button>
+        </div>
+        {minted && (
+          <div className="space-y-2 rounded border p-3">
+            <p className="text-sm font-medium">
+              Copy the stats secret now: it is shown exactly once and cannot be
+              recovered, not even by us.
+            </p>
+            <p className="text-sm">
+              secret <CopyValue value={minted.secret} />
+            </p>
+            <p className="text-muted-foreground text-sm">
+              kh (public, for your links) <CopyValue value={minted.kh} />
+            </p>
+          </div>
+        )}
+        <form
+          className="flex flex-wrap gap-2"
+          onSubmit={event => {
+            event.preventDefault();
+            claim(claimSecret, false);
+          }}
+        >
+          <Input
+            type="password"
+            value={claimSecret}
+            onChange={event => setClaimSecret(event.target.value)}
+            placeholder="Or paste an existing stats secret"
+            className="max-w-xs"
+            aria-label="Stats secret"
+          />
+          <Button
+            type="submit"
+            variant="outline"
+            disabled={busy || !claimSecret || !label}
+          >
+            Claim
+          </Button>
+        </form>
+        {notice && <p className="text-destructive text-sm">{notice}</p>}
+        {keys.length === 0 && !minted && (
+          <p className="text-muted-foreground text-sm">
+            No named stats keys yet. Give one a name and generate it, and wire
+            its kh into your templates once.
+          </p>
+        )}
+        {keys.map(row => (
+          <div key={row.kh} className="space-y-2 rounded border p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <CopyValue value={row.kh} />
+              {row.label && <Badge variant="secondary">{row.label}</Badge>}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-muted-foreground flex-1 text-xs">
+                {row.testCount} test{row.testCount === 1 ? "" : "s"} · claimed{" "}
+                {new Date(row.claimedAt).toLocaleDateString()}
+                {row.lockReads ? " · reads require sign-in" : ""}
+              </span>
+              <span
+                title={
+                  "Normally the stats secret alone reads results, like a " +
+                  "bearer token. Locked, reading additionally requires a " +
+                  "signed-in member of this organization, so a leaked " +
+                  "secret alone gets a 401 exactly like a wrong one. " +
+                  "Secrets cannot be rotated (the kh is inside each " +
+                  "test's identity), so the lock is the containment story."
+                }
+                aria-label="What locking reads means"
+                className="text-muted-foreground inline-flex cursor-help"
+              >
+                <Info className="size-3.5" />
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setNotice(null);
+                  void fetch(`/account/keys/${row.kh}`, {
+                    method: "PATCH",
+                    credentials: "include",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ lockReads: !row.lockReads })
+                  })
+                    .then(res => json(res))
+                    .then(reload)
+                    .catch(surface);
+                }}
+              >
+                {row.lockReads ? "Unlock reads" : "Lock reads"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Release key ${row.kh.slice(0, 8)}`}
+                onClick={() => {
+                  setNotice(null);
+                  void fetch(`/account/keys/${row.kh}`, {
+                    method: "DELETE",
+                    credentials: "include"
+                  })
+                    .then(res => json(res))
+                    .then(reload)
+                    .catch(surface);
+                }}
+              >
+                <Trash2 />
+              </Button>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -392,6 +605,8 @@ export function Settings() {
       <h1 className="font-display text-3xl">Settings</h1>
 
       <OrganizationCard account={account} />
+
+      <StatsKeysCard />
 
       <Card>
         <CardHeader>
