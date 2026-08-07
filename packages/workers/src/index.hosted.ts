@@ -87,7 +87,11 @@ function renderWithBrowserRendering(
 const apps = new WeakMap<HostedEnv, ReturnType<typeof createApp>>();
 
 export default {
-  fetch(request: Request, env: HostedEnv): Response | Promise<Response> {
+  fetch(
+    request: Request,
+    env: HostedEnv,
+    ctx: ExecutionContext
+  ): Response | Promise<Response> {
     let app = apps.get(env);
     if (!app) {
       const options = baseAppOptions(env);
@@ -138,6 +142,10 @@ export default {
       app = createApp(options);
       apps.set(env, app);
     }
-    return app.fetch(request);
+    // The ExecutionContext must travel: without it Hono's
+    // c.executionCtx throws, waitUntil never engages, and SDK
+    // first-sight registration dies at its first await when the
+    // invocation ends.
+    return app.fetch(request, env, ctx);
   }
 };

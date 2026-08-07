@@ -383,12 +383,20 @@ export function baseAppOptions(env: Env): AppOptions {
 const apps = new WeakMap<Env, ReturnType<typeof createApp>>();
 
 export default {
-  fetch(request: Request, env: Env): Response | Promise<Response> {
+  fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext
+  ): Response | Promise<Response> {
     let app = apps.get(env);
     if (!app) {
       app = createApp(baseAppOptions(env));
       apps.set(env, app);
     }
-    return app.fetch(request);
+    // The ExecutionContext must travel: without it Hono's
+    // c.executionCtx throws, waitUntil never engages, and any work
+    // scheduled past the response (registration) dies at its first
+    // await when the invocation ends.
+    return app.fetch(request, env, ctx);
   }
 };
