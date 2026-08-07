@@ -82,6 +82,11 @@ export interface ApiOptions {
    */
   publishableKey?: string;
   /**
+   * OpenAI Apps domain-verification token, served from
+   * /.well-known/openai-apps-challenge when configured by the hosted entry.
+   */
+  openaiAppsChallengeToken?: string;
+  /**
    * Fetches the static app shell, for the homepage route that runs
    * worker-first to offer agents markdown negotiation and Link headers
    * while browsers still get the SPA. On Workers this is the ASSETS
@@ -326,6 +331,17 @@ export function createApi(options: ApiOptions): Hono {
       ]
     });
   });
+
+  const openaiAppsChallengeToken =
+    options.openaiAppsChallengeToken?.trim() || undefined;
+  if (openaiAppsChallengeToken) {
+    app.get("/.well-known/openai-apps-challenge", c =>
+      c.text(openaiAppsChallengeToken, 200, {
+        "content-type": "text/plain; charset=utf-8",
+        "cache-control": "no-store"
+      })
+    );
+  }
 
   // auth.md (workos.com/auth-md): the honest registration story.
   app.get("/auth.md", c =>
