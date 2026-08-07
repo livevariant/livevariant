@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { TOOLS } from "@livevariant/tools";
 import { createServer } from "./index.js";
+import pkg from "@livevariant/mcp/package.json" with { type: "json" };
 
 /**
  * Driven through a real MCP client over an in-memory transport, so what is
@@ -32,6 +33,16 @@ const A = "https://cdn.example.com/a.jpg";
 const B = "https://cdn.example.com/b.jpg";
 
 describe("the MCP server", () => {
+  it("reports the package's real version in the handshake", async () => {
+    // Hardcoded, this said 0.0.1 forever while releases moved all five
+    // packages in lockstep and the server card next door told the truth.
+    const client = await connect();
+    const info = client.getServerVersion();
+    expect(info?.name).toBe("livevariant");
+    expect(info?.version).toBe(pkg.version);
+    expect(info?.version).not.toBe("0.0.1");
+  });
+
   it("advertises exactly the shared registry", async () => {
     // If these ever diverge, the SKILL and the OpenAPI document are
     // documenting a server that does not exist.

@@ -68,7 +68,13 @@
   "assets": {
     "directory": "apps/web/dist",
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
+    // "none", not "single-page-application": the router's SPA fallback
+    // answers EVERY miss with index.html at 200, so /favicon.ico and
+    // /sitemap_index.xml came back as HTML claiming success. Misses now
+    // fall through to the Worker, which serves the shell to browser
+    // NAVIGATIONS and a true 404 to everything else (see the
+    // app.notFound handler in packages/server/src/app.ts).
+    "not_found_handling": "none",
     "run_worker_first": [
       // The homepage runs worker-first for agents (markdown negotiation,
       // Link headers); browsers get the shell via the ASSETS binding.

@@ -1,3 +1,4 @@
+import packageJson from "@livevariant/mcp/package.json" with { type: "json" };
 import { renderMcpInstructions, renderSkillMd } from "@livevariant/tools";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -20,7 +21,13 @@ import {
  */
 
 export const SERVER_NAME = "livevariant";
-export const SERVER_VERSION = "0.0.1";
+/**
+ * Read from package.json rather than typed here: releases version all
+ * five packages in lockstep, and a hardcoded string meant the MCP
+ * handshake told every client 0.0.1 forever while the server card next
+ * door reported the truth.
+ */
+export const SERVER_VERSION: string = packageJson.version;
 
 /** Default public deployment; self-hosters override it. */
 export const DEFAULT_SERVER_URL = "https://livevariant.link";

@@ -148,9 +148,30 @@ describe("the deployed Worker", () => {
   it("serves the dashboard, and lets the app's own routes through", async () => {
     // The assets binding plus run_worker_first: a client-side route falls
     // back to the shell, while a path the app owns reaches the Worker.
-    const shell = await harness.fetch(`${ORIGIN}/tests/anything`);
+    // The navigation headers are what a browser actually sends, and are
+    // what the Worker's fallback keys on: a miss is only answered with
+    // the shell when a PERSON is looking at a page, so that machine
+    // probes get a real 404 instead of HTML claiming success.
+    const shell = await harness.fetch(`${ORIGIN}/tests/anything`, {
+      headers: { "sec-fetch-dest": "document", accept: "text/html" }
+    });
     expect(shell.status).toBe(200);
     expect(shell.headers.get("content-type")).toMatch(/text\/html/);
+
+    // The same path fetched as a machine does not exist.
+    const probe = await harness.fetch(`${ORIGIN}/sitemap_index.xml`, {
+      headers: { accept: "*/*" }
+    });
+    expect(probe.status).toBe(404);
+    expect(probe.headers.get("content-type")).not.toMatch(/text\/html/);
+
+    // Real static assets are still served by the router, never the
+    // Worker's fallback.
+    const asset = await harness.fetch(`${ORIGIN}/sdk.js`, {
+      headers: { accept: "*/*" }
+    });
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("content-type")).toMatch(/javascript/);
 
     const health = await harness.fetch(`${ORIGIN}/health`);
     expect(await health.json()).toEqual({ ok: true });
