@@ -7,6 +7,7 @@ import { SERVER_VERSION } from "./version.js";
 import {
   renderAuthMd,
   renderLlmsTxt,
+  renderRobotsTxt,
   renderSkillMd,
   SKILL_DESCRIPTION
 } from "@livevariant/tools";
@@ -330,6 +331,15 @@ export function createApi(options: ApiOptions): Hono {
   app.get("/auth.md", c =>
     c.text(renderAuthMd(new URL(c.req.url).origin), 200, {
       "content-type": "text/markdown; charset=utf-8"
+    })
+  );
+
+  // Crawling is welcome, training included: see renderRobotsTxt. Served
+  // by the worker rather than shipped as a static file so the Sitemap
+  // directive names the origin the request arrived on.
+  app.get("/robots.txt", c =>
+    c.text(renderRobotsTxt(new URL(c.req.url).origin), 200, {
+      "content-type": "text/plain; charset=utf-8"
     })
   );
 

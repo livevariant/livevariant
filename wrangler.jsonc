@@ -89,6 +89,7 @@
       "/account/*",
       "/.well-known/*",
       "/llms.txt",
+      "/robots.txt",
       "/skills/*",
       "/health",
       "/config",
