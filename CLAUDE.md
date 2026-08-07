@@ -104,6 +104,24 @@ accounts only through two dependency-free ports: `TrustPolicy`
 server one: the secret stays in the `#fragment` and one React page
 (`TestDetail`) serves saved tests and manage links alike.
 
+Discovery doctrine: advertise only what this deployment actually
+serves. No OAuth/OIDC metadata (there is no authorization server;
+`/auth.md` says so), and the MCP server card's `authentication` block
+follows `LV_API_TOKEN`, so a gated self-host never claims open access.
+The one discovery mechanism NOT in code is DNS-AID
+(draft-mozleywilliams-dnsop-dnsaid), which lives in the zone:
+
+```dns
+_index._agents.<domain>. 3600 IN SVCB 1 <domain>. alpn="h2,h3" port=443
+_mcp._agents.<domain>.   3600 IN SVCB 1 <domain>. alpn="mcp,h2" port=443
+```
+
+Same rule applies: no `_a2a` record, because we do not speak A2A. The
+draft's `cap`/`policy`/`well-known` SvcParams stay out until their
+SvcParamKey numbers are registered; unregistered `keyNNNNN` guesses
+parse for nobody. Sign the zone (DNSSEC) so validating resolvers
+return authenticated data.
+
 Handoff params on redirects: `_lvt` (testId), `_lvid` (idHash), `_lvvar`
 (cell), `_lvr` (region, when set). Query config form: `v` `vn` `s` `n`
 `kh` `ctx` `r` `stamp` `fw`; runtime: `id` `auto` `to` `slot`.
