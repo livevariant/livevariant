@@ -23,6 +23,16 @@ const ONE_LINER =
   "shifts toward the winner while the test runs, several elements are " +
   "optimized as one combination, and no account is needed to create one.";
 
+/** The skill's one description, shared by its frontmatter and the
+ * /.well-known/agent-skills discovery index. */
+export const SKILL_DESCRIPTION =
+  "Run A/B tests that pick their own winner. Build a test from variants " +
+  "of one element or several at once (hero plus CTA), get URLs for email " +
+  "or web, and read results with real win probabilities instead of " +
+  "eyeballed conversion rates. Use when someone wants to test headlines, " +
+  "images, landing pages or email creative, or asks which variant is " +
+  "winning.";
+
 function toolsTable(): string {
   const rows = TOOLS.map(tool => [`\`${tool.name}\``, tool.summary]);
   const headers = ["Tool", "What it does"];
@@ -479,7 +489,7 @@ export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
   const frontmatter = [
     `---`,
     `name: livevariant`,
-    `description: Run A/B tests that pick their own winner. Build a test from variants of one element or several at once (hero plus CTA), get URLs for email or web, and read results with real win probabilities instead of eyeballed conversion rates. Use when someone wants to test headlines, images, landing pages or email creative, or asks which variant is winning.`,
+    `description: ${SKILL_DESCRIPTION}`,
     `license: AGPL-3.0`,
     `---`,
     ``
@@ -487,8 +497,16 @@ export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
   return frontmatter + body;
 }
 
-export function renderLlmsTxt(origin: string): string {
+/**
+ * @param origin The deployment's own origin (the docs/dashboard/API
+ * domain): every documentation, MCP and legal link renders against it.
+ * @param serveUrl The campaign-link domain when the deployment runs a
+ * second one (LV_SERVE_URL): only the links a CAMPAIGN carries (the /s
+ * query example, the sdk.js tag) render against it.
+ */
+export function renderLlmsTxt(origin: string, serveUrl?: string): string {
   const base = origin.replace(/\/+$/, "");
+  const serve = (serveUrl ?? origin).replace(/\/+$/, "");
   return `# LiveVariant
 
 > ${ONE_LINER}
@@ -510,12 +528,12 @@ are all there is.
 ## The capability ladder
 
 1. **Just URLs**: compose a test from documented query parameters
-   (\`${base}/s?v=<url-a>&v=<url-b>&id={{recipient_id}}&auto=0\`); each distinct
+   (\`${serve}/s?v=<url-a>&v=<url-b>&id={{recipient_id}}&auto=0\`); each distinct
    parameter set IS its own test. The skill documents the full grammar.
 2. **Tools**: build_test / inspect_test / generate_priors / get_stats /
    get_test_status / upload_image / variant_brief / list_tests via MCP or
    REST.
-3. **On-page**: the tag (\`${base}/sdk.js\`) plus
+3. **On-page**: the tag (\`${serve}/sdk.js\`) plus
    \`window.livevariant.sdk.createTest("<encoded>")\` serves website tests you
    build, and \`upload_image\` lets you create image variants yourself.
 
@@ -532,6 +550,42 @@ screen until the domain is verified under Settings.
 ## Terms
 
 Hosted service terms: ${base}/terms · privacy: ${base}/privacy
+`;
+}
+
+/**
+ * /auth.md (workos.com/auth-md): agent registration instructions in
+ * markdown. Ours is short because the honest answer is short: there is
+ * no registration and no credential an agent could hold. Saying that
+ * explicitly stops agents from hunting for an OAuth flow that does not
+ * exist.
+ */
+export function renderAuthMd(origin: string): string {
+  const base = origin.replace(/\/+$/, "");
+  return `# Agent access to LiveVariant
+
+There is NO registration, no API key, no OAuth flow, and none is
+missing. Every tool is open at \`POST ${base}/api/v1/<tool-name>\` and
+over MCP at \`${base}/mcp\`. Authority travels in the arguments:
+
+- A test IS its config, encoded in its own URLs. Whoever holds the
+  config can serve it; that is the product working as designed.
+- Reading results requires the test's STATS SECRET (a bearer value
+  minted at build time and shown exactly once), sent as an
+  \`Authorization: Bearer\` header to \`GET /stats/<config>\`. The
+  config only carries the secret's hash (\`kh\`), so possession of a
+  link never grants reads.
+- Saving tests into a human's dashboard uses their PUBLIC publishable
+  key (\`pk_...\`), which names their organization and grants nothing.
+  Never ask a human for passwords or session cookies; there is nothing
+  here they could be used for.
+
+Deployments MAY gate the tool API and MCP endpoint with a single
+server-to-server Bearer token (\`LV_API_TOKEN\`); if you receive a 401
+from \`/api/v1/*\` or \`/mcp\`, ask the deployment's operator for that
+token. The hosted service at livevariant.com sets none.
+
+Start with the full skill: ${base}/skills/livevariant/SKILL.md
 `;
 }
 

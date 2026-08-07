@@ -42,6 +42,23 @@ describe("the agent docs source", () => {
     expect(txt).not.toContain("self.example//");
   });
 
+  it("splits llms.txt between the docs domain and the serve domain", () => {
+    // Two-domain deployments: everything an agent READS (skill, MCP,
+    // OpenAPI, terms) belongs to the main domain; only the links a
+    // campaign CARRIES (/s example, sdk.js tag) use the serve domain.
+    const txt = renderLlmsTxt("https://main.example", "https://serve.example");
+    expect(txt).toContain("https://main.example/skills/livevariant/SKILL.md");
+    expect(txt).toContain("https://main.example/mcp");
+    expect(txt).toContain("https://main.example/openapi.json");
+    expect(txt).toContain("https://main.example/api/v1/");
+    expect(txt).toContain("https://main.example/terms");
+    expect(txt).toContain("https://serve.example/s?v=");
+    expect(txt).toContain("https://serve.example/sdk.js");
+    // Nothing readable leaked onto the serve domain.
+    expect(txt).not.toContain("https://serve.example/mcp");
+    expect(txt).not.toContain("https://serve.example/skills");
+  });
+
   it("keeps the MCP instructions aligned with the skill's core claims", () => {
     const instructions = renderMcpInstructions();
     expect(instructions).toContain("stats secret exactly once");

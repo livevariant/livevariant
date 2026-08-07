@@ -150,6 +150,8 @@ export interface AppOptions {
    * seconds; deployments keep the default.
    */
   statsStreamIntervalMs?: number;
+  /** Static app-shell fetcher for the homepage. See ApiOptions.spaFetch. */
+  spaFetch?: (request: Request) => Promise<Response>;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -754,6 +756,7 @@ export function createApp(options: AppOptions): Hono {
       provider: options.provider,
       gtmId: options.gtmId,
       publishableKey: options.publishableKey,
+      spaFetch: options.spaFetch,
       fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
         app.fetch(new Request(input as RequestInfo, init))) as typeof fetch
     })

@@ -70,6 +70,11 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": [
+      // The homepage runs worker-first for agents (markdown negotiation,
+      // Link headers); browsers get the shell via the ASSETS binding.
+      "/",
+      "/auth.md",
+      "/sitemap.xml",
       "/s",
       "/s/*",
       "/c",
