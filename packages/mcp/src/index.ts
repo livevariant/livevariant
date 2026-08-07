@@ -107,7 +107,33 @@ export function registerTools(
 export function createServer(options: McpServerOptions = {}): McpServer {
   const serverUrl = options.serverUrl ?? DEFAULT_SERVER_URL;
   const server = new McpServer(
-    { name: SERVER_NAME, version: SERVER_VERSION },
+    {
+      name: SERVER_NAME,
+      version: SERVER_VERSION,
+      // Hosted URLs on purpose: this server also runs as a local stdio
+      // process (npx), where a relative path would resolve to nothing.
+      // The SVG follows the client's theme by itself; the PNGs are the
+      // explicit pair, light first, our one-slot default.
+      icons: [
+        {
+          src: "https://livevariant.com/icon.svg",
+          mimeType: "image/svg+xml",
+          sizes: ["any"]
+        },
+        {
+          src: "https://livevariant.com/icon-512.png",
+          mimeType: "image/png",
+          sizes: ["512x512"],
+          theme: "light"
+        },
+        {
+          src: "https://livevariant.com/icon-512-dark.png",
+          mimeType: "image/png",
+          sizes: ["512x512"],
+          theme: "dark"
+        }
+      ]
+    },
     {
       capabilities: { tools: {} },
       // One source of truth: the same overview every other surface

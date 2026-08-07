@@ -11,6 +11,9 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "LiveVariant",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png",
+    "logoDark": "./assets/icon-dark.png",
     "shortDescription": "A/B tests that pick their own winner.",
     "longDescription": "Build bandit-driven A/B tests from a set of variants, get ready-made URLs for email and web, warm-start them from what you expect, and read results with genuine win probabilities and a stop/continue call rather than eyeballed conversion rates.",
     "developerName": "LiveVariant",
