@@ -1,3 +1,15 @@
+<picture>
+  <source
+    media="(prefers-color-scheme: dark)"
+    srcset="design-assets/generated/logo-dark.svg"
+  />
+  <img
+    alt="LiveVariant"
+    src="design-assets/generated/logo-light.svg"
+    height="72"
+  />
+</picture>
+
 # LiveVariant
 
 **The test that keeps testing.**
