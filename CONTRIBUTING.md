@@ -46,11 +46,14 @@ npx nx build @livevariant/server
 npx nx test @livevariant/sdk
 ```
 
-CI runs build, test, lint, and typecheck across all projects, so make sure they pass locally before opening a pull request:
+CI runs the following, so make sure they pass locally before opening a pull request:
 
 ```bash
+npx nx format:check --all
 npx nx run-many -t build test lint typecheck
 ```
+
+Formatting is enforced with Prettier; `npx nx format:write --all` fixes formatting issues. If you change the agent tool registry, also run `npm run generate` and commit the regenerated assets (`skills`, `plugins`, `.claude-plugin`, `.agents`); CI fails when they are stale.
 
 ## Testing
 
