@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/web",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "livevariant.com: product website and account-free admin (test builder, stats) served as static assets by the Worker",
   "license": "AGPL-3.0",
   "private": true,
@@ -22,9 +22,9 @@
   },
   "dependencies": {
     "@fontsource/instrument-serif": "^5.3.0",
-    "@livevariant/core": "0.0.2",
-    "@livevariant/react": "0.0.2",
-    "@livevariant/sdk": "0.0.2",
+    "@livevariant/core": "0.0.3",
+    "@livevariant/react": "0.0.3",
+    "@livevariant/sdk": "0.0.3",
     "@radix-ui/react-tabs": "^1.1.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -35,7 +35,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@livevariant/tools": "0.0.2",
+    "@livevariant/tools": "0.0.3",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
