@@ -274,6 +274,9 @@ export function createApi(options: ApiOptions): Hono {
   });
 
   // MCP Server Card (SEP-1649): what /mcp is, without connecting first.
+  // The authentication block reflects THIS deployment: a self-host that
+  // gates the endpoint with LV_API_TOKEN must not advertise open access,
+  // or agents following the card would send tokenless requests into 401s.
   const mcpServerCard = (c: { req: { url: string } }) => {
     const base = new URL(c.req.url).origin;
     return {
@@ -281,9 +284,21 @@ export function createApi(options: ApiOptions): Hono {
       description:
         "Adaptive A/B testing tools: build tests that live in URLs, " +
         "inspect links, warm-start with priors, and read results with " +
-        "win probabilities. No authentication; authority travels in " +
-        "tool arguments.",
+        "win probabilities. " +
+        (apiToken
+          ? "This deployment requires a Bearer token on /mcp (its " +
+            "operator's LV_API_TOKEN); within that, authority travels " +
+            "in tool arguments."
+          : "No authentication; authority travels in tool arguments."),
       transport: { type: "streamable-http", url: `${base}/mcp` },
+      authentication: apiToken
+        ? {
+            type: "bearer",
+            description:
+              "Authorization: Bearer <token>; ask this deployment's " +
+              "operator for its LV_API_TOKEN."
+          }
+        : { type: "none" },
       capabilities: { tools: {}, resources: {} },
       documentation: `${base}/skills/livevariant/SKILL.md`
     };

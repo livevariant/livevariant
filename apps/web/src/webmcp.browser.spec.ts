@@ -81,4 +81,25 @@ describe("WebMCP tools", () => {
       variants: [{ url: "https://a.example/x.jpg" }]
     });
   });
+
+  it("surfaces API errors as FAILED calls carrying the server's reason", async () => {
+    const { provided } = stubModelContext();
+    const doc = buildOpenApiDocument({ serverUrl: "https://self.example" });
+    vi.stubGlobal("fetch", async (url: RequestInfo | URL) => {
+      if (String(url) === "/openapi.json") {
+        return Response.json(doc);
+      }
+      return Response.json(
+        { error: "that is not a LiveVariant test" },
+        { status: 400 }
+      );
+    });
+    await registerWebMcpTools();
+    const inspect = provided()!.find(tool => tool.name === "inspect_test")!;
+    // A 400 must reject with the API's own complaint, never resolve as
+    // if the operation succeeded.
+    await expect(inspect.execute({ test: "rubbish" })).rejects.toThrow(
+      "not a LiveVariant test"
+    );
+  });
 });

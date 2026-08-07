@@ -583,7 +583,29 @@ describe("agent discovery well-knowns", () => {
       expect(card.documentation).toBe(
         "https://self.example/skills/livevariant/SKILL.md"
       );
+      // Open deployment: the card says so.
+      expect(card.authentication).toEqual({ type: "none" });
+      expect(card.description).toContain("No authentication");
     }
+  });
+
+  it("the server card tells the truth about an LV_API_TOKEN gate", async () => {
+    // A self-host gating /mcp must not advertise open access, or agents
+    // following the card would send tokenless requests into 401s.
+    const gated = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      apiToken: "operator-token"
+    });
+    const card = (await (
+      await gated.request(
+        "https://self.example/.well-known/mcp/server-card.json"
+      )
+    ).json()) as Record<string, any>;
+    expect(card.authentication.type).toBe("bearer");
+    expect(card.authentication.description).toContain("LV_API_TOKEN");
+    expect(card.description).toContain("Bearer token");
+    expect(card.description).not.toContain("No authentication");
   });
 
   it("indexes the skill with a digest of the exact served bytes", async () => {

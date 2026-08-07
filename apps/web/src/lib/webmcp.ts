@@ -66,7 +66,21 @@ export async function registerWebMcpTools(): Promise<void> {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(input ?? {})
         });
-        return res.json();
+        const body: unknown = await res.json().catch(() => null);
+        if (!res.ok) {
+          // A failed call must FAIL, with the server's own reason: the
+          // API answers errors as {error} JSON precisely so an agent
+          // can read the complaint and correct its next call.
+          const reason =
+            body !== null &&
+            typeof body === "object" &&
+            "error" in body &&
+            typeof (body as { error: unknown }).error === "string"
+              ? (body as { error: string }).error
+              : `request failed (${res.status})`;
+          throw new Error(reason);
+        }
+        return body;
       }
     });
   }
