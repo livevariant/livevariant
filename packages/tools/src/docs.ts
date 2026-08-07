@@ -487,8 +487,16 @@ export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
   return frontmatter + body;
 }
 
-export function renderLlmsTxt(origin: string): string {
+/**
+ * @param origin The deployment's own origin (the docs/dashboard/API
+ * domain): every documentation, MCP and legal link renders against it.
+ * @param serveUrl The campaign-link domain when the deployment runs a
+ * second one (LV_SERVE_URL): only the links a CAMPAIGN carries (the /s
+ * query example, the sdk.js tag) render against it.
+ */
+export function renderLlmsTxt(origin: string, serveUrl?: string): string {
   const base = origin.replace(/\/+$/, "");
+  const serve = (serveUrl ?? origin).replace(/\/+$/, "");
   return `# LiveVariant
 
 > ${ONE_LINER}
@@ -510,12 +518,12 @@ are all there is.
 ## The capability ladder
 
 1. **Just URLs**: compose a test from documented query parameters
-   (\`${base}/s?v=<url-a>&v=<url-b>&id={{recipient_id}}&auto=0\`); each distinct
+   (\`${serve}/s?v=<url-a>&v=<url-b>&id={{recipient_id}}&auto=0\`); each distinct
    parameter set IS its own test. The skill documents the full grammar.
 2. **Tools**: build_test / inspect_test / generate_priors / get_stats /
    get_test_status / upload_image / variant_brief / list_tests via MCP or
    REST.
-3. **On-page**: the tag (\`${base}/sdk.js\`) plus
+3. **On-page**: the tag (\`${serve}/sdk.js\`) plus
    \`window.livevariant.sdk.createTest("<encoded>")\` serves website tests you
    build, and \`upload_image\` lets you create image variants yourself.
 
