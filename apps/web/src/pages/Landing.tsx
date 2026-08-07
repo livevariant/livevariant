@@ -444,13 +444,13 @@ function ChatTyping() {
 const BUILT_LINKS = [
   {
     label: "img hero",
-    url: "livevariant.link/s/eyJz…?slot=hero&id={{email}}&auto=0"
+    url: "livevariant.link/s/eyJz…?slot=hero&id={{email_or_any_id}}&auto=0"
   },
   {
     label: "img cta",
-    url: "livevariant.link/s/eyJz…?slot=cta&id={{email}}&auto=0"
+    url: "livevariant.link/s/eyJz…?slot=cta&id={{email_or_any_id}}&auto=0"
   },
-  { label: "click", url: "livevariant.link/c/eyJz…?id={{email}}" },
+  { label: "click", url: "livevariant.link/c/eyJz…?id={{email_or_any_id}}" },
   { label: "manage", url: "livevariant.com/manage/eyJz…#kq4xw…" }
 ];
 

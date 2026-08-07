@@ -57,9 +57,9 @@ image link per slot, plus the click link that records the win and
 redirects) and your manage link with live results:
 
 ```
-img hero  livevariant.link/s/<config>?slot=hero&id={{email}}&auto=0
-img cta   livevariant.link/s/<config>?slot=cta&id={{email}}&auto=0
-click     livevariant.link/c/<config>?id={{email}}
+img hero  livevariant.link/s/<config>?slot=hero&id={{email_or_any_id}}&auto=0
+img cta   livevariant.link/s/<config>?slot=cta&id={{email_or_any_id}}&auto=0
+click     livevariant.link/c/<config>?id={{email_or_any_id}}
 manage    livevariant.com/manage/<config>#<stats-secret>
 ```
 
