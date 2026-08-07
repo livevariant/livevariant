@@ -344,3 +344,20 @@ describe("GTM through /config", () => {
     expect(configured.publishableKey).toBe("pk_own");
   });
 });
+
+describe("agent discovery routes", () => {
+  it("serves llms.txt and the skill, rendered for this origin", async () => {
+    const res = await app.request("https://self.example/llms.txt");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("markdown");
+    const txt = await res.text();
+    expect(txt).toContain("/skills/livevariant/SKILL.md");
+    const skill = await app.request(
+      "https://self.example/skills/livevariant/SKILL.md"
+    );
+    expect(skill.status).toBe(200);
+    const body = await skill.text();
+    expect(body).toContain("# LiveVariant");
+    expect(body).toContain("https://self.example/api/v1/");
+  });
+});

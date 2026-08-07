@@ -44,7 +44,9 @@
     "LV_UNLISTED_DESTINATIONS": "",
     "LV_GOOGLE_TAG_MANAGER": "",
     "LV_PUBLISHABLE_KEY": "",
-    "LV_BROWSER_ID_COOKIE": ""
+    // First-party identity cookie for id-less serve/click navigations.
+    // "on" (default) or "off" for a fully cookieless deployment.
+    "LV_BROWSER_ID_COOKIE": "on"
   },
   // Deliberately no routes here. This is the config a
   // stranger gets when they deploy their own copy, and it has to work on
@@ -81,6 +83,8 @@
       "/auth/*",
       "/account/*",
       "/.well-known/*",
+      "/llms.txt",
+      "/skills/*",
       "/health",
       "/config",
       "/assets",
@@ -134,6 +138,7 @@
         "LV_UNLISTED_DESTINATIONS": "",
         "LV_GOOGLE_TAG_MANAGER": "",
         "LV_PUBLISHABLE_KEY": "",
+        "LV_BROWSER_ID_COOKIE": "on",
         // The vite origin: the dashboard is developed through its proxy,
         // so cookies, CORS and magic-link callbacks all key off it.
         "LV_APP_URL": "http://localhost:5173"
@@ -211,7 +216,8 @@
         // Our own publishable key (from Settings), so the landing's
         // hero test registers under our org and shows in My tests.
         // Publishable keys are public by design.
-        "LV_PUBLISHABLE_KEY": "pk_4h92m7urxh7to7c83eacn2e8" // gitleaks:allow
+        "LV_PUBLISHABLE_KEY": "pk_4h92m7urxh7to7c83eacn2e8", // gitleaks:allow
+        "LV_BROWSER_ID_COOKIE": "on"
       },
       "routes": [
         { "pattern": "livevariant.link/*", "zone_name": "livevariant.link" },

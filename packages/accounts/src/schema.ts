@@ -11,7 +11,13 @@
  * entirely the key's, except for keyless SDK tests, which are owned by
  * the org that registered them (kh NULL).
  */
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text
+} from "drizzle-orm/sqlite-core";
 import { organization } from "./auth-schema.js";
 
 export * from "./auth-schema.js";
@@ -65,6 +71,34 @@ export const tests = sqliteTable(
     // Keyset pagination for GET /account/tests: (org, addedAt DESC, id).
     index("tests_org_added_idx").on(table.orgId, table.addedAt, table.testId),
     index("tests_kh_idx").on(table.kh)
+  ]
+);
+
+/**
+ * Which registered tests reference which uploaded assets. Written when
+ * a test is REGISTERED (the one chokepoint every ownership path runs
+ * through), because that is the moment a config becomes attributable:
+ * anonymous tests never store their config, so their assets stay as
+ * anonymous as their tests, by design. Rows cascade with the listing,
+ * so removal keeps this honest.
+ */
+export const assetRefs = sqliteTable(
+  "asset_refs",
+  {
+    /** sha256 content hash: the /a/<id> asset id. */
+    assetId: text("asset_id").notNull(),
+    testId: text("test_id")
+      .notNull()
+      .references(() => tests.testId, { onDelete: "cascade" }),
+    orgId: text("org_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull()
+  },
+  table => [
+    primaryKey({ columns: [table.assetId, table.testId] }),
+    index("asset_refs_org").on(table.orgId),
+    index("asset_refs_asset").on(table.assetId)
   ]
 );
 

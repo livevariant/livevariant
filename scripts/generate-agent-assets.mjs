@@ -20,13 +20,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { TOOLS } from "@livevariant/tools";
+import { renderSkillMd, TOOLS } from "@livevariant/tools";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PLUGIN_NAME = "livevariant";
-const TEMPLATE = path.join(root, "skill", "SKILL.template.md");
 const SKILL = path.join(root, "skills", PLUGIN_NAME, "SKILL.md");
-const TOOLS_MARKER = "<!-- TOOLS_TABLE -->";
 
 export const PLUGIN = {
   name: PLUGIN_NAME,
@@ -73,38 +71,11 @@ function mcpServersConfig() {
   };
 }
 
-/** Left-aligned GFM table, padded so the committed file is stable. */
-function renderTable(headers, rows) {
-  const widths = headers.map((h, i) =>
-    Math.max(h.length, ...rows.map(r => r[i].length))
-  );
-  const line = cells =>
-    `| ${cells.map((c, i) => c.padEnd(widths[i])).join(" | ")} |`;
-  return [
-    line(headers),
-    `| ${widths.map(w => "-".repeat(w)).join(" | ")} |`,
-    ...rows.map(line)
-  ].join("\n");
-}
-
-export function renderToolsTable() {
-  return renderTable(
-    ["Tool", "What it does"],
-    TOOLS.map(tool => [`\`${tool.name}\``, tool.summary])
-  );
-}
-
-export function renderSkill(template) {
-  if (!template.includes(TOOLS_MARKER)) {
-    throw new Error(`SKILL.template.md is missing the ${TOOLS_MARKER} marker`);
-  }
-  return template
-    .replace(TOOLS_MARKER, `## Tools\n\n${renderToolsTable()}`)
-    .replaceAll("{{API_URL}}", PLUGIN.apiUrl);
-}
-
 export function generateSkill() {
-  return renderSkill(fs.readFileSync(TEMPLATE, "utf8"));
+  // The single source of truth lives in @livevariant/tools (docs.ts):
+  // the same renderer the server serves live at
+  // /skills/livevariant/SKILL.md, here rendered with the hosted URL.
+  return renderSkillMd(PLUGIN.apiUrl);
 }
 
 function writeFile(file, contents) {

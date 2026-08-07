@@ -64,4 +64,21 @@ export interface AccountsProvider {
     publishableKey: string;
     origin: string | null;
   }): Promise<void>;
+  /**
+   * Agent-path registration: the stats secret proves authority over
+   * the test, the publishable key names the org. See the provider
+   * implementation for why neither suffices alone.
+   */
+  registerWithSecret?(input: {
+    encoded: string;
+    statsSecret: string;
+    publishableKey: string;
+  }): Promise<
+    | { ok: true; org: string; testId: string }
+    | {
+        ok: false;
+        reason:
+          "bad-config" | "bad-secret" | "unknown-key" | "claimed-elsewhere";
+      }
+  >;
 }

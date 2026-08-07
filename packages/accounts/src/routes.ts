@@ -28,6 +28,7 @@ import {
   releaseKey,
   removeDomain,
   removePublishableKey,
+  removeTest,
   setLockReads
 } from "./registry.js";
 import { member, organization } from "./schema.js";
@@ -39,6 +40,8 @@ export interface AccountRoutesDeps {
   db: Db;
   auth: () => Auth;
   provider: RegistryProvider;
+  /** Origins whose /a/ URLs are this deployment's own assets. */
+  assetOrigins: string[];
   /** Dashboard origin; the only host these routes answer on. */
   baseUrl: string;
   /** JS-rendered fetch for the tag-manager verification path. */
@@ -304,7 +307,7 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
     if (!policy || policy.orgId !== orgId) {
       return c.json({ error: "claim this test's stats key first" }, 403);
     }
-    await registerTest(deps.db, {
+    await registerTest(deps.db, deps.assetOrigins, {
       testId: decoded.testId,
       orgId,
       kh,
@@ -339,6 +342,28 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
       return c.json({ keys: [] });
     }
     return c.json({ keys: await listPublishableKeys(deps.db, who.orgId) });
+  });
+
+  app.delete("/account/tests/:testId", async c => {
+    const who = await caller(c);
+    if (!who) {
+      return c.json(unauthorized, 401);
+    }
+    if (!who.orgId) {
+      return c.json({ error: "no organization" }, 404);
+    }
+    // The symmetric right to pk-based registration: a public key lets
+    // anyone put a test on this list, so the org can always take one
+    // off. Removes the LISTING only; the test itself keeps serving.
+    const removed = await removeTest(deps.db, {
+      testId: c.req.param("testId"),
+      orgId: who.orgId
+    });
+    if (!removed) {
+      return c.json({ error: "not in this organization's list" }, 404);
+    }
+    deps.provider.invalidateTest(c.req.param("testId"));
+    return c.json({ removed: true });
   });
 
   app.delete("/account/publishable-keys/:key", async c => {

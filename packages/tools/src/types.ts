@@ -59,6 +59,24 @@ export interface AccountTools {
     }>;
     nextCursor: string | null;
   }>;
+  /**
+   * Registers a test to the org a publishable key names. Authority is
+   * the stats secret (its hash is inside the config), so this needs no
+   * session: build_test calls it with the secret it just minted, and
+   * register_test with a secret the agent still holds.
+   */
+  registerWithSecret?(input: {
+    encoded: string;
+    statsSecret: string;
+    publishableKey: string;
+  }): Promise<
+    | { ok: true; org: string; testId: string }
+    | {
+        ok: false;
+        reason:
+          "bad-config" | "bad-secret" | "unknown-key" | "claimed-elsewhere";
+      }
+  >;
 }
 
 /**
@@ -120,7 +138,7 @@ export function toolPath(name: string): string {
  * into a 400 and an MCP error result instead of a stack trace.
  */
 /** The statuses a tool failure can carry, so hosts need no cast. */
-export type ToolErrorStatus = 400 | 401 | 404 | 502;
+export type ToolErrorStatus = 400 | 401 | 404 | 409 | 502;
 
 export class ToolInputError extends Error {
   constructor(
