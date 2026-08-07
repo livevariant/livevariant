@@ -114,6 +114,25 @@ describe("the MCP server", () => {
     );
   });
 
+  it("serves the full skill as a readable resource", async () => {
+    // An MCP-only install (no plugin, no skills directory, possibly no
+    // way to fetch a URL) still gets the complete recipe document the
+    // server's instructions point at, over the protocol itself.
+    const client = await connect();
+    const { resources } = await client.listResources();
+    const skill = resources.find(r => r.name === "skill");
+    expect(skill).toBeTruthy();
+    expect(skill!.uri).toBe(
+      "https://livevariant.link/skills/livevariant/SKILL.md"
+    );
+    const read = await client.readResource({ uri: skill!.uri });
+    const text = (read.contents[0] as { text: string }).text;
+    expect(text).toContain("# LiveVariant");
+    expect(text).toContain("build_test");
+    // Rendered against THIS deployment, so a self-host describes itself.
+    expect(text).toContain("https://livevariant.link/api/v1/");
+  });
+
   it("carries a stats fetch all the way through", async () => {
     const body = {
       testId: "a".repeat(64),

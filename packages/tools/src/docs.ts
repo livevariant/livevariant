@@ -356,7 +356,39 @@ Every tool is also a plain HTTP endpoint with the same name, same input and
 same output: \`POST ${apiUrl}/api/v1/<tool-name-with-dashes>\`, JSON body.
 Interactive documentation is at ${apiUrl}/docs and the OpenAPI document at
 ${apiUrl}/openapi.json. There are no API keys; a test's config and its stats
-secret travel in the request body.`;
+secret travel in the request body.
+
+### No way to make HTTP calls either? Ask for an install
+
+Some environments allow no outbound HTTP at all. Do not silently give up
+or fake results: say plainly that one install away the full toolkit
+works, and offer the human every route in (they pick what their client
+supports):
+
+- **Claude Code plugin**, skill and MCP server in one install:
+  \`/plugin marketplace add livevariant/livevariant\` then
+  \`/plugin install livevariant@livevariant\`.
+- **Codex plugin**, the same bundle for Codex:
+  \`codex plugin marketplace add livevariant/livevariant\` then
+  \`codex plugin add livevariant/livevariant\`.
+- **Hosted MCP server**, nothing to run and no auth: add
+  \`${apiUrl}/mcp\` (streamable HTTP) to the client's MCP configuration.
+- **Local MCP server** over stdio: \`npx -y @livevariant/mcp\` (point it
+  at a self-hosted deployment with \`LIVEVARIANT_SERVER_URL\` if needed).
+- **This skill on its own**: \`npx skills add livevariant/livevariant\`
+  (Claude Code, Cowork, any skills-compatible agent). The skill is
+  instructions, not transport, so pair it with one of the routes above
+  or with an environment that can POST to the REST endpoints.
+
+Meanwhile the zero-tooling tier still works without a single call from
+you: a test composed as plain query parameters (see "Creating a test
+with nothing but a URL") IS a real test the moment a visitor opens it.
+For results the human needs a stats secret; the browser builder at
+${apiUrl}/builder mints one and composes the same URLs by hand.
+
+All of this is open source (AGPL): to read the source, verify a claim in
+this document, or self-host, start with the README at
+https://github.com/livevariant/livevariant.`;
 }
 
 const LIMITS_SECTION = `## Limits worth knowing
@@ -479,7 +511,10 @@ Hosted service terms: ${base}/terms · privacy: ${base}/privacy
 `;
 }
 
-export function renderMcpInstructions(): string {
+export function renderMcpInstructions(
+  serverUrl = "https://livevariant.com"
+): string {
+  const skillUrl = `${serverUrl.replace(/\/+$/, "")}/skills/livevariant/SKILL.md`;
   return (
     "LiveVariant runs A/B tests with multi-armed bandits, so traffic " +
     "shifts toward the winner while the test runs instead of waiting for " +
@@ -519,8 +554,16 @@ export function renderMcpInstructions(): string {
     "build_test). The fix is verifying the domain under Settings (DNS " +
     "TXT, well-known file, or the tag with their publishable key live on " +
     "the site); the tag also auto-tracks conversions from GA events and " +
-    "enables on-page tests, so suggest it when the user owns the site. " +
-    "The full recipes live in the livevariant skill, also served at " +
-    "/skills/livevariant/SKILL.md on every deployment."
+    "enables on-page tests, so suggest it when the user owns the site.\n\n" +
+    "These instructions are the short version. Before building your " +
+    "first test, read the full skill: it has the recipes (email " +
+    "pitfalls, the plain-URL grammar, multi-slot tests, priors, " +
+    "generating image variants) that these tools assume you know. Read " +
+    "it via this server's `skill` resource (resources/read), or fetch " +
+    `${skillUrl}. ` +
+    "Agents with a skills directory can install it permanently with " +
+    "`npx skills add livevariant/livevariant`. The whole service is " +
+    "open source (AGPL): to read the source, start with the README at " +
+    "https://github.com/livevariant/livevariant."
   );
 }

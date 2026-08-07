@@ -48,6 +48,37 @@ describe("the agent docs source", () => {
     expect(instructions).toContain("manage URL");
     expect(instructions).toContain("upload_image");
   });
+
+  it("points an MCP-only client at the full skill, per deployment", () => {
+    // Someone who installed nothing but the MCP server must still be
+    // able to find the recipes: the resource, the URL, the skill install.
+    const instructions = renderMcpInstructions("https://self.example/");
+    expect(instructions).toContain(
+      "https://self.example/skills/livevariant/SKILL.md"
+    );
+    expect(instructions).toContain("`skill` resource");
+    expect(instructions).toContain("npx skills add livevariant/livevariant");
+    expect(instructions).toContain(
+      "https://github.com/livevariant/livevariant"
+    );
+    expect(instructions).not.toContain("self.example//");
+  });
+
+  it("tells an agent without network access to ask for an install", () => {
+    // The skill's fallback ladder must end with every install route, not
+    // with a silent dead end.
+    const skill = renderSkillMd("https://self.example");
+    expect(skill).toContain("Ask for an install");
+    expect(skill).toContain("/plugin marketplace add livevariant/livevariant");
+    expect(skill).toContain("/plugin install livevariant@livevariant");
+    expect(skill).toContain("codex plugin marketplace add");
+    expect(skill).toContain("https://self.example/mcp");
+    expect(skill).toContain("npx -y @livevariant/mcp");
+    expect(skill).toContain("npx skills add livevariant/livevariant");
+    expect(skill).toContain("https://self.example/builder");
+    // Open source: reading the code is always an option, via the README.
+    expect(skill).toContain("https://github.com/livevariant/livevariant");
+  });
 });
 
 describe("the parameter table matches the identity hash", () => {

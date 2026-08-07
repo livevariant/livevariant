@@ -1,4 +1,4 @@
-import { renderMcpInstructions } from "@livevariant/tools";
+import { renderMcpInstructions, renderSkillMd } from "@livevariant/tools";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -105,6 +105,7 @@ export function registerTools(
 }
 
 export function createServer(options: McpServerOptions = {}): McpServer {
+  const serverUrl = options.serverUrl ?? DEFAULT_SERVER_URL;
   const server = new McpServer(
     {
       name: SERVER_NAME,
@@ -137,10 +138,37 @@ export function createServer(options: McpServerOptions = {}): McpServer {
       capabilities: { tools: {} },
       // One source of truth: the same overview every other surface
       // renders from (packages/tools/src/docs.ts).
-      instructions: renderMcpInstructions()
+      instructions: renderMcpInstructions(serverUrl)
     }
   );
   registerTools(server, options);
+  // The full skill, readable over the protocol itself. An MCP-only
+  // install (no plugin, no skills directory, maybe no way to fetch a
+  // URL) still gets the complete recipe document the instructions
+  // point at, rendered against this deployment so a self-host
+  // describes itself.
+  const skillUri = `${serverUrl.replace(/\/+$/, "")}/skills/livevariant/SKILL.md`;
+  server.registerResource(
+    "skill",
+    skillUri,
+    {
+      title: "LiveVariant agent skill",
+      description:
+        "The full LiveVariant skill: recipes and pitfalls for building " +
+        "and reading A/B tests with these tools. Read this before your " +
+        "first build_test call.",
+      mimeType: "text/markdown"
+    },
+    uri => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: "text/markdown",
+          text: renderSkillMd(serverUrl)
+        }
+      ]
+    })
+  );
   return server;
 }
 
