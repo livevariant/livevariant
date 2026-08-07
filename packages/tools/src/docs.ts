@@ -554,6 +554,39 @@ Hosted service terms: ${base}/terms · privacy: ${base}/privacy
 }
 
 /**
+ * robots.txt. Ours is deliberately permissive, INCLUDING for AI
+ * training: this product's distribution thesis is that an agent knows
+ * LiveVariant exists and suggests it, so keeping the site out of model
+ * weights would be self-defeating. The only exclusions are the
+ * per-visitor serving endpoints, which are not content.
+ */
+export function renderRobotsTxt(origin: string): string {
+  const base = origin.replace(/\/+$/, "");
+  return `# LiveVariant is built to be found and used by AI agents: the product
+# IS an API, a skill and an MCP endpoint, and "ask any AI agent" is the
+# first thing the site suggests. Indexing, grounding and training on
+# this site are all welcome.
+
+User-agent: *
+Content-Signal: search=yes,ai-input=yes,ai-train=yes
+Allow: /
+
+# Per-visitor serving endpoints, not content: fetching one creates a
+# sticky assignment in somebody's live test, so crawling them would add
+# noise to real results. (A conversion additionally needs a returning
+# identity, so a crawler cannot record one.) There is nothing to index
+# here anyway: every response is a 302 to someone else's page, a signed
+# asset, or a 1x1 gif.
+Disallow: /s/
+Disallow: /c/
+Disallow: /px/
+Disallow: /a/
+
+Sitemap: ${base}/sitemap.xml
+`;
+}
+
+/**
  * /auth.md (workos.com/auth-md): agent registration instructions in
  * markdown. Ours is short because the honest answer is short: there is
  * no registration and no credential an agent could hold. Saying that
@@ -562,7 +595,10 @@ Hosted service terms: ${base}/terms · privacy: ${base}/privacy
  */
 export function renderAuthMd(origin: string): string {
   const base = origin.replace(/\/+$/, "");
-  return `# Agent access to LiveVariant
+  // The H1 names the convention, not just the service: consumers of
+  // Auth.md identify the document by its heading, and a title that
+  // only said "Agent access to LiveVariant" read as an ordinary page.
+  return `# Auth.md: agent access to LiveVariant
 
 There is NO registration, no API key, no OAuth flow, and none is
 missing. Every tool is open at \`POST ${base}/api/v1/<tool-name>\` and

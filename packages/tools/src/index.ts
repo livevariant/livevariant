@@ -13,6 +13,7 @@ export {
   renderAuthMd,
   renderLlmsTxt,
   renderMcpInstructions,
+  renderRobotsTxt,
   renderSkillMd,
   SKILL_DESCRIPTION
 } from "./docs.js";

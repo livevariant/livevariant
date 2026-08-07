@@ -1297,5 +1297,41 @@ export function createApp(options: AppOptions): Hono {
   // exists exactly once. The URL shape and its #fragment secret are
   // unchanged for everyone holding an old link.
 
+  /**
+   * The SPA fallback, ours rather than the asset router's, because the
+   * router's version answers EVERY miss with index.html at 200: a
+   * crawler asking for /sitemap_index.xml, a browser asking for
+   * /favicon.ico and an agent asking for /openapi.yaml each got a page
+   * of HTML claiming success. That is a soft-404, and machines cannot
+   * see through it.
+   *
+   * What separates "render the app" from "that file does not exist" is
+   * NOT the shape of the path. We do not control the paths: people
+   * configure and share their own links, and a rule like "no dots means
+   * an app route" would 404 a real visitor the first time one of those
+   * broke the pattern. The honest signal is the client's own: a
+   * top-level navigation (`Sec-Fetch-Dest: document`, or an Accept that
+   * asks for HTML) means a person is looking at a page, so serve the
+   * shell and let the router decide. Anything else is a machine
+   * fetching a resource, and a resource we did not serve above is a
+   * genuine 404.
+   *
+   * Worst case for a crawler that claims to want HTML is exactly the
+   * old behaviour, and a real browser can never be 404'd out of the
+   * dashboard. Requires `not_found_handling: "none"` in wrangler.jsonc,
+   * which is what routes asset misses here at all.
+   */
+  app.notFound(async c => {
+    if (!isNavigation(c) || !options.spaFetch) {
+      return c.text("not found", 404);
+    }
+    // The shell lives at "/", so ask for that rather than the route the
+    // visitor typed, which the asset router does not have.
+    const shell = new URL(c.req.url);
+    shell.pathname = "/";
+    shell.search = "";
+    return options.spaFetch(new Request(shell, { headers: c.req.raw.headers }));
+  });
+
   return app;
 }

@@ -2018,3 +2018,76 @@ describe("live stats stream", () => {
     expect(events.slice(1).every(e => e.event === "ping")).toBe(true);
   });
 });
+
+describe("misses: the app for people, the truth for machines", () => {
+  /**
+   * The asset router's SPA fallback answered every miss with index.html
+   * at 200, so /favicon.ico and /sitemap_index.xml were HTML claiming
+   * success. Misses now reach the Worker (not_found_handling "none"),
+   * and the split is the CLIENT'S declaration, never the shape of the
+   * path: we do not own the paths people configure and share.
+   */
+  const withShell = () =>
+    createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(3),
+      spaFetch: async () =>
+        new Response('<!doctype html><div id="root"></div>', {
+          headers: { "content-type": "text/html" }
+        })
+    });
+
+  it("404s machine fetches instead of handing back a page of HTML", async () => {
+    const app = withShell();
+    for (const path of [
+      "/sitemap_index.xml",
+      "/sitemap.xml.gz",
+      "/favicon.ico",
+      "/manifest.json",
+      "/openapi.yaml",
+      "/api",
+      "/nonexistent"
+    ]) {
+      const res = await app.request(path, { headers: { accept: "*/*" } });
+      expect(res.status, path).toBe(404);
+      expect(res.headers.get("content-type"), path).not.toContain("text/html");
+    }
+  });
+
+  it("serves the shell to a real navigation, whatever the path looks like", async () => {
+    const app = withShell();
+    for (const path of [
+      "/builder",
+      "/manage/abc123",
+      "/nonexistent-page",
+      // The regression guard: an earlier draft used "a dot means a
+      // file", which would have 404'd a visitor on any shared link that
+      // happened to contain one.
+      "/weird.dotted.path"
+    ]) {
+      const res = await app.request(path, {
+        headers: { "sec-fetch-dest": "document", accept: "text/html" }
+      });
+      expect(res.status, path).toBe(200);
+      expect(await res.text(), path).toContain('id="root"');
+    }
+  });
+
+  it("404s a subresource even when the path could be a page", async () => {
+    // Sec-Fetch-Dest tells us this is an <img>, not a person looking.
+    const res = await withShell().request("/favicon.ico", {
+      headers: { "sec-fetch-dest": "image", accept: "image/*,*/*" }
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("404s rather than inventing a shell when the host serves no assets", async () => {
+    const res = await createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(3)
+    }).request("/builder", {
+      headers: { "sec-fetch-dest": "document", accept: "text/html" }
+    });
+    expect(res.status).toBe(404);
+  });
+});

@@ -632,10 +632,39 @@ describe("agent discovery well-knowns", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/markdown");
     const text = await res.text();
+    // Consumers identify the document by its H1, so it must name the
+    // convention rather than just the service.
+    expect(text).toMatch(/^# Auth\.md/i);
     expect(text).toContain("NO registration");
     expect(text).toContain("https://self.example/api/v1/");
     // No aspirational OAuth: the honest story is the whole story.
     expect(text).not.toContain("authorization_endpoint");
+  });
+
+  it("welcomes crawlers, training included, but not the serving paths", async () => {
+    const res = await app.request("https://self.example/robots.txt");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/plain");
+    const txt = await res.text();
+    // Not HTML: without this route the SPA fallback answered /robots.txt
+    // with index.html, which a crawler cannot use at all.
+    expect(txt).not.toContain("<!doctype html>");
+    expect(txt).toContain("User-agent: *");
+    expect(txt).toContain("Allow: /");
+    // Training is welcome on purpose: a model that knows LiveVariant
+    // exists is this product's distribution.
+    expect(txt).toContain("ai-train=yes");
+    expect(txt).not.toContain("ai-train=no");
+    // The serving endpoints mutate live tests, so they stay out...
+    for (const path of ["/s/", "/c/", "/px/", "/a/"]) {
+      expect(txt).toContain(`Disallow: ${path}`);
+    }
+    // ...but the prefixes an agent actually needs must NOT be caught by
+    // those rules (a bare "Disallow: /s" would have blocked both).
+    expect(txt).not.toMatch(/Disallow: \/s$/m);
+    expect(txt).not.toMatch(/Disallow: \/skills/);
+    expect(txt).not.toMatch(/Disallow: \/sitemap/);
+    expect(txt).toContain("Sitemap: https://self.example/sitemap.xml");
   });
 
   it("serves a sitemap of the public pages", async () => {
