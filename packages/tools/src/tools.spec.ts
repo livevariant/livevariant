@@ -48,8 +48,11 @@ describe("the registry itself", () => {
   it("only reaches the network where it must", () => {
     expect(getStats.reachesNetwork).toBe(true);
     expect(uploadImage.reachesNetwork).toBe(true);
-    // Genuinely non-read-only tools: one stores bytes, one writes an
-    // ownership record.
+    // Non-read-only tools: build_test may register a test when given a
+    // publishable key, upload_image stores bytes, and register_test writes
+    // an ownership record.
+    expect(buildTest.reachesNetwork).toBe(false);
+    expect(buildTest.readOnly).toBe(false);
     expect(uploadImage.readOnly).toBe(false);
     const registerTest = TOOLS.find(t => t.name === "register_test")!;
     expect(registerTest.reachesNetwork).toBe(true);
@@ -60,6 +63,7 @@ describe("the registry itself", () => {
     expect(getTestStatus.reachesNetwork).toBe(true);
     expect(getTestStatus.readOnly).toBe(true);
     const writers = new Set([
+      "build_test",
       "get_stats",
       "get_test_status",
       "upload_image",

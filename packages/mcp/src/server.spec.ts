@@ -74,7 +74,7 @@ describe("the MCP server", () => {
     const client = await connect();
     const { tools } = await client.listTools();
     const byName = new Map(tools.map(t => [t.name, t]));
-    expect(byName.get("build_test")?.annotations?.readOnlyHint).toBe(true);
+    expect(byName.get("build_test")?.annotations?.readOnlyHint).toBe(false);
     expect(byName.get("build_test")?.annotations?.openWorldHint).toBe(false);
     // get_stats is the only one that leaves the process.
     expect(byName.get("get_stats")?.annotations?.openWorldHint).toBe(true);

@@ -143,15 +143,19 @@ export const buildTest = defineTool({
     "COMBINATION: one model learns how the elements interact, which two " +
     "separate tests structurally cannot see. There is no algorithm to pick " +
     "either way; every test runs the same joint model, sized from its shape.\n\n" +
-    "Nothing is registered anywhere: the config IS the test, encoded into the " +
-    "URLs, and the test's identity is a hash of it. That means editing a " +
-    "variant later produces a DIFFERENT test with its own empty history, " +
-    "which is usually what you want per campaign but is worth saying out loud " +
-    "to whoever you are building this for.\n\n" +
+    "By default, nothing is registered anywhere: the config IS the test, " +
+    "encoded into the URLs, and the test's identity is a hash of it. Pass " +
+    "`publishableKey` on an account-enabled deployment to also register the " +
+    "new test to that key's organization, so it appears under My tests; the " +
+    "config and URLs are still the test, and registration failure is returned " +
+    "as a warning rather than failing the build. Editing a variant later " +
+    "produces a DIFFERENT test with its own empty history, which is usually " +
+    "what you want per campaign but is worth saying out loud to whoever you " +
+    "are building this for.\n\n" +
     "The stats secret is returned once and never again. Only its hash goes " +
     "into the config, so nobody, including this service, can recover it. Give " +
     "it to the person who will read the results.",
-  readOnly: true,
+  readOnly: false,
   reachesNetwork: false,
   input: z
     .object({

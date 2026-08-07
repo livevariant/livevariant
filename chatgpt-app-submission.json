@@ -1,0 +1,188 @@
+{
+  "$schema": "https://developers.openai.com/apps-sdk/schemas/chatgpt-app-submission.v1.json",
+  "schema_version": 1,
+  "app_info": {
+    "display_name": "LiveVariant",
+    "subtitle": "Run adaptive A/B tests",
+    "description": "LiveVariant helps users create adaptive A/B tests for email and web, inspect test links, warm-start tests with priors, upload image variants, register tests to an account, and read results with win probabilities and domain/account status.",
+    "category": "PRODUCTIVITY"
+  },
+  "tools": {
+    "build_test": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a fresh test config and can register it to an organization when a publishable key is supplied.",
+        "open_world_justification": "Does not publish content or write to third-party systems; account registration stays within LiveVariant.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "inspect_test": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Only decodes a supplied LiveVariant config or URL and reports its structure and findings.",
+        "open_world_justification": "Does not contact external services or change public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "generate_priors": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Computes a new encoded config with priors and returns it without writing server state.",
+        "open_world_justification": "Does not contact external services or change public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_stats": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Fetches test statistics from LiveVariant and derives win probabilities without modifying the test.",
+        "open_world_justification": "Contacts the configured LiveVariant deployment to retrieve current results.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "get_test_status": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads registry status and verified-domain information for a test without changing records.",
+        "open_world_justification": "Contacts the configured LiveVariant deployment's account registry to read status.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "list_tests": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Lists tests available to the signed-in account without creating or changing records.",
+        "open_world_justification": "Reads from the current LiveVariant deployment's authenticated account context only.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "register_test": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Writes an existing test into an organization's LiveVariant test list after validating the stats secret.",
+        "open_world_justification": "Contacts the configured LiveVariant deployment to update its account registry.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "upload_image": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Stores image bytes in the deployment's asset store and returns protected asset URLs.",
+        "open_world_justification": "Uploads image data to the configured LiveVariant deployment's asset endpoint.",
+        "destructive_justification": "Uses content-addressed storage and does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    },
+    "variant_brief": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Returns channel-specific variant-writing guidance without reading or changing server state.",
+        "open_world_justification": "Does not contact external services or change public internet state.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    }
+  },
+  "test_cases": [
+    {
+      "description": "Get constraints before drafting email image variants.",
+      "user_prompt": "I want to test three email hero images for a coffee newsletter. Give me the LiveVariant brief before we draft them.",
+      "file_attachment_urls": null,
+      "tools_triggered": "variant_brief",
+      "expected_output": "Returns channel and format constraints, testing rules, hosting guidance, and the next step for building the test.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Upload an image asset and build a multi-slot registered test.",
+      "user_prompt": "Upload this PNG as one hero option, then build a LiveVariant email test with two hero options and two CTA options, registered to my publishable key.",
+      "file_attachment_urls": null,
+      "tools_triggered": "upload_image, build_test",
+      "expected_output": "Returns protected asset URLs, a test config, serve/click/pixel/manage URLs, slot links, warnings if any, and registration status when accepted.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Inspect a link and warm-start it with prior beliefs.",
+      "user_prompt": "Here is my LiveVariant manage link. Explain what it does, then add medium-confidence priors that the second variant converts at 6% and the control at 4%.",
+      "file_attachment_urls": null,
+      "tools_triggered": "inspect_test, generate_priors",
+      "expected_output": "Reports the test structure and findings, then returns an updated config with capped priors and notes about how quickly real traffic overrides them.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Read results and account/domain status for a running test.",
+      "user_prompt": "Use this LiveVariant manage URL to tell me which variant is winning, whether I can stop, and whether its redirect domains are verified.",
+      "file_attachment_urls": null,
+      "tools_triggered": "get_stats, get_test_status",
+      "expected_output": "Returns current counts, win probabilities, stop/continue advice, claimed status, and verified-domain information.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Find saved tests and register an existing test.",
+      "user_prompt": "Show my saved LiveVariant tests matching newsletter, then register this existing test config to my organization with its stats secret and publishable key.",
+      "file_attachment_urls": null,
+      "tools_triggered": "list_tests, register_test",
+      "expected_output": "Returns matching account tests, then confirms the existing test was registered to the organization or explains why registration failed.",
+      "expected_output_url": null
+    }
+  ],
+  "negative_test_cases": [
+    {
+      "description": "Do not trigger for calendar scheduling.",
+      "user_prompt": "Put a reminder on my calendar to review the campaign next Friday.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because calendar management is outside LiveVariant's supported workflows.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not trigger for unrelated analytics reporting.",
+      "user_prompt": "Analyze this Google Analytics export and make a dashboard of traffic sources.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked unless the user asks to build, inspect, register, or read a LiveVariant test.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not trigger for sending an email campaign.",
+      "user_prompt": "Send my newsletter to the full customer list with subject line A for half and subject line B for half.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "The app should not be invoked because it does not send email or manage campaign delivery.",
+      "expected_output_url": null
+    }
+  ]
+}
