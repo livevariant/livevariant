@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link, useParams } from "react-router";
-import { Bookmark, Check, Copy, RefreshCw, UserPlus } from "lucide-react";
+import { Bookmark, Check, Copy, UserPlus } from "lucide-react";
 import { buildTestUrls } from "@livevariant/core";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,33 +10,10 @@ import {
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { NativeSelect } from "@/components/ui/select";
+import { StatsPanel } from "@/components/StatsPanel";
 import { claimAndRegister, setActiveOrg, useAccount } from "@/lib/account";
 import { useResolvedTest, type ResolvedTest } from "@/lib/resolve-test";
-
-interface VariantStats {
-  name: string;
-  pulls: number;
-  conversions: number;
-  conversionRate: number | null;
-}
-
-interface CombinationStats {
-  cell: number;
-  choice: string[];
-  pulls: number;
-  conversions: number;
-  rewardTotal: number;
-  conversionRate: number | null;
-}
-
-interface Stats {
-  totalAssignments: number;
-  combinations: CombinationStats[];
-  slots: Record<string, VariantStats[]>;
-  buckets: Record<string, unknown>;
-}
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
@@ -194,41 +171,7 @@ function AccountCard({
 export function TestDetail() {
   const params = useParams<{ testId?: string; encoded?: string }>();
   const { test, ready, save } = useResolvedTest(params);
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [snippetCopied, setSnippetCopied] = useState(false);
-
-  const refresh = useCallback(async () => {
-    if (!test) {
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      // Same-origin on purpose: the one Worker answers /stats on every
-      // hostname it serves, and a signed-in member of the owning org can
-      // read without the bearer secret at all.
-      const res = await fetch(`/stats/${test.encoded}`, {
-        credentials: "include",
-        headers: test.statsSecret
-          ? { authorization: `Bearer ${test.statsSecret}` }
-          : {}
-      });
-      if (!res.ok) {
-        throw new Error(`stats request failed (${res.status})`);
-      }
-      setStats((await res.json()) as Stats);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [test]);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   if (!ready) {
     return null;
@@ -267,117 +210,20 @@ element.textContent = test.variant.text;`;
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <h1 className="font-display text-3xl">{test.name}</h1>
-        {stats && Object.keys(stats.slots).length > 1 && (
-          <Badge variant="secondary">
-            {stats.combinations.length} combinations
-          </Badge>
-        )}
         <div className="ml-auto flex items-center gap-2">
           {!test.saved && test.statsSecret && (
             <Button variant="outline" size="sm" onClick={save}>
               <Bookmark /> Save in this browser
             </Button>
           )}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={loading}
-            onClick={() => void refresh()}
-          >
-            <RefreshCw className={loading ? "animate-spin" : ""} /> Refresh
-          </Button>
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Results</CardTitle>
-          <CardDescription>
-            {stats
-              ? `${stats.totalAssignments} assignments · ${Object.keys(stats.buckets).length} context buckets`
-              : error
-                ? `Could not load stats: ${error}${
-                    test.statsSecret
-                      ? ""
-                      : " (open the manage link with its #secret, or sign in to the owning account)"
-                  }`
-                : "loading…"}
-          </CardDescription>
-        </CardHeader>
-        {stats && (
-          <CardContent className="space-y-6">
-            {/* Per-slot marginals: how each variant did across every
-                combination it appeared in. For a single-slot test this IS
-                the whole picture. */}
-            {Object.entries(stats.slots).map(([slotKey, variants]) => (
-              <table key={slotKey} className="w-full text-sm">
-                {Object.keys(stats.slots).length > 1 && (
-                  <caption className="pb-2 text-left font-medium">
-                    {slotKey}
-                  </caption>
-                )}
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 font-medium">Variant</th>
-                    <th className="py-2 font-medium">Pulls</th>
-                    <th className="py-2 font-medium">Conversions</th>
-                    <th className="py-2 font-medium">Rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {variants.map((variant, i) => (
-                    <tr key={i} className="border-b last:border-0">
-                      <td className="py-2">{variant.name}</td>
-                      <td className="py-2">{variant.pulls}</td>
-                      <td className="py-2">{variant.conversions}</td>
-                      <td className="py-2">
-                        {variant.conversionRate === null
-                          ? "–"
-                          : `${(variant.conversionRate * 100).toFixed(1)}%`}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ))}
-            {/* Exact per-combination outcomes, the answer a multi-element
-                test exists to give. */}
-            {Object.keys(stats.slots).length > 1 && (
-              <table className="w-full text-sm">
-                <caption className="pb-2 text-left font-medium">
-                  Combinations
-                </caption>
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 font-medium">Combination</th>
-                    <th className="py-2 font-medium">Pulls</th>
-                    <th className="py-2 font-medium">Conversions</th>
-                    <th className="py-2 font-medium">Rate</th>
-                    <th className="py-2 font-medium">Reward</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...stats.combinations]
-                    .sort((a, b) => b.pulls - a.pulls)
-                    .map(combo => (
-                      <tr key={combo.cell} className="border-b last:border-0">
-                        <td className="py-2">{combo.choice.join(" + ")}</td>
-                        <td className="py-2">{combo.pulls}</td>
-                        <td className="py-2">{combo.conversions}</td>
-                        <td className="py-2">
-                          {combo.conversionRate === null
-                            ? "–"
-                            : `${(combo.conversionRate * 100).toFixed(1)}%`}
-                        </td>
-                        <td className="py-2">{combo.rewardTotal}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            )}
-          </CardContent>
-        )}
-      </Card>
+      <StatsPanel
+        encoded={test.encoded}
+        statsSecret={test.statsSecret}
+        hasSecret={test.statsSecret !== null}
+      />
 
       <AccountCard test={test} onSaved={save} />
 

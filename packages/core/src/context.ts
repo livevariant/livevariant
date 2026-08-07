@@ -155,6 +155,81 @@ export async function bucketKey(
 }
 
 /**
+ * Candidate spaces bigger than this are not enumerated at all: past it a
+ * partial sweep would label an arbitrary subset of buckets, which reads
+ * as "the others are attackers" when they are just unlucky.
+ */
+const MAX_LABEL_CANDIDATES = 1024;
+
+/**
+ * Best-effort readable names for the opaque bucket keys in stats. The
+ * keys are one-way hashes on purpose (raw context never has to reach the
+ * store), but for dimensions with a declared `values` list the whole
+ * space of possible contexts is enumerable, so the label can be RECOVERED
+ * by hashing every candidate the exact way serving does and matching:
+ * a label is attached only when the hash agrees, never guessed.
+ *
+ * Free-form dimensions stay unlabeled (their value space is unbounded),
+ * as does anything past MAX_LABEL_CANDIDATES.
+ */
+export async function enumerateBucketLabels(
+  testId: string,
+  dims: readonly CtxDim[] | undefined
+): Promise<Map<string, string>> {
+  const labels = new Map<string, string>();
+  if (!dims || dims.length === 0) {
+    return labels;
+  }
+  let space = 1;
+  for (const dim of dims) {
+    // Each dimension is either absent or one of its declared values; a
+    // free-form dimension only contributes "absent".
+    space *= 1 + (dim.values?.length ?? 0);
+    if (space > MAX_LABEL_CANDIDATES) {
+      return labels;
+    }
+  }
+  // Mixed-radix counter over the candidate space: digit 0 is "absent",
+  // digit i is values[i - 1].
+  const digits = new Array<number>(dims.length).fill(0);
+  for (let candidate = 1; candidate < space; candidate++) {
+    let carry = 1;
+    for (let i = 0; i < dims.length && carry; i++) {
+      digits[i] += carry;
+      carry = 0;
+      if (digits[i] > (dims[i].values?.length ?? 0)) {
+        digits[i] = 0;
+        carry = 1;
+      }
+    }
+    // Rebuild the exact serve-time composition: caller dimensions hash
+    // into the caller's key, auto (`from`) dimensions compose on top.
+    const callerCtx: Record<string, string> = {};
+    const autoCtx: Record<string, string> = {};
+    const parts: string[] = [];
+    for (let i = 0; i < dims.length; i++) {
+      // A non-zero digit implies a declared values list: free-form
+      // dimensions only ever hold digit 0.
+      const value = dims[i].values?.[digits[i] - 1];
+      if (digits[i] === 0 || value === undefined) {
+        continue;
+      }
+      (dims[i].from ? autoCtx : callerCtx)[dims[i].key] = value;
+      parts.push(`${dims[i].key}=${value}`);
+    }
+    const callerKey =
+      Object.keys(callerCtx).length > 0
+        ? await bucketKey(testId, callerCtx)
+        : null;
+    const key = await composeBucketKey(testId, callerKey, autoCtx);
+    if (key !== null) {
+      labels.set(key, parts.join(", "));
+    }
+  }
+  return labels;
+}
+
+/**
  * Hashed one-hot feature indices for the linear bandit: bias slot 0 plus
  * one slot per context key=value pair, hashed into [1, dim). Collisions
  * just merge two features, which linear models tolerate.

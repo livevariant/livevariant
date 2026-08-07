@@ -3,6 +3,7 @@ import {
   bucketKey,
   composeBucketKey,
   deriveAutoCtx,
+  enumerateBucketLabels,
   featureIndices,
   mergeFeatureIndices,
   normalizeCtx,
@@ -126,6 +127,67 @@ describe("composeBucketKey", () => {
       country: "nl"
     });
     expect(otherTest).not.toBe(nl);
+  });
+});
+
+describe("enumerateBucketLabels", () => {
+  const testId = "a".repeat(64);
+
+  it("recovers the label for a caller-hashed bucket", async () => {
+    const config = configWithDims([{ key: "plan", values: ["free", "pro"] }]);
+    const labels = await enumerateBucketLabels(testId, config.ctx?.dims);
+    expect(labels.get(await bucketKey(testId, { plan: "pro" }))).toBe(
+      "plan=pro"
+    );
+    expect(labels.size).toBe(2);
+  });
+
+  it("labels composed auto-dimension buckets the way serving keys them", async () => {
+    const config = configWithDims([
+      { key: "plan", values: ["free", "pro"] },
+      { key: "country", from: "country", values: ["nl", "de"] }
+    ]);
+    const labels = await enumerateBucketLabels(testId, config.ctx?.dims);
+    // A visitor with both dimensions: caller part hashed, auto part
+    // composed on top, exactly as resolveIdentity does it.
+    const key = await composeBucketKey(
+      testId,
+      await bucketKey(testId, { plan: "pro" }),
+      { country: "nl" }
+    );
+    expect(labels.get(key!)).toBe("plan=pro, country=nl");
+    // A visitor with only the derived dimension.
+    const autoOnly = await composeBucketKey(testId, null, { country: "de" });
+    expect(labels.get(autoOnly!)).toBe("country=de");
+    // (2 plans + absent) x (2 countries + absent), minus the empty one.
+    expect(labels.size).toBe(8);
+  });
+
+  it("leaves free-form dimensions unlabeled without giving up on the rest", async () => {
+    const config = configWithDims([
+      { key: "persona" },
+      { key: "plan", values: ["free", "pro"] }
+    ]);
+    const labels = await enumerateBucketLabels(testId, config.ctx?.dims);
+    expect(labels.get(await bucketKey(testId, { plan: "free" }))).toBe(
+      "plan=free"
+    );
+    // A bucket that includes the free-form dimension cannot be matched.
+    expect(
+      labels.get(await bucketKey(testId, { persona: "power", plan: "free" }))
+    ).toBeUndefined();
+  });
+
+  it("refuses spaces too large to sweep completely", async () => {
+    const config = configWithDims([
+      { key: "city", values: Array.from({ length: 40 }, (_, i) => `c${i}`) },
+      { key: "tz", values: Array.from({ length: 40 }, (_, i) => `t${i}`) }
+    ]);
+    // 41 x 41 > 1024: labeling half the buckets would read as meaning.
+    expect((await enumerateBucketLabels(testId, config.ctx?.dims)).size).toBe(
+      0
+    );
+    expect((await enumerateBucketLabels(testId, undefined)).size).toBe(0);
   });
 });
 

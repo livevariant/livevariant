@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
+import { streamSSE } from "hono/streaming";
 import {
   assetIdFromUrl,
   autoContextDisabled,
@@ -143,6 +144,12 @@ export interface AppOptions {
    * cookieless deployment.
    */
   browserIdCookie?: boolean;
+  /**
+   * How often GET /stats/:cfg/stream re-reads the event log to look for
+   * something new to push. Injectable so tests do not wait wall-clock
+   * seconds; deployments keep the default.
+   */
+  statsStreamIntervalMs?: number;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -156,6 +163,14 @@ const MAX_PRIOR_STRENGTH = 50;
 
 /** Redirects and pixels must never be cached: they are per-visitor. */
 const NO_STORE = "no-store, private";
+
+/**
+ * A stats stream re-reads the log this many times, then closes and lets
+ * the client reconnect: at the default interval that is ~30 minutes, long
+ * enough that a watched dashboard never notices, short enough that an
+ * abandoned tab's Worker is reclaimed.
+ */
+const MAX_STREAM_TICKS = 360;
 
 export function createApp(options: AppOptions): Hono {
   const service: TestBackend =
@@ -1104,8 +1119,66 @@ export function createApp(options: AppOptions): Hono {
       return c.json({ error: "stats secret required" }, 401);
     }
     return c.json(
-      await service.stats(paramsFromConfig(decoded), labelsFromConfig(decoded))
+      await service.stats(
+        paramsFromConfig(decoded),
+        labelsFromConfig(decoded),
+        decoded.config.ctx?.dims
+      )
     );
+  });
+
+  /**
+   * Live stats over Server-Sent Events: the full /stats payload as a
+   * `stats` event immediately, then again whenever it changes, with a
+   * `ping` between unchanged reads so proxies keep the connection.
+   *
+   * The event log is re-read each interval, which is the same cost the
+   * refresh button had; the win is that the dashboard no longer chooses
+   * between stale numbers and hammering refresh. The connection closes
+   * itself after MAX_STREAM_TICKS reads (a dashboard reconnects
+   * transparently), so an abandoned tab cannot hold a Worker forever.
+   *
+   * Authorization is the Bearer secret, same as /stats. EventSource
+   * cannot send headers, so the dashboard consumes this with a streaming
+   * fetch; the secret stays out of the URL either way (query params land
+   * in access logs).
+   */
+  app.get("/stats/:cfg/stream", async c => {
+    const result = await decodeOr404(c.req.param("cfg"));
+    if ("error" in result) {
+      return result.error;
+    }
+    const { decoded } = result;
+    if (!(await authorized(c, decoded))) {
+      return c.json({ error: "stats secret required" }, 401);
+    }
+    const interval = options.statsStreamIntervalMs ?? 5000;
+    const params = paramsFromConfig(decoded);
+    const labels = labelsFromConfig(decoded);
+    const ctxDims = decoded.config.ctx?.dims;
+    return streamSSE(c, async stream => {
+      let sent = "";
+      for (let tick = 0; tick < MAX_STREAM_TICKS && !stream.aborted; tick++) {
+        let payload: string;
+        try {
+          payload = JSON.stringify(
+            await service.stats(params, labels, ctxDims)
+          );
+        } catch {
+          // A transient backend failure must not kill the stream with a
+          // half-written event; skip the tick and let the next one heal.
+          await stream.sleep(interval);
+          continue;
+        }
+        if (payload !== sent) {
+          await stream.writeSSE({ event: "stats", data: payload });
+          sent = payload;
+        } else {
+          await stream.writeSSE({ event: "ping", data: "" });
+        }
+        await stream.sleep(interval);
+      }
+    });
   });
 
   app.post("/recompute/:cfg", async c => {
