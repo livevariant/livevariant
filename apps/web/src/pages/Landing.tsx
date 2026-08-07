@@ -909,13 +909,14 @@ sub.textContent = test.slots.sub.text;`;
 
 /* ------------------------------------------------------------------ */
 
-/* The URL strip: the full template spelling of the same two-slot test
-   the conversation builds, named slots included. Writing these
-   parameters IS creating the test, so the strip shows every fixed part
-   a newsletter template carries; v= values are tinted per variant, the
+/* The URL strip: the two serve links of the same two-slot test the
+   conversation builds, in full. Writing these parameters IS creating
+   the test, so both links carry the complete config (named slots,
+   named variants, kh, merge tag) and differ only in which element
+   their slot= renders; v=/vn= pairs are tinted per variant, the
    machinery stays ink. */
-const DEMO_URL: { text: string; variant?: number }[] = [
-  { text: "https://livevariant.link/s?s=hero" },
+const DEMO_CONFIG: { text: string; variant?: number }[] = [
+  { text: "s=hero" },
   { text: "&v=a.jpg&vn=packshot", variant: 0 },
   { text: "&v=b.jpg&vn=cafe", variant: 1 },
   { text: "&v=c.jpg&vn=fireside", variant: 2 },
@@ -924,8 +925,27 @@ const DEMO_URL: { text: string; variant?: number }[] = [
   { text: "&v=y.jpg&vn=ritual", variant: 1 },
   { text: "&v=z.jpg&vn=brew", variant: 2 },
   { text: "&kh=<hash>" },
-  { text: "&id={{email_or_any_id}}" },
-  { text: "&auto=0" }
+  { text: "&id={{email_or_any_id}}" }
+];
+
+/* The same config three times: each slot's image link serves its
+   element, the click link records the win and redirects. */
+const DEMO_LINKS = [
+  {
+    label: "img hero",
+    base: "https://livevariant.link/s?",
+    tail: "&auto=0&slot=hero"
+  },
+  {
+    label: "img cta",
+    base: "https://livevariant.link/s?",
+    tail: "&auto=0&slot=cta"
+  },
+  {
+    label: "click",
+    base: "https://livevariant.link/c?",
+    tail: "&to=https://dailybrew.shop"
+  }
 ];
 
 export function Landing() {
@@ -989,24 +1009,32 @@ export function Landing() {
         />
         {/* Each parameter group is an unbreakable unit, so line wraps
             land between parameters (&s=cta never splits into s=c/ta). */}
-        <p className="mx-auto mt-10 max-w-4xl font-mono text-sm sm:text-base">
-          {DEMO_URL.map((part, i) => (
-            <span
-              key={i}
-              className="inline-block"
-              style={
-                part.variant !== undefined
-                  ? { color: VARIANT_COLORS[part.variant] }
-                  : undefined
-              }
-            >
-              {part.text}
-            </span>
+        <div className="mx-auto mt-10 max-w-4xl space-y-5">
+          {DEMO_LINKS.map(link => (
+            <p key={link.label} className="font-mono text-sm sm:text-base">
+              <span className="mr-3 text-muted-foreground">{link.label}</span>
+              <span className="inline-block">{link.base}</span>
+              {DEMO_CONFIG.map((part, i) => (
+                <span
+                  key={i}
+                  className="inline-block"
+                  style={
+                    part.variant !== undefined
+                      ? { color: VARIANT_COLORS[part.variant] }
+                      : undefined
+                  }
+                >
+                  {part.text}
+                </span>
+              ))}
+              <span className="inline-block">{link.tail}</span>
+            </p>
           ))}
-        </p>
+        </div>
         <p className="mx-auto mt-6 max-w-2xl font-mono text-xs text-muted-foreground">
-          three links per email: this URL with &slot=hero in one image,
-          &slot=cta in the other, and the /c click link around them
+          s= declares an element of the test; slot= picks which one this link
+          renders. Wire all three into the template once, swap the v= URLs next
+          campaign, and it is a fresh test.
         </p>
       </section>
 

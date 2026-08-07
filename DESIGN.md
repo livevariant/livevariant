@@ -145,14 +145,18 @@ blog`, `country: DE (merge tag)`), each lane internally sharing its
    Caption: "three variants, competing inside every audience segment,
    forever." **Semantics rule: lanes are segments, bands are variants.
    Never color a lane by variant.**
-5. **URL strip:** the full template spelling of the same two-slot test
-   (`/s?s=hero&v=…&vn=packshot…&s=cta&…&kh=<hash>&id={{email_or_any_id}}&auto=0`),
-   named slots and named variants included, in mono, wrapped rather
-   than scrolled, each `v=…&vn=…` pair tinted per variant. Sub says
-   composing the parameters IS creating the test (the config is the
-   identity; `kh` added once makes every campaign readable). Mono
-   footnote: three links per email, `slot=hero` / `slot=cta` serve
-   links plus the `/c` click link.
+5. **URL strip:** the THREE full template links of the same two-slot
+   test, labeled `img hero` / `img cta` / `click`, each carrying the
+   complete template spelling (named slots, `v=…&vn=…` pairs tinted
+   per variant, `kh=<hash>`, `id={{email_or_any_id}}`) and differing
+   only in the tail: `&auto=0&slot=hero`, `&auto=0&slot=cta`, and the
+   click link on `/c` ending `&to=<destination>`. Mono, wrapped
+   between parameter groups, never inside one. Sub says composing the
+   parameters IS creating the test (the config is the identity; `kh`
+   added once makes every campaign readable). Mono footnote explains
+   `s=` declares an element while `slot=` picks which one the link
+   renders, and that swapping `v=` URLs next campaign mints a fresh
+   test.
 6. **Install card, tabbed, prompt-first:** tabs `ask any AI agent`
    (default: a copyable prompt naming the deployment, zero install),
    `skills` (`npx skills add livevariant/livevariant`), `Claude Code /
