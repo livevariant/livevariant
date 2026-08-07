@@ -10,6 +10,7 @@ const OPEN_TOOLS = TOOLS.filter(t => t.scope !== "account");
 import { mulberry32 } from "@livevariant/core";
 import { createApp } from "./app.js";
 import { MemoryStore } from "./store/memory.js";
+import type { AccountsProvider } from "./accounts-port.js";
 
 /**
  * The hosted MCP endpoint, driven by the real MCP client over real HTTP
@@ -32,6 +33,33 @@ async function connect() {
     })
   );
   return client;
+}
+
+function appWithAccounts() {
+  const provider: AccountsProvider = {
+    sessionOrgIds: async req =>
+      req.headers.get("cookie")?.includes("session=yes") ? ["org-1"] : [],
+    keyPolicy: async () => null,
+    testOrg: async () => null,
+    listTests: async () => ({ tests: [], nextCursor: null }),
+    registerWithSecret: async () => ({
+      ok: true,
+      org: "Example Org",
+      testId: "a".repeat(64)
+    }),
+    testStatusWithSecret: async () => ({
+      ok: true,
+      testId: "a".repeat(64),
+      claimed: false,
+      org: null,
+      destinations: []
+    })
+  };
+  return createApp({
+    store: new MemoryStore(),
+    rng: mulberry32(42),
+    provider
+  });
 }
 
 describe("MCP over HTTP", () => {
@@ -84,5 +112,14 @@ describe("MCP over HTTP", () => {
     );
     const { tools } = await client.listTools();
     expect(tools).toHaveLength(OPEN_TOOLS.length);
+  });
+
+  it("advertises account-scoped tools when the deployment has accounts", async () => {
+    app = appWithAccounts();
+    const client = await connect();
+    const { tools } = await client.listTools();
+    expect(tools.map(t => t.name).sort()).toEqual(
+      TOOLS.map(t => t.name).sort()
+    );
   });
 });

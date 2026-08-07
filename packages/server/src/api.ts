@@ -395,7 +395,7 @@ export function createApi(options: ApiOptions): Hono {
       // no reason to hold a stream open for a request/response exchange.
       enableJsonResponse: true
     });
-    const server = createServer(contextFor(c.req.url));
+    const server = createServer(contextFor(c.req.url, c.req.raw));
     await server.connect(transport);
     try {
       return await transport.handleRequest(c.req.raw);

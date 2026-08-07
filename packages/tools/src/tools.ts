@@ -151,7 +151,7 @@ export const buildTest = defineTool({
     "The stats secret is returned once and never again. Only its hash goes " +
     "into the config, so nobody, including this service, can recover it. Give " +
     "it to the person who will read the results.",
-  readOnly: true,
+  readOnly: false,
   reachesNetwork: false,
   input: z
     .object({
