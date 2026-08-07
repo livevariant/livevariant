@@ -909,18 +909,24 @@ sub.textContent = test.slots.sub.text;`;
 
 /* ------------------------------------------------------------------ */
 
-const DEMO_URL = {
-  base: "https://livevariant.link/s?",
-  parts: [
-    { text: "s=hero", color: undefined },
-    { text: "&" },
-    { text: "v=a.jpg", color: VARIANT_COLORS[0] },
-    { text: "&" },
-    { text: "v=b.jpg", color: VARIANT_COLORS[1] },
-    { text: "&" },
-    { text: "v=c.jpg", color: VARIANT_COLORS[2] }
-  ]
-};
+/* The URL strip: the full template spelling of the same two-slot test
+   the conversation builds, named slots included. Writing these
+   parameters IS creating the test, so the strip shows every fixed part
+   a newsletter template carries; v= values are tinted per variant, the
+   machinery stays ink. */
+const DEMO_URL: { text: string; variant?: number }[] = [
+  { text: "https://livevariant.link/s?s=hero" },
+  { text: "&v=a.jpg&vn=packshot", variant: 0 },
+  { text: "&v=b.jpg&vn=cafe", variant: 1 },
+  { text: "&v=c.jpg&vn=fireside", variant: 2 },
+  { text: "&s=cta" },
+  { text: "&v=x.jpg&vn=shop", variant: 0 },
+  { text: "&v=y.jpg&vn=ritual", variant: 1 },
+  { text: "&v=z.jpg&vn=brew", variant: 2 },
+  { text: "&kh=<hash>" },
+  { text: "&id={{email_or_any_id}}" },
+  { text: "&auto=0" }
+];
 
 export function Landing() {
   const serveUrl = useServeUrl();
@@ -979,18 +985,25 @@ export function Landing() {
       <section className="border-t border-border py-14 text-center">
         <SectionTitle
           title="The whole test lives in the URL."
-          sub="Paste it in your newsletter or website; every recipient sticks to their combination, and it keeps optimizing."
+          sub="Compose it from plain parameters right in your newsletter template: no create step, because the configuration is the test's identity. Swap the variant URLs and each campaign becomes its own fresh test; add your stats key hash (kh) once and one secret reads them all."
         />
-        <p className="mt-10 overflow-x-auto whitespace-nowrap pb-1 font-mono text-sm sm:text-xl">
-          {DEMO_URL.base}
-          {DEMO_URL.parts.map((part, i) => (
+        <p className="mx-auto mt-10 max-w-4xl break-all font-mono text-sm sm:text-base">
+          {DEMO_URL.map((part, i) => (
             <span
               key={i}
-              style={part.color ? { color: part.color } : undefined}
+              style={
+                part.variant !== undefined
+                  ? { color: VARIANT_COLORS[part.variant] }
+                  : undefined
+              }
             >
               {part.text}
             </span>
           ))}
+        </p>
+        <p className="mx-auto mt-6 max-w-2xl font-mono text-xs text-muted-foreground">
+          three links per email: this URL with &slot=hero in one image,
+          &slot=cta in the other, and the /c click link around them
         </p>
       </section>
 

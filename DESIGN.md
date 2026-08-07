@@ -145,9 +145,14 @@ blog`, `country: DE (merge tag)`), each lane internally sharing its
    Caption: "three variants, competing inside every audience segment,
    forever." **Semantics rule: lanes are segments, bands are variants.
    Never color a lane by variant.**
-5. **URL strip:** `https://livevariant.link/s?s=hero&v=a.jpg&v=b.jpg&v=c.jpg`
-   in large mono, `v=` params tinted per variant. Caption: "the whole
-   test lives in this URL."
+5. **URL strip:** the full template spelling of the same two-slot test
+   (`/s?s=hero&v=…&vn=packshot…&s=cta&…&kh=<hash>&id={{email_or_any_id}}&auto=0`),
+   named slots and named variants included, in mono, wrapped rather
+   than scrolled, each `v=…&vn=…` pair tinted per variant. Sub says
+   composing the parameters IS creating the test (the config is the
+   identity; `kh` added once makes every campaign readable). Mono
+   footnote: three links per email, `slot=hero` / `slot=cta` serve
+   links plus the `/c` click link.
 6. **Install card, tabbed, prompt-first:** tabs `ask any AI agent`
    (default: a copyable prompt naming the deployment, zero install),
    `skills` (`npx skills add livevariant/livevariant`), `Claude Code /
@@ -195,3 +200,4 @@ Cowork`, `Codex`, `any agent (MCP)`. MCP is the fallback tab, never
 | 2026-08-07 | First band shows the setup conversation beside the email window           | The flow (plan, approve, build) is the product story; the email is proof |
 | 2026-08-07 | Conversation and newsletter are separate headed bands, stacked            | Two focal artifacts in one band blurred both; each earns its own header  |
 | 2026-08-07 | Install card leads with a paste-into-any-AI prompt; manual buttons follow | Naming the site to any agent is the widest zero-install funnel           |
+| 2026-08-07 | URL strip shows the full template spelling, wrapped, slots and vn named   | The no-create-step claim needs the real parameters visible on screen     |
