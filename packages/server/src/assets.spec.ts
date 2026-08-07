@@ -397,3 +397,40 @@ describe("/choose asset signatures (the SDK contract)", () => {
     });
   });
 });
+
+describe("manage-page preview signing", () => {
+  it("signs own assets for the secret holder and skips foreign hosts", async () => {
+    const { url } = await upload();
+    const { encoded } = await encodeConfig({
+      v: 2,
+      slots: {
+        hero: [
+          { name: "ours", image: url },
+          { name: "theirs", image: "https://cdn.example/other.png" }
+        ]
+      },
+      statsKeyHash: await hashStatsSecret(STATS_SECRET)
+    } as TestConfigInput);
+
+    // Same gate as /stats: no secret, no creative.
+    const denied = await app.request(
+      `https://livevariant.com/stats/${encoded}/assets`,
+      { headers: { authorization: "Bearer wrong-secret" } }
+    );
+    expect(denied.status).toBe(401);
+
+    const res = await app.request(
+      `https://livevariant.com/stats/${encoded}/assets`,
+      { headers: { authorization: `Bearer ${STATS_SECRET}` } }
+    );
+    expect(res.status).toBe(200);
+    const { assets } = (await res.json()) as {
+      assets: Record<string, string>;
+    };
+    // Foreign images need no signing and must not be listed; the own
+    // asset maps to a URL that actually serves.
+    expect(Object.keys(assets)).toEqual([url]);
+    const img = await app.request(assets[url]);
+    expect(img.status).toBe(200);
+  });
+});

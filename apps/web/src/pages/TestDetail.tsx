@@ -22,18 +22,78 @@ import {
 import { useResolvedTest, type ResolvedTest } from "@/lib/resolve-test";
 import type { Variant } from "@livevariant/core";
 
+/** Attribute-position escaping for URLs embedded into a srcdoc. */
+function escapeAttr(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
 /**
- * One variant, previewed by what it IS. Images render as themselves
- * (with a fallback for protected assets, which only serve inside the
- * test's flow), destinations as links, text as text. HTML and markdown
- * are deliberately shown as source: this page's URL embeds the config,
- * so rendering config-supplied markup here would let any crafted manage
- * link run markup on this origin.
+ * Variant content is an UNTRUSTED source: this page renders configs
+ * that arrive in anyone's manage URL. Everything remotely active
+ * (images from arbitrary hosts, author-supplied HTML) therefore renders
+ * inside a fully sandboxed iframe: `sandbox=""` runs no script and
+ * gives the document an opaque origin, so nothing in it can reach our
+ * JS, cookies or storage. The meta referrer keeps this dashboard's URL
+ * out of foreign image servers' logs.
  */
-function VariantTile({ variant, index }: { variant: Variant; index: number }) {
-  const [imageBroken, setImageBroken] = useState(false);
+function SandboxPreview({ body, title }: { body: string; title: string }) {
+  const doc =
+    `<!doctype html><meta charset="utf-8">` +
+    `<meta name="referrer" content="no-referrer">` +
+    `<style>html,body{margin:0;padding:4px;background:transparent;` +
+    `font:12px system-ui}img{max-width:100%;max-height:150px;display:block;` +
+    `margin:0 auto}</style>` +
+    body;
+  return (
+    <iframe
+      sandbox=""
+      srcDoc={doc}
+      title={title}
+      referrerPolicy="no-referrer"
+      loading="lazy"
+      className="h-40 w-full rounded border-0 bg-white"
+    />
+  );
+}
+
+/** Our own protected asset URLs: /a/<sha256> paths that 403 unsigned. */
+function isProtectedAssetUrl(url: string): boolean {
+  try {
+    return /^\/a\/[0-9a-f]{64}$/.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One variant, previewed by what it IS: images render as themselves
+ * (protected assets through a signed preview URL when the page holds
+ * the secret), destinations as links, text as text, HTML rendered but
+ * sandboxed. Markdown stays source: rendering it would mean an HTML
+ * conversion of untrusted input for cosmetic gain.
+ */
+function VariantTile({
+  variant,
+  index,
+  signedAssets
+}: {
+  variant: Variant;
+  index: number;
+  signedAssets: Record<string, string>;
+}) {
   const name = variant.name ?? `v${index + 1}`;
-  const inline = variant.html ?? variant.md ?? variant.text;
+  const image = variant.image
+    ? (signedAssets[variant.image] ?? variant.image)
+    : undefined;
+  const imageLocked =
+    variant.image !== undefined &&
+    signedAssets[variant.image!] === undefined &&
+    isProtectedAssetUrl(variant.image!);
+  const text = variant.md ?? variant.text;
   return (
     <div className="space-y-2 rounded-lg border p-3">
       <div className="flex items-baseline gap-2">
@@ -42,18 +102,17 @@ function VariantTile({ variant, index }: { variant: Variant; index: number }) {
           <span className="text-muted-foreground text-xs">control</span>
         )}
       </div>
-      {variant.image &&
-        (imageBroken ? (
+      {image &&
+        (imageLocked ? (
           <p className="text-muted-foreground text-xs">
-            Protected image asset (it only serves inside the test):{" "}
+            Protected image asset; open this page with the manage link (its
+            #fragment holds the secret) to preview it:{" "}
             <span className="font-mono break-all">{variant.image}</span>
           </p>
         ) : (
-          <img
-            src={variant.image}
-            alt={`Variant ${name}`}
-            className="max-h-40 w-full rounded object-contain"
-            onError={() => setImageBroken(true)}
+          <SandboxPreview
+            body={`<img src="${escapeAttr(image)}" alt="">`}
+            title={`Variant ${name} image`}
           />
         ))}
       {variant.url && (
@@ -69,9 +128,12 @@ function VariantTile({ variant, index }: { variant: Variant; index: number }) {
           </a>
         </p>
       )}
-      {inline !== undefined && (
+      {variant.html !== undefined && (
+        <SandboxPreview body={variant.html} title={`Variant ${name} HTML`} />
+      )}
+      {text !== undefined && (
         <pre className="bg-muted max-h-32 overflow-auto rounded p-2 text-xs whitespace-pre-wrap">
-          {inline.length > 400 ? `${inline.slice(0, 400)}…` : inline}
+          {text.length > 400 ? `${text.slice(0, 400)}…` : text}
         </pre>
       )}
       {variant.redirectUrl && (
@@ -90,6 +152,39 @@ function VariantTile({ variant, index }: { variant: Variant; index: number }) {
  */
 function VariantsCard({ test }: { test: ResolvedTest }) {
   const slots = Object.entries(test.config?.slots ?? {});
+  const [signedAssets, setSignedAssets] = useState<Record<string, string>>({});
+
+  // Protected assets 403 without a signature; holding the stats secret
+  // entitles this page to short-lived preview URLs (same authority as
+  // reading the stats themselves).
+  const wantsSigning =
+    test.statsSecret !== null &&
+    slots.some(([, variants]) =>
+      variants.some(v => v.image && isProtectedAssetUrl(v.image))
+    );
+  useEffect(() => {
+    if (!wantsSigning) {
+      setSignedAssets({});
+      return;
+    }
+    let live = true;
+    fetch(`/stats/${test.encoded}/assets`, {
+      headers: { authorization: `Bearer ${test.statsSecret}` }
+    })
+      .then(res => (res.ok ? res.json() : { assets: {} }))
+      .then((body: { assets?: Record<string, string> }) => {
+        if (live) {
+          setSignedAssets(body.assets ?? {});
+        }
+      })
+      .catch(() => {
+        // Previews degrade to the locked notice; the page still works.
+      });
+    return () => {
+      live = false;
+    };
+  }, [test, wantsSigning]);
+
   if (slots.length === 0) {
     return null;
   }
@@ -111,7 +206,12 @@ function VariantsCard({ test }: { test: ResolvedTest }) {
             )}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {variants.map((variant, i) => (
-                <VariantTile key={i} variant={variant} index={i} />
+                <VariantTile
+                  key={i}
+                  variant={variant}
+                  index={i}
+                  signedAssets={signedAssets}
+                />
               ))}
             </div>
           </div>
@@ -183,10 +283,22 @@ function AccountCard({
   const activeOrgId = account.me?.activeOrgId ?? orgs[0]?.id ?? null;
   const chosenOrg = targetOrg ?? activeOrgId;
 
+  // Same staleness rule for the just-claimed flag and org choice: they
+  // describe the test they were set for, not whichever comes next.
+  // Keyed on the test's IDENTITY: the object is replaced on unrelated
+  // updates (saving to the browser), which must not wipe fresh state.
+  useEffect(() => {
+    setClaimed(false);
+    setTargetOrg(null);
+  }, [test.testId]);
+
   // The registry, not component state, knows whether this test is
   // already claimed: without asking, every reload of a claimed test's
-  // manage page would re-offer the claim button forever.
+  // manage page would re-offer the claim button forever. The reset
+  // matters when navigation swaps the test within this mounted route:
+  // the previous test's verdict must never describe the next one.
   useEffect(() => {
+    setStatus(null);
     if (!test.statsSecret || !account.available) {
       return;
     }
@@ -203,7 +315,7 @@ function AccountCard({
     return () => {
       live = false;
     };
-  }, [test, account.available, claimed]);
+  }, [test.encoded, test.statsSecret, account.available, claimed]);
 
   // Claiming is EXPLICIT: with several organizations, an automatic
   // claim would silently pick one of them, and a test filed under the

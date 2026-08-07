@@ -322,15 +322,20 @@ describe("the manage page for a multi-slot test", () => {
     const container = render(`/manage/${encoded}`);
     await until(() => container.textContent?.includes("Variants") ?? false);
 
-    // Image variants render as an image, or as the protected-asset
-    // fallback once the (unresolvable in this test) load errors; either
-    // way the tile is present. Inline variants show their text and the
-    // control is marked.
+    // Foreign image variants render inside a fully sandboxed iframe
+    // (no scripts, opaque origin, no referrer): the config arrived in
+    // an attacker-authorable URL, so nothing in it may touch our JS.
     await until(
       () =>
-        container.querySelector('img[src="https://cdn.example/warm.png"]') !==
-          null ||
-        (container.textContent?.includes("Protected image asset") ?? false)
+        container.querySelector('iframe[title="Variant warm image"]') !== null
+    );
+    const frame = container.querySelector(
+      'iframe[title="Variant warm image"]'
+    ) as HTMLIFrameElement;
+    expect(frame.getAttribute("sandbox")).toBe("");
+    expect(frame.getAttribute("srcdoc")).toContain("cdn.example/warm.png");
+    expect(frame.getAttribute("srcdoc")).toContain(
+      'name="referrer" content="no-referrer"'
     );
     expect(container.textContent).toContain("warm");
     expect(container.textContent).toContain("Buy now");
@@ -345,6 +350,43 @@ describe("the manage page for a multi-slot test", () => {
       expect(input.value).toContain("slot=");
     }
     expect(container.querySelector("input[aria-label='Serve']")).toBeNull();
+  });
+
+  it("previews protected assets through signed URLs, or says why not", async () => {
+    const statsSecret = generateStatsSecret();
+    const own = `${window.location.origin}/a/${"c".repeat(64)}`;
+    const { encoded } = await encodeConfig({
+      v: 2,
+      variants: [
+        { name: "locked", image: own },
+        { name: "open", image: "https://cdn.example/open.png" }
+      ],
+      statsKeyHash: await hashStatsSecret(statsSecret)
+    } as never);
+    window.location.hash = `#${statsSecret}`;
+
+    // Without a signing answer the protected tile explains itself.
+    stubServer({ "/stats/": STATS_OK });
+    const locked = render(`/manage/${encoded}`);
+    await until(
+      () => locked.textContent?.includes("Protected image asset") ?? false
+    );
+
+    // With one, the tile renders the SIGNED URL, still sandboxed.
+    stubServer({
+      [`/stats/${encoded}/assets`]: () =>
+        Response.json({ assets: { [own]: `${own}?e=99&s=sig` } }),
+      "/stats/": STATS_OK
+    });
+    const signed = render(`/manage/${encoded}`);
+    await until(
+      () =>
+        signed.querySelector('iframe[title="Variant locked image"]') !== null
+    );
+    const frame = signed.querySelector(
+      'iframe[title="Variant locked image"]'
+    ) as HTMLIFrameElement;
+    expect(frame.getAttribute("srcdoc")).toContain("?e=99&amp;s=sig");
   });
 });
 
