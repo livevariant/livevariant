@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Hono } from "hono";
 import { TOOLS, toolPath } from "@livevariant/tools";
-import { mulberry32 } from "@livevariant/core";
+import {
+  configFromParams,
+  encodeConfig,
+  hashStatsSecret,
+  mulberry32
+} from "@livevariant/core";
 import { createApp } from "./app.js";
 import { SERVER_VERSION } from "./version.js";
 import { MemoryStore } from "./store/memory.js";
@@ -413,7 +418,6 @@ describe("the ESP template flow, end to end", () => {
 
     // Filled with the exact variants the test was built from, the
     // template spelling IS the built test, not a lookalike.
-    const { configFromParams } = await import("@livevariant/core");
     const spelled = await configFromParams(
       new URL(fill(template.hero.imageSrc, values)).searchParams
     );
@@ -467,8 +471,6 @@ describe("the ESP template flow, end to end", () => {
 
     // Different variant URLs, different identity: September is its own
     // test with its own empty history...
-    const { configFromParams, encodeConfig } =
-      await import("@livevariant/core");
     const spelled = await configFromParams(
       new URL(fill(template.hero.imageSrc, nextCampaign)).searchParams
     );
@@ -491,8 +493,6 @@ describe("a Settings-minted stats key, end to end", () => {
     // builder, its kh wired into a hand-written template. Serving,
     // clicking and reading stats must all work from nothing but the
     // secret and its hash.
-    const { hashStatsSecret, configFromParams, encodeConfig } =
-      await import("@livevariant/core");
     const secret = "settings-minted-secret";
     const kh = await hashStatsSecret(secret);
     const spelled =
