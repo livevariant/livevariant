@@ -361,3 +361,169 @@ describe("agent discovery routes", () => {
     expect(body).toContain("https://self.example/api/v1/");
   });
 });
+
+describe("the ESP template flow, end to end", () => {
+  const HERO_A = "https://example.com/hero-warm";
+  const HERO_B = "https://example.com/hero-cool";
+  const CTA_A = "https://example.com/cta-go";
+  const CTA_B = "https://example.com/cta-wait";
+  const LANDING = "https://example.com/thanks";
+
+  async function buildTemplate() {
+    const res = await post(toolPath("build_test"), {
+      slots: {
+        hero: [
+          { url: HERO_A, name: "warm" },
+          { url: HERO_B, name: "cool" }
+        ],
+        cta: [
+          { url: CTA_A, name: "go" },
+          { url: CTA_B, name: "wait" }
+        ]
+      },
+      context: [{ key: "source", from: "utm_source" }],
+      redirectUrl: LANDING
+    });
+    expect(res.status).toBe(200);
+    return (await res.json()) as Record<string, any>;
+  }
+
+  const fill = (link: string, values: Record<string, string>) =>
+    link.replace(/\{\{([a-z0-9_]+)\}\}/g, (_, key: string) =>
+      encodeURIComponent(values[key] ?? key)
+    );
+
+  it("serves both slots and rewards the click as ONE test", async () => {
+    // The whole promise of the template: the links an ESP renders from
+    // build_test's emailTemplate really serve, really share a sticky
+    // combination, and the slot-less click really lands its conversion
+    // on the same test. This drives the actual app, no mocks.
+    const built = await buildTemplate();
+    const values = {
+      hero_variant_1_url: HERO_A,
+      hero_variant_2_url: HERO_B,
+      cta_variant_1_url: CTA_A,
+      cta_variant_2_url: CTA_B,
+      recipient_id: "reader-1"
+    };
+    const template = built.emailTemplate as Record<
+      string,
+      { imageSrc: string; linkHref: string }
+    >;
+
+    // Filled with the exact variants the test was built from, the
+    // template spelling IS the built test, not a lookalike.
+    const { configFromParams } = await import("@livevariant/core");
+    const spelled = await configFromParams(
+      new URL(fill(template.hero.imageSrc, values)).searchParams
+    );
+    expect(spelled.testId).toBe(built.testId);
+
+    const hero = await app.request(fill(template.hero.imageSrc, values));
+    expect(hero.status).toBe(302);
+    expect(hero.headers.get("location")).toMatch(/hero-(warm|cool)/);
+    const cta = await app.request(fill(template.cta.imageSrc, values));
+    expect(cta.status).toBe(302);
+    expect(cta.headers.get("location")).toMatch(/cta-(go|wait)/);
+
+    // The click link carries no slot and still lands on the landing
+    // page, rewarding the combination the images served.
+    expect(template.hero.linkHref).toBe(template.cta.linkHref);
+    const click = await app.request(fill(template.hero.linkHref, values), {
+      headers: { accept: "text/html" }
+    });
+    expect(click.status).toBe(302);
+    expect(click.headers.get("location")).toContain(LANDING);
+
+    const stats = (await (
+      await app.request(`/stats/${built.config}`, {
+        headers: { authorization: `Bearer ${built.statsSecret}` }
+      })
+    ).json()) as Record<string, any>;
+    expect(stats.totalAssignments).toBe(1);
+    const conversions = (stats.combinations as any[]).reduce(
+      (sum, combo) => sum + combo.conversions,
+      0
+    );
+    expect(conversions).toBe(1);
+  });
+
+  it("the next campaign's URLs mint a fresh test the same secret reads", async () => {
+    const built = await buildTemplate();
+    const nextCampaign = {
+      hero_variant_1_url: "https://example.com/sept-warm",
+      hero_variant_2_url: "https://example.com/sept-cool",
+      cta_variant_1_url: CTA_A,
+      cta_variant_2_url: CTA_B,
+      recipient_id: "reader-2"
+    };
+    const template = built.emailTemplate as Record<
+      string,
+      { imageSrc: string; linkHref: string }
+    >;
+    const serve = await app.request(fill(template.hero.imageSrc, nextCampaign));
+    expect(serve.status).toBe(302);
+    expect(serve.headers.get("location")).toMatch(/sept-(warm|cool)/);
+
+    // Different variant URLs, different identity: September is its own
+    // test with its own empty history...
+    const { configFromParams, encodeConfig } =
+      await import("@livevariant/core");
+    const spelled = await configFromParams(
+      new URL(fill(template.hero.imageSrc, nextCampaign)).searchParams
+    );
+    expect(spelled.testId).not.toBe(built.testId);
+
+    // ...readable with the ORIGINAL stats secret, because the template
+    // carries the same kh into every campaign it mints.
+    const { encoded } = await encodeConfig(spelled.config);
+    const stats = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${built.statsSecret}` }
+    });
+    expect(stats.status).toBe(200);
+    expect(((await stats.json()) as any).totalAssignments).toBe(1);
+  });
+});
+
+describe("a Settings-minted stats key, end to end", () => {
+  it("reads every template campaign built from a hand-held secret", async () => {
+    // The Settings flow: a key generated (or invented) without the
+    // builder, its kh wired into a hand-written template. Serving,
+    // clicking and reading stats must all work from nothing but the
+    // secret and its hash.
+    const { hashStatsSecret, configFromParams, encodeConfig } =
+      await import("@livevariant/core");
+    const secret = "settings-minted-secret";
+    const kh = await hashStatsSecret(secret);
+    const spelled =
+      `s=hero&v=${encodeURIComponent(A)}&vn=warm` +
+      `&v=${encodeURIComponent(B)}&vn=cool` +
+      `&s=cta&v=${encodeURIComponent(A)}&vn=go` +
+      `&v=${encodeURIComponent(B)}&vn=wait` +
+      `&r=${encodeURIComponent("https://example.com/lp")}&kh=${kh}`;
+
+    const hero = await app.request(`/s?${spelled}&auto=0&id=r1&slot=hero`);
+    expect(hero.status).toBe(302);
+    const click = await app.request(`/c?${spelled}&auto=0&id=r1`, {
+      headers: { accept: "text/html" }
+    });
+    expect(click.status).toBe(302);
+    expect(click.headers.get("location")).toContain("https://example.com/lp");
+
+    const { config } = await configFromParams(
+      new URLSearchParams(`${spelled}`)
+    );
+    const { encoded } = await encodeConfig(config);
+    const stats = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${secret}` }
+    });
+    expect(stats.status).toBe(200);
+    const body = (await stats.json()) as Record<string, any>;
+    expect(body.totalAssignments).toBe(1);
+    const conversions = (body.combinations as any[]).reduce(
+      (sum, combo) => sum + combo.conversions,
+      0
+    );
+    expect(conversions).toBe(1);
+  });
+});

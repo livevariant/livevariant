@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { Bookmark, Check, Copy, UserPlus } from "lucide-react";
-import { buildTestUrls } from "@livevariant/core";
+import { buildTestUrls, configToTemplateQuery } from "@livevariant/core";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -452,6 +452,10 @@ export function TestDetail() {
   );
   const multiSlot = test.slots.length > 1;
   const slotParam = (slot: string | null) => (slot ? `slot=${slot}&` : "");
+  // The ESP template is derived from the REAL config, so slots, names,
+  // dims and the stats key all survive into future campaigns; null when
+  // the config has inline content the parameter form cannot express.
+  const templateQuery = test.config ? configToTemplateQuery(test.config) : null;
   // Full encoded config: the snippet must be copy-paste runnable.
   const snippet = `import { createTest } from "@livevariant/sdk";
 
@@ -567,36 +571,48 @@ element.textContent = test.variant.text;`;
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {test.statsKeyHash && (
+          {templateQuery ? (
             <>
-              <CopyField
-                label="Image src (serve)"
-                value={`${test.serveUrl}/s?v={{variant_1_url}}&v={{variant_2_url}}&stamp=utm_content&auto=0&id={{recipient_id}}&kh=${test.statsKeyHash}`}
-              />
+              {(multiSlot ? test.slots : [null]).map(slot => (
+                <CopyField
+                  key={slot ?? "single"}
+                  label={slot ? `Image src (${slot})` : "Image src (serve)"}
+                  value={
+                    `${test.serveUrl}/s?${templateQuery}` +
+                    `&auto=0&id={{recipient_id}}` +
+                    (slot ? `&slot=${slot}` : "")
+                  }
+                />
+              ))}
               <CopyField
                 label="Link href (click)"
-                value={`${test.serveUrl}/c?v={{variant_1_url}}&v={{variant_2_url}}&r={{landing_url}}&stamp=utm_content&auto=0&id={{recipient_id}}&kh=${test.statsKeyHash}`}
+                value={`${test.serveUrl}/c?${templateQuery}&auto=0&id={{recipient_id}}`}
               />
+              <p className="text-muted-foreground text-sm">
+                Every link carries the identical config string; only the
+                trailing <code>slot=</code> differs, saying which element an
+                image renders (the click link needs none). Fill the{" "}
+                <code>{"{{…}}"}</code> fields through your ESP's template
+                editor: the variant image URLs, the landing page, and the
+                recipient merge tag. Swapping the variant URLs next campaign
+                automatically makes it a fresh test, while the shared{" "}
+                <code>kh</code> keeps every campaign readable with this one
+                stats secret. <code>ctx</code> dimensions and variant names ride
+                along, so segments and labels stay consistent across campaigns.
+              </p>
             </>
+          ) : (
+            <p className="text-muted-foreground text-sm">
+              This test has inline content or per-variant click destinations,
+              which the parameter form cannot express; use the encoded links
+              above instead.
+            </p>
           )}
           <p className="text-muted-foreground text-sm">
             <code>kh</code> is the <em>hash</em> of your stats secret, not the
             secret itself. It is already public in every serve URL, so it is
             safe in a link that reaches every recipient; the secret stays in the
             manage link above.
-          </p>
-          <p className="text-muted-foreground text-sm">
-            Add another <code>v=</code> for a third variant, <code>vn=</code> to
-            name them (they default to v1, v2, …), and <code>s=</code> to open a
-            second element (<code>s=hero&amp;v=…&amp;s=cta&amp;v=…</code>, each
-            link then adding <code>&amp;slot=</code> to say which element it
-            serves). <code>stamp=utm_content</code> writes the served variant
-            into that parameter on the way out, so the test shows up in your own
-            analytics without installing anything; drop it to turn that off. Any
-            parameter we do not recognize, <code>utm_source</code> and{" "}
-            <code>gclid</code> included, is carried through to the destination,
-            and <code>ctx=source:utm_source</code> turns a campaign tag into a
-            context dimension the bandit learns per segment.
           </p>
         </CardContent>
       </Card>

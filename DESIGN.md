@@ -145,18 +145,22 @@ blog`, `country: DE (merge tag)`), each lane internally sharing its
    Caption: "three variants, competing inside every audience segment,
    forever." **Semantics rule: lanes are segments, bands are variants.
    Never color a lane by variant.**
-5. **URL strip:** the THREE full template links of the same two-slot
-   test, labeled `img hero` / `img cta` / `click`, each carrying the
-   complete template spelling (named slots, `v=…&vn=…` pairs tinted
-   per variant, `kh=<hash>`, `id={{email_or_any_id}}`) and differing
-   only in the tail: `&auto=0&slot=hero`, `&auto=0&slot=cta`, and the
-   click link on `/c` ending `&to=<destination>`. Mono, wrapped
-   between parameter groups, never inside one. Sub says composing the
-   parameters IS creating the test (the config is the identity; `kh`
-   added once makes every campaign readable). Mono footnote explains
-   `s=` declares an element while `slot=` picks which one the link
-   renders, and that swapping `v=` URLs next campaign mints a fresh
-   test.
+5. **URL strip, definition then uses:** a `config` row spelling the
+   two-slot test one parameter group per line, annotated with muted
+   `// comments` (element declarations, a variant's image + stats
+   name, `kh=<your-stats-key>` as the stable yours-once value,
+   `id={{email_or_any_id}}` as the merge tag), `v=…&vn=…` pairs
+   tinted per variant. The click destination is `r=` INSIDE the shared
+   string (r is identity: it must ride on every link). Placeholder
+   grammar: `<…>` is a constant pasted once, `{{…}}` is a
+   per-recipient merge value. Below it the THREE template links,
+   labeled `img hero` / `img cta` / `click`, each reusing the string
+   via a muted `{config}` chip; the images tail `&auto=0&slot=…`, the
+   `/c` click link needs no tail at all.
+   Sub says composing the parameters IS creating the test and that kh
+   comes from the builder or any of your tests. Mono footnote: all
+   three links carry the config verbatim; `slot=` picks the element;
+   swapping `v=` URLs next campaign mints a fresh test.
 6. **Install card, tabbed, prompt-first:** tabs `ask any AI agent`
    (default: a copyable prompt naming the deployment, zero install),
    `skills` (`npx skills add livevariant/livevariant`), `Claude Code /
@@ -205,3 +209,4 @@ Cowork`, `Codex`, `any agent (MCP)`. MCP is the fallback tab, never
 | 2026-08-07 | Conversation and newsletter are separate headed bands, stacked            | Two focal artifacts in one band blurred both; each earns its own header  |
 | 2026-08-07 | Install card leads with a paste-into-any-AI prompt; manual buttons follow | Naming the site to any agent is the widest zero-install funnel           |
 | 2026-08-07 | URL strip shows the full template spelling, wrapped, slots and vn named   | The no-create-step claim needs the real parameters visible on screen     |
+| 2026-08-07 | Stats keys join Settings: generate client-side, secret shown exactly once | kh must be findable somewhere stable; the backend routes already existed |

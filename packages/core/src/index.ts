@@ -110,6 +110,7 @@ export {
   RUNTIME_PARAMS,
   configFromParams,
   configToParams,
+  configToTemplateQuery,
   decorateDestination,
   fallbackTarget,
   isReservedParam,

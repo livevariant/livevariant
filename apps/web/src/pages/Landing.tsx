@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { ArrowRight } from "lucide-react";
 import { createTest, type LiveTest } from "@livevariant/sdk";
@@ -915,17 +915,33 @@ sub.textContent = test.slots.sub.text;`;
    named variants, kh, merge tag) and differ only in which element
    their slot= renders; v=/vn= pairs are tinted per variant, the
    machinery stays ink. */
-const DEMO_CONFIG: { text: string; variant?: number }[] = [
-  { text: "s=hero" },
-  { text: "&v=a.jpg&vn=packshot", variant: 0 },
-  { text: "&v=b.jpg&vn=cafe", variant: 1 },
-  { text: "&v=c.jpg&vn=fireside", variant: 2 },
-  { text: "&s=cta" },
-  { text: "&v=x.jpg&vn=shop", variant: 0 },
-  { text: "&v=y.jpg&vn=ritual", variant: 1 },
-  { text: "&v=z.jpg&vn=brew", variant: 2 },
-  { text: "&kh=<hash>" },
-  { text: "&id={{email_or_any_id}}" }
+const DEMO_CONFIG: {
+  parts: { text: string; variant?: number }[];
+  comment?: string;
+}[] = [
+  { parts: [{ text: "s=hero" }], comment: "an element to test" },
+  {
+    parts: [{ text: "&v=a.jpg&vn=packshot", variant: 0 }],
+    comment: "a variant: its image, and its name in stats"
+  },
+  { parts: [{ text: "&v=b.jpg&vn=cafe", variant: 1 }] },
+  { parts: [{ text: "&v=c.jpg&vn=fireside", variant: 2 }] },
+  { parts: [{ text: "&s=cta" }], comment: "a second element: the button" },
+  { parts: [{ text: "&v=x.jpg&vn=shop", variant: 0 }] },
+  { parts: [{ text: "&v=y.jpg&vn=ritual", variant: 1 }] },
+  { parts: [{ text: "&v=z.jpg&vn=brew", variant: 2 }] },
+  {
+    parts: [{ text: "&r=https://dailybrew.shop" }],
+    comment: "where every click lands"
+  },
+  {
+    parts: [{ text: "&kh=<your-stats-key>" }],
+    comment: "yours and stable: one key reads every campaign"
+  },
+  {
+    parts: [{ text: "&id={{email_or_any_id}}" }],
+    comment: "your ESP's merge tag: sticky combination per reader"
+  }
 ];
 
 /* The same config three times: each slot's image link serves its
@@ -941,11 +957,7 @@ const DEMO_LINKS = [
     base: "https://livevariant.link/s?",
     tail: "&auto=0&slot=cta"
   },
-  {
-    label: "click",
-    base: "https://livevariant.link/c?",
-    tail: "&to=https://dailybrew.shop"
-  }
+  { label: "click", base: "https://livevariant.link/c?", tail: "" }
 ];
 
 export function Landing() {
@@ -1005,35 +1017,70 @@ export function Landing() {
       <section className="border-t border-border py-14 text-center">
         <SectionTitle
           title="The whole test lives in the URL."
-          sub="Compose it from plain parameters right in your newsletter template: no create step, because the configuration is the test's identity. Swap the variant URLs and each campaign becomes its own fresh test; add your stats key hash (kh) once and one secret reads them all."
+          sub="Compose it from plain parameters right in your newsletter template: no create step, because the configuration is the test's identity. Swap the variant URLs and each campaign becomes its own fresh test; add your stats key (kh), the stable value from your Settings page or the builder, and one secret reads them all."
         />
-        {/* Each parameter group is an unbreakable unit, so line wraps
-            land between parameters (&s=cta never splits into s=c/ta). */}
-        <div className="mx-auto mt-10 max-w-4xl space-y-5">
-          {DEMO_LINKS.map(link => (
-            <p key={link.label} className="font-mono text-sm sm:text-base">
-              <span className="mr-3 text-muted-foreground">{link.label}</span>
-              <span className="inline-block">{link.base}</span>
-              {DEMO_CONFIG.map((part, i) => (
-                <span
-                  key={i}
-                  className="inline-block"
-                  style={
-                    part.variant !== undefined
-                      ? { color: VARIANT_COLORS[part.variant] }
-                      : undefined
-                  }
-                >
-                  {part.text}
-                </span>
+        {/* The config string once, then the three links that reuse it
+            verbatim: the {config} token shows the templated part shared
+            by all three. Parameter groups are unbreakable units, so
+            wraps land between parameters (&s=cta never splits). */}
+        <div className="mx-auto mt-10 inline-block max-w-full text-left">
+          <div className="flex gap-3 font-mono text-sm sm:text-base">
+            <span className="w-20 shrink-0 text-muted-foreground">config</span>
+            {/* One parameter group per line, its comment in a shared
+                second column like annotated code; on phones the comment
+                drops under its parameter instead of forcing overflow. */}
+            <div className="grid min-w-0 grid-cols-1 items-baseline gap-x-6 gap-y-1 sm:grid-cols-[auto_1fr]">
+              {DEMO_CONFIG.map((line, i) => (
+                <Fragment key={i}>
+                  <span>
+                    {line.parts.map((part, j) => (
+                      <span
+                        key={j}
+                        className="inline-block"
+                        style={
+                          part.variant !== undefined
+                            ? { color: VARIANT_COLORS[part.variant] }
+                            : undefined
+                        }
+                      >
+                        {part.text}
+                      </span>
+                    ))}
+                  </span>
+                  {line.comment ? (
+                    <span className="pl-4 text-xs text-muted-foreground sm:pl-0">
+                      {`// ${line.comment}`}
+                    </span>
+                  ) : (
+                    <span className="hidden sm:block" />
+                  )}
+                </Fragment>
               ))}
-              <span className="inline-block">{link.tail}</span>
-            </p>
-          ))}
+            </div>
+          </div>
+          <div className="mt-5 space-y-2">
+            {DEMO_LINKS.map(link => (
+              <div
+                key={link.label}
+                className="flex gap-3 font-mono text-sm sm:text-base"
+              >
+                <span className="w-20 shrink-0 text-muted-foreground">
+                  {link.label}
+                </span>
+                <span className="min-w-0">
+                  <span className="inline-block">{link.base}</span>
+                  <span className="inline-block rounded bg-muted px-1.5 text-muted-foreground">
+                    {"{config}"}
+                  </span>
+                  <span className="inline-block">{link.tail}</span>
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
         <p className="mx-auto mt-6 max-w-2xl font-mono text-xs text-muted-foreground">
-          s= declares an element of the test; slot= picks which one this link
-          renders. Wire all three into the template once, swap the v= URLs next
+          the config string is the test; all three links carry it verbatim, and
+          slot= picks which element a link renders. Swap the v= URLs next
           campaign, and it is a fresh test.
         </p>
       </section>
@@ -1048,11 +1095,11 @@ export function Landing() {
             }}
           />
         </div>
-        <div className="mt-12 text-center">
+        <div className="mt-10 text-center">
           <p className="font-mono text-xs text-muted-foreground">
             or do it manually
           </p>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
             <Button size="lg" asChild>
               <Link
                 to="/builder"

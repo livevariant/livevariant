@@ -213,6 +213,53 @@ export function configToParams(config: TestConfig): URLSearchParams | null {
 }
 
 /**
+ * The ESP-template spelling of a config: the same query string
+ * configToParams produces, with every variant URL swapped for a merge
+ * placeholder ({{hero_variant_1_url}}, or {{variant_1_url}} when the
+ * test has one slot) and, when the config sets no redirectUrl, an
+ * r={{landing_url}} placeholder appended.
+ *
+ * The critical property is that ONE string feeds every link in the
+ * template. `r` is part of a test's identity, so a click link that
+ * added r while the image links did not would reward a different test
+ * than the one being served; deriving all links from this single
+ * string makes that mistake impossible. Callers append only runtime
+ * parameters (auto, id, slot), which never touch identity.
+ *
+ * Returns null exactly when configToParams does: a config with inline
+ * content, per-variant redirects or other query-inexpressible fields
+ * has no template spelling.
+ */
+export function configToTemplateQuery(config: TestConfig): string | null {
+  const params = configToParams(config);
+  if (params === null) {
+    return null;
+  }
+  const entries = Object.entries(config.slots);
+  const singleMain = entries.length === 1 && entries[0][0] === "main";
+  // Positional, exactly like the vn grammar: the nth v= in the string
+  // is the nth variant in slot-declaration order.
+  const placeholders = entries.flatMap(([slotKey, list]) =>
+    list.map(
+      (_, i) => `{{${singleMain ? "" : `${slotKey}_`}variant_${i + 1}_url}}`
+    )
+  );
+  let variantOrdinal = 0;
+  const pieces: string[] = [];
+  for (const [key, value] of params.entries()) {
+    if (key === "v") {
+      pieces.push(`v=${placeholders[variantOrdinal++]}`);
+    } else {
+      pieces.push(`${key}=${encodeURIComponent(value)}`);
+    }
+  }
+  if (!params.has("r")) {
+    pieces.push("r={{landing_url}}");
+  }
+  return pieces.join("&");
+}
+
+/**
  * First usable variant URL, for the failure path. A malformed link in an
  * `img src` is a broken image in front of the entire recipient list, so a
  * config we cannot parse degrades to serving the control rather than to

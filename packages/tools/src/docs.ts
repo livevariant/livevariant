@@ -265,9 +265,11 @@ Email is where this is most useful and most easily got wrong.
 - **Clicks and on-site conversions are the trustworthy signals.** Raw opens
   are not, in any email tool.
 
-- **Multi-slot tests need \`slot=\` on every serve/click link.** The bare
-  serve URL returns an error for them; \`build_test\`'s \`slotLinks\` has the
-  per-element pair ready.
+- **Multi-slot SERVE links need \`slot=\`.** The bare serve URL returns an
+  error for them; \`build_test\`'s \`slotLinks\` has the per-element pair
+  ready. The click link is the exception: one slot-less click link can
+  wrap every element, unless variants carry their own \`redirectUrl\`s
+  (then the click must say which element was clicked).
 
 \`build_test\` also returns an \`emailTemplate\`: the query-parameter spelling of
 the same test (see "Creating a test with nothing but a URL"), for wiring into
