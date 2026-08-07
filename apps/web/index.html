@@ -8,6 +8,12 @@
       name="description"
       content="Adaptive A/B testing where the entire test lives in a URL. Traffic shifts toward the winner while the test runs, several elements are optimized as one combination, and no raw visitor data is stored. No accounts, no platform."
     />
+    <!-- The hero test cannot choose before it knows the deployment's
+         serve URL and publishable key; starting this fetch during HTML
+         parse overlaps it with the bundle download instead of paying
+         it after React mounts. crossorigin matches fetch()'s default
+         cors/same-origin mode, or the preload would not be reused. -->
+    <link rel="preload" href="/config" as="fetch" crossorigin />
     <link rel="llms-txt" href="/llms.txt" />
     <link
       rel="ai-skill"
