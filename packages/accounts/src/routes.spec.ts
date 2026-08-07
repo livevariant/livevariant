@@ -760,3 +760,130 @@ describe("asset attribution", () => {
     expect((after.results as { n: number }[])[0].n).toBe(0);
   });
 });
+
+describe("test status endpoint", () => {
+  it("answers with the secret, marks the caller's own org, refuses the rest", async () => {
+    const d1 = (proxy.env as { LV_ACCOUNTS_DB: D1Database }).LV_ACCOUNTS_DB;
+    const emails: Array<{ to: string; subject: string; text: string }> = [];
+    const flow = createAccounts({
+      db: d1,
+      baseUrl: DASHBOARD,
+      secret: "f".repeat(48),
+      sendEmail: async email => {
+        emails.push(email);
+      }
+    });
+    const post = (path: string, body: unknown, cookie?: string) =>
+      flow.routes.request(`${DASHBOARD}${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: DASHBOARD,
+          ...(cookie ? { cookie } : {})
+        },
+        body: JSON.stringify(body)
+      });
+    const cookieOf = (res: Response, previous = "") => {
+      const set = res.headers.get("set-cookie");
+      if (!set) {
+        return previous;
+      }
+      const jar = new Map<string, string>(
+        previous
+          .split("; ")
+          .filter(Boolean)
+          .map(pair => [pair.split("=")[0], pair] as [string, string])
+      );
+      for (const part of set.split(",")) {
+        const pair = part.split(";")[0].trim();
+        if (pair.includes("=")) {
+          jar.set(pair.split("=")[0], pair);
+        }
+      }
+      return [...jar.values()].join("; ");
+    };
+
+    await post("/auth/sign-up/email", {
+      name: "statususer",
+      email: "status@example.com",
+      password: "status-password-long"
+    });
+    const verify = emails
+      .map(e => e.text.match(/https?:\/\/\S+/)?.[0])
+      .find(Boolean)!;
+    const parsed = new URL(verify);
+    await flow.routes.request(
+      `${DASHBOARD}${parsed.pathname}${parsed.search}`,
+      { headers: { origin: DASHBOARD } }
+    );
+    const signIn = await post("/auth/sign-in/email", {
+      email: "status@example.com",
+      password: "status-password-long"
+    });
+    const cookie = cookieOf(signIn);
+    const pkRes = await post("/account/publishable-keys", {}, cookie);
+    const { key: pk } = (await pkRes.json()) as { key: string };
+
+    const statsSecret = generateStatsSecret();
+    const { encoded, testId } = await encodeConfig({
+      v: 2,
+      variants: [
+        { name: "a", url: "https://unverified-status.example/a" },
+        { name: "b", url: "https://unverified-status.example/b" }
+      ],
+      statsKeyHash: await hashStatsSecret(statsSecret)
+    } as never);
+
+    // Wrong secret: 401, indistinguishable from any other bad secret.
+    const wrong = await post("/account/tests/status", {
+      encoded,
+      statsSecret: "not-the-secret-at-all"
+    });
+    expect(wrong.status).toBe(401);
+
+    // Unclaimed, no session needed: the secret is the whole authority.
+    const before = await post("/account/tests/status", {
+      encoded,
+      statsSecret
+    });
+    expect(before.status).toBe(200);
+    expect(await before.json()).toEqual({
+      testId,
+      claimed: false,
+      org: null,
+      destinations: [{ host: "unverified-status.example", verified: false }]
+    });
+
+    // Registered via the agent pair, then asked WITH the session: the
+    // org is the caller's own, which is what the manage page renders as
+    // "in your account".
+    const registered = await flow.provider.registerWithSecret({
+      encoded,
+      statsSecret,
+      publishableKey: pk
+    });
+    expect(registered).toMatchObject({ ok: true, testId });
+    const mineRes = await post(
+      "/account/tests/status",
+      { encoded, statsSecret },
+      cookie
+    );
+    const mine = (await mineRes.json()) as {
+      claimed: boolean;
+      org: { name: string; mine: boolean } | null;
+    };
+    expect(mine.claimed).toBe(true);
+    expect(mine.org?.mine).toBe(true);
+
+    // The same question without the session still answers, but cannot
+    // call the org the caller's own.
+    const anonRes = await post("/account/tests/status", {
+      encoded,
+      statsSecret
+    });
+    const anon = (await anonRes.json()) as {
+      org: { name: string; mine: boolean } | null;
+    };
+    expect(anon.org?.mine).toBe(false);
+  });
+});

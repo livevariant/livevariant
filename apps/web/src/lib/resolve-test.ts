@@ -7,7 +7,7 @@
  * shell could be deleted.
  */
 import { useEffect, useState } from "react";
-import { decodeConfig } from "@livevariant/core";
+import { decodeConfig, type TestConfig } from "@livevariant/core";
 import { loadTests, saveTest, type SavedTest } from "./tests-store";
 import { fetchServeUrl } from "./serve-url";
 
@@ -19,6 +19,12 @@ export interface ResolvedTest {
   statsSecret: string | null;
   /** The public hash from the config; null for keyless tests. */
   statsKeyHash: string | null;
+  /** Slot keys in config order; more than one means every serve/click
+   *  link needs ?slot= to say which element it renders. */
+  slots: string[];
+  /** The decoded config, for rendering variant previews. Null only when
+   *  a browser-saved entry no longer decodes. */
+  config: TestConfig | null;
   /** Origin for visitor-facing links (serve/click/pixel). */
   serveUrl: string;
   /** Whether this browser's list already has it. */
@@ -76,18 +82,20 @@ async function resolve(
     if (!saved) {
       return null;
     }
-    let kh: string | null;
+    let config: TestConfig | null;
     try {
-      kh = (await decodeConfig(saved.encoded)).config.statsKeyHash ?? null;
+      config = (await decodeConfig(saved.encoded)).config;
     } catch {
-      kh = null;
+      config = null;
     }
     return {
       testId: saved.testId,
       encoded: saved.encoded,
       name: saved.name,
       statsSecret: saved.statsSecret,
-      statsKeyHash: kh,
+      statsKeyHash: config?.statsKeyHash ?? null,
+      slots: Object.keys(config?.slots ?? {}),
+      config,
       serveUrl: saved.serverUrl,
       saved: true
     };
@@ -110,6 +118,8 @@ async function resolve(
     name: decoded.config.name ?? "LiveVariant test",
     statsSecret: secret ?? saved?.statsSecret ?? null,
     statsKeyHash: decoded.config.statsKeyHash ?? null,
+    slots: Object.keys(decoded.config.slots ?? {}),
+    config: decoded.config,
     serveUrl: saved?.serverUrl ?? (await fetchServeUrl()),
     saved: saved !== undefined
   };

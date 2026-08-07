@@ -3,6 +3,11 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getPlatformProxy } from "wrangler";
+import {
+  encodeConfig,
+  generateStatsSecret,
+  hashStatsSecret
+} from "@livevariant/core";
 import { createDb, type Db } from "./auth.js";
 import {
   addDomain,
@@ -312,6 +317,68 @@ describe("SDK first-sight registration", () => {
     expect(await provider.isDomainAllowedForRedirect("elsewhere.example")).toBe(
       "interstitial"
     );
+  });
+});
+
+describe("test status by secret", () => {
+  it("reports claim state and per-destination verification", async () => {
+    const org = await makeOrg();
+    const domain = `status-${seq}.example`;
+    await addDomain(db, {
+      domain,
+      orgId: org.orgId,
+      token: "tok",
+      method: "dns-txt"
+    });
+    await markDomainVerified(db, org.orgId, domain, "dns-txt", true);
+    const provider = new RegistryProvider(db, () => {
+      throw new Error("auth not needed");
+    });
+
+    const statsSecret = generateStatsSecret();
+    const { encoded, testId } = await encodeConfig({
+      v: 2,
+      variants: [
+        // A subdomain of the verified domain and a stranger: the status
+        // must tell them apart, and the parent-domain walk must count.
+        { name: "a", url: `https://shop.${domain}/a` },
+        { name: "b", url: "https://stranger-status.example/b" }
+      ],
+      statsKeyHash: await hashStatsSecret(statsSecret)
+    } as never);
+
+    const before = await provider.testStatusWithSecret({
+      encoded,
+      statsSecret
+    });
+    if (!before.ok) {
+      throw new Error(`status refused: ${before.reason}`);
+    }
+    expect(before.claimed).toBe(false);
+    expect(before.org).toBeNull();
+    expect(before.destinations).toEqual([
+      { host: `shop.${domain}`, verified: true },
+      { host: "stranger-status.example", verified: false }
+    ]);
+
+    expect(
+      await provider.testStatusWithSecret({
+        encoded,
+        statsSecret: "not-the-secret-at-all"
+      })
+    ).toEqual({ ok: false, reason: "bad-secret" });
+
+    await registerTest(db, [], { testId, orgId: org.orgId, encoded });
+    provider.invalidateTest(testId);
+    const after = await provider.testStatusWithSecret({
+      encoded,
+      statsSecret
+    });
+    if (!after.ok) {
+      throw new Error(`status refused: ${after.reason}`);
+    }
+    expect(after.claimed).toBe(true);
+    expect(after.org).toEqual({ id: org.orgId, name: `Org ${seq}` });
   });
 });
 

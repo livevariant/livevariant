@@ -77,6 +77,22 @@ export interface AccountTools {
           "bad-config" | "bad-secret" | "unknown-key" | "claimed-elsewhere";
       }
   >;
+  /**
+   * Registry status for a test, authorized by its stats secret: is it
+   * claimed (and by which org), and is each redirect destination a
+   * verified domain. build_test uses it to warn about the interstitial
+   * at creation; get_test_status exposes it to agents directly.
+   */
+  testStatus?(input: { encoded: string; statsSecret: string }): Promise<
+    | { ok: false; reason: "bad-config" | "bad-secret" }
+    | {
+        ok: true;
+        testId: string;
+        claimed: boolean;
+        org: { id: string; name: string } | null;
+        destinations: Array<{ host: string; verified: boolean }>;
+      }
+  >;
 }
 
 /**

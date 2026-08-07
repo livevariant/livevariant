@@ -112,6 +112,9 @@ export function createApi(options: ApiOptions): Hono {
               registerWithSecret: provider.registerWithSecret
                 ? input => provider.registerWithSecret!(input)
                 : undefined,
+              testStatus: provider.testStatusWithSecret
+                ? input => provider.testStatusWithSecret!(input)
+                : undefined,
               listTests: async listOptions => {
                 const orgIds = await provider.sessionOrgIds(raw);
                 if (orgIds.length === 0) {

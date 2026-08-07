@@ -152,7 +152,54 @@ const FLOW_SECTION = `## Working flow
 5. \`get_stats\` to read results.
 
 \`inspect_test\` answers "what does this link do?" for any LiveVariant URL, and
-lints it for the mistakes that only surface once a campaign has gone out.`;
+lints it for the mistakes that only surface once a campaign has gone out.
+\`get_test_status\` reports whether a test is claimed into an account and
+whether its destinations are verified (you hold the secret, so you may ask).`;
+
+const DELIVERABLE_SECTION = `## What your final answer must include
+
+After building a test, the human should never have to ask a follow-up to
+use it. Always include:
+
+- **The manage URL**, every time. Say what it is: live results in the
+  browser, and signed in one click ("Add to my account") claims the test
+  into their dashboard. It carries the stats secret in its #fragment, so
+  they should share it only with people who may see results.
+- **The exact links or HTML for their channel**, composed for THIS test.
+  For email that means the serve URL in the \`<img src>\` wrapped in the
+  click URL as \`<a href>\`, with the platform's real merge tag in \`id=\`
+  and the \`auto=0\` spelling; for a multi-slot test use the per-slot
+  links (\`slotLinks\`), one image+link pair per element; the pixel goes
+  on the thank-you page. If the test learns per context dimension you
+  configured (\`ctx\`), merge the value in as \`c_<dim>\` wherever the
+  sending platform knows it (like \`&c_plan={{plan}}\`); auto-derived
+  dims (country, device) need nothing in email links beyond what the
+  auto=0 note says. When you know the platform, write the finished HTML
+  yourself instead of listing raw URLs.
+- **Any warnings**, especially unverified destinations: relay what the
+  visitor will see and how to fix it (next section).`;
+
+const VERIFICATION_SECTION = `## Verified domains and the interstitial
+
+On the hosted service a redirect to a domain nobody has verified shows the
+visitor an explicit "Redirecting you to…" continue screen before landing
+(anti-abuse for a public redirector). Verified domains redirect instantly.
+
+\`build_test\` and \`get_test_status\` report \`verified\` per destination
+host. When a destination shows \`verified: false\`, tell the user their
+links WORK but click-throughs see the continue screen, and that verifying
+removes it: on the dashboard under Settings, Verified domains, prove
+control with a DNS TXT record, by serving the well-known file, or by
+having the LiveVariant tag with their publishable key live in the site's
+page source (tag-manager installs count: verification renders the page).
+
+Recommend the tag install whenever the user owns the destination site:
+one \`<script>\` with their PUBLIC publishable key means conversions are
+tracked automatically from their existing GA events (clicks stop being
+the only signal), the domain verifies from the snippet itself, tests
+served from it register into their account on their own, and on-page
+website tests become possible with the same install. It is the single
+highest-leverage step to suggest after a first email or redirect test.`;
 
 const RESULTS_SECTION = `## Reading results honestly
 
@@ -185,6 +232,10 @@ Email is where this is most useful and most easily got wrong.
   learn a different winner per traffic source.
 - **Clicks and on-site conversions are the trustworthy signals.** Raw opens
   are not, in any email tool.
+
+- **Multi-slot tests need \`slot=\` on every serve/click link.** The bare
+  serve URL returns an error for them; \`build_test\`'s \`slotLinks\` has the
+  per-element pair ready.
 
 \`build_test\` also returns an \`emailTemplate\`: the query-parameter spelling of
 the same test (see "Creating a test with nothing but a URL"), for wiring into
@@ -271,7 +322,12 @@ and grants nothing alone; authority is always the stats secret, which
 \`build_test\` mints itself and you never ask the user for. Never collect
 credentials. Registration is what makes the dashboard useful for the
 test: My tests lists it, and its stats become readable there without the
-secret.`;
+secret.
+
+Either way, ALWAYS hand over the manage URL and say what claiming does;
+an unregistered test whose manage URL the user never saw is effectively
+lost to them. \`get_test_status\` tells you later whether a test ended up
+claimed and by which organization.`;
 
 function restSection(apiUrl: string): string {
   return `## If you cannot install the MCP server
@@ -325,6 +381,8 @@ export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
     ``,
     FLOW_SECTION,
     ``,
+    DELIVERABLE_SECTION,
+    ``,
     RESULTS_SECTION,
     ``,
     EMAIL_SECTION,
@@ -334,6 +392,8 @@ export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
     IMAGES_SECTION,
     ``,
     OWNERSHIP_SECTION,
+    ``,
+    VERIFICATION_SECTION,
     ``,
     restSection(origin),
     ``,
@@ -377,7 +437,8 @@ are all there is.
    (\`${base}/s?v=<url-a>&v=<url-b>&id={{recipient_id}}&auto=0\`); each distinct
    parameter set IS its own test. The skill documents the full grammar.
 2. **Tools**: build_test / inspect_test / generate_priors / get_stats /
-   upload_image / variant_brief / list_tests via MCP or REST.
+   get_test_status / upload_image / variant_brief / list_tests via MCP or
+   REST.
 3. **On-page**: the tag (\`${base}/sdk.js\`) plus
    \`window.livevariant.sdk.createTest("<encoded>")\` serves website tests you
    build, and \`upload_image\` lets you create image variants yourself.
@@ -388,6 +449,9 @@ Creating requires no account. To save a test into a human's dashboard, ask
 for their PUBLIC publishable key (pk_..., from Settings) and pass it to
 build_test, which registers the test at creation; or hand them the manage
 URL, which claims it in one signed-in click. Never collect credentials.
+Always give the human the manage URL either way, and relay unverified
+destination warnings: unverified redirect targets show visitors a continue
+screen until the domain is verified under Settings.
 
 ## Terms
 
@@ -422,8 +486,16 @@ export function renderMcpInstructions(): string {
     "To save a test into a human's account, ask for their PUBLIC " +
     "publishable key (pk_...) and pass it to build_test (registers at " +
     "creation), or hand them build_test's manage URL (one signed-in " +
-    "click); never collect credentials. The full recipes live in the " +
-    "livevariant skill, also served at /skills/livevariant/SKILL.md on " +
-    "every deployment."
+    "click); never collect credentials. ALWAYS include the manage URL in " +
+    "your final answer, plus the ready-to-paste links for the channel " +
+    "(per-slot for multi-slot tests, merge tag in id=, auto=0 for email).\n\n" +
+    "Relay destination warnings: an unverified redirect destination shows " +
+    "visitors a continue screen (get_test_status reports this; so does " +
+    "build_test). The fix is verifying the domain under Settings (DNS " +
+    "TXT, well-known file, or the tag with their publishable key live on " +
+    "the site); the tag also auto-tracks conversions from GA events and " +
+    "enables on-page tests, so suggest it when the user owns the site. " +
+    "The full recipes live in the livevariant skill, also served at " +
+    "/skills/livevariant/SKILL.md on every deployment."
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router";
 import { Bookmark, Check, Copy, UserPlus } from "lucide-react";
 import { buildTestUrls } from "@livevariant/core";
@@ -12,8 +12,114 @@ import {
 } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/select";
 import { StatsPanel } from "@/components/StatsPanel";
-import { claimAndRegister, setActiveOrg, useAccount } from "@/lib/account";
+import {
+  claimAndRegister,
+  fetchTestStatus,
+  setActiveOrg,
+  useAccount,
+  type TestStatus
+} from "@/lib/account";
 import { useResolvedTest, type ResolvedTest } from "@/lib/resolve-test";
+import type { Variant } from "@livevariant/core";
+
+/**
+ * One variant, previewed by what it IS. Images render as themselves
+ * (with a fallback for protected assets, which only serve inside the
+ * test's flow), destinations as links, text as text. HTML and markdown
+ * are deliberately shown as source: this page's URL embeds the config,
+ * so rendering config-supplied markup here would let any crafted manage
+ * link run markup on this origin.
+ */
+function VariantTile({ variant, index }: { variant: Variant; index: number }) {
+  const [imageBroken, setImageBroken] = useState(false);
+  const name = variant.name ?? `v${index + 1}`;
+  const inline = variant.html ?? variant.md ?? variant.text;
+  return (
+    <div className="space-y-2 rounded-lg border p-3">
+      <div className="flex items-baseline gap-2">
+        <span className="text-sm font-medium">{name}</span>
+        {index === 0 && (
+          <span className="text-muted-foreground text-xs">control</span>
+        )}
+      </div>
+      {variant.image &&
+        (imageBroken ? (
+          <p className="text-muted-foreground text-xs">
+            Protected image asset (it only serves inside the test):{" "}
+            <span className="font-mono break-all">{variant.image}</span>
+          </p>
+        ) : (
+          <img
+            src={variant.image}
+            alt={`Variant ${name}`}
+            className="max-h-40 w-full rounded object-contain"
+            onError={() => setImageBroken(true)}
+          />
+        ))}
+      {variant.url && (
+        <p className="text-sm break-all">
+          Destination:{" "}
+          <a
+            href={variant.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            {variant.url}
+          </a>
+        </p>
+      )}
+      {inline !== undefined && (
+        <pre className="bg-muted max-h-32 overflow-auto rounded p-2 text-xs whitespace-pre-wrap">
+          {inline.length > 400 ? `${inline.slice(0, 400)}…` : inline}
+        </pre>
+      )}
+      {variant.redirectUrl && (
+        <p className="text-muted-foreground text-xs break-all">
+          Click lands on {variant.redirectUrl}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Every slot's variants at a glance, previewed by type. The reader is
+ * whoever holds a manage link, often not the person who built the test,
+ * so this answers "what is actually being tested?" without tooling.
+ */
+function VariantsCard({ test }: { test: ResolvedTest }) {
+  const slots = Object.entries(test.config?.slots ?? {});
+  if (slots.length === 0) {
+    return null;
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Variants</CardTitle>
+        <CardDescription>
+          {slots.length > 1
+            ? `${slots.length} elements tested as one combination; the first variant of each is the control.`
+            : "The first variant is the control."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {slots.map(([slot, variants]) => (
+          <div key={slot} className="space-y-2">
+            {slots.length > 1 && (
+              <div className="text-sm font-medium">{slot}</div>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {variants.map((variant, i) => (
+                <VariantTile key={i} variant={variant} index={i} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
@@ -69,12 +175,35 @@ function AccountCard({
   const account = useAccount();
   const [claiming, setClaiming] = useState(false);
   const [claimed, setClaimed] = useState(false);
+  const [status, setStatus] = useState<TestStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [targetOrg, setTargetOrg] = useState<string | null>(null);
 
   const orgs = account.me?.orgs ?? [];
   const activeOrgId = account.me?.activeOrgId ?? orgs[0]?.id ?? null;
   const chosenOrg = targetOrg ?? activeOrgId;
+
+  // The registry, not component state, knows whether this test is
+  // already claimed: without asking, every reload of a claimed test's
+  // manage page would re-offer the claim button forever.
+  useEffect(() => {
+    if (!test.statsSecret || !account.available) {
+      return;
+    }
+    let live = true;
+    fetchTestStatus({ encoded: test.encoded, statsSecret: test.statsSecret })
+      .then(current => {
+        if (live) {
+          setStatus(current);
+        }
+      })
+      .catch(() => {
+        // Status is advisory; the card still renders the claim path.
+      });
+    return () => {
+      live = false;
+    };
+  }, [test, account.available, claimed]);
 
   // Claiming is EXPLICIT: with several organizations, an automatic
   // claim would silently pick one of them, and a test filed under the
@@ -125,7 +254,19 @@ function AccountCard({
       </CardHeader>
       <CardContent className="space-y-3">
         {account.me ? (
-          claimed ? (
+          status?.claimed && status.org && !claimed ? (
+            <p className="text-sm">
+              <Check className="mr-1 inline size-4" />{" "}
+              {status.org.mine ? (
+                <>
+                  In your account ({status.org.name}). Find it under{" "}
+                  <Link to="/tests">My tests</Link>.
+                </>
+              ) : (
+                <>Already claimed by {status.org.name}.</>
+              )}
+            </p>
+          ) : claimed ? (
             <p className="text-sm">
               <Check className="mr-1 inline size-4" /> Saved to {chosenName}.
               Find it under <Link to="/tests">My tests</Link>.
@@ -197,6 +338,8 @@ export function TestDetail() {
     test.statsSecret ?? undefined,
     window.location.origin
   );
+  const multiSlot = test.slots.length > 1;
+  const slotParam = (slot: string | null) => (slot ? `slot=${slot}&` : "");
   // Full encoded config: the snippet must be copy-paste runnable.
   const snippet = `import { createTest } from "@livevariant/sdk";
 
@@ -225,6 +368,8 @@ element.textContent = test.variant.text;`;
         hasSecret={test.statsSecret !== null}
       />
 
+      <VariantsCard test={test} />
+
       <AccountCard test={test} onSaved={save} />
 
       <Card>
@@ -237,14 +382,26 @@ element.textContent = test.variant.text;`;
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <CopyField
-            label="Serve"
-            value={`${urls.serve}?id={{recipient_id}}`}
-          />
-          <CopyField
-            label="Click"
-            value={`${urls.click}?id={{recipient_id}}`}
-          />
+          {multiSlot && (
+            <p className="text-muted-foreground text-sm">
+              This test serves {test.slots.length} elements, so every serve and
+              click link says which one it renders via <code>slot</code>; a link
+              without one returns an error. Each recipient still gets one sticky
+              combination across all of them.
+            </p>
+          )}
+          {(multiSlot ? test.slots : [null]).map(slot => (
+            <div key={slot ?? "single"} className="space-y-3">
+              <CopyField
+                label={slot ? `Serve (${slot})` : "Serve"}
+                value={`${urls.serve}?${slotParam(slot)}id={{recipient_id}}`}
+              />
+              <CopyField
+                label={slot ? `Click (${slot})` : "Click"}
+                value={`${urls.click}?${slotParam(slot)}id={{recipient_id}}`}
+              />
+            </div>
+          ))}
           <CopyField
             label="Pixel"
             value={`${urls.pixel}?id={{recipient_id}}`}
@@ -261,14 +418,26 @@ element.textContent = test.variant.text;`;
             guess. Context you merge in yourself, like{" "}
             <code>&amp;c_country=nl</code>, still counts.
           </p>
-          <CopyField
-            label="Serve (no derived context)"
-            value={`${urls.noAuto.serve}&id={{recipient_id}}`}
-          />
-          <CopyField
-            label="Click (no derived context)"
-            value={`${urls.noAuto.click}&id={{recipient_id}}`}
-          />
+          {(multiSlot ? test.slots : [null]).map(slot => (
+            <div key={slot ?? "single"} className="space-y-3">
+              <CopyField
+                label={
+                  slot
+                    ? `Serve (${slot}, no derived context)`
+                    : "Serve (no derived context)"
+                }
+                value={`${urls.noAuto.serve}&${slotParam(slot)}id={{recipient_id}}`}
+              />
+              <CopyField
+                label={
+                  slot
+                    ? `Click (${slot}, no derived context)`
+                    : "Click (no derived context)"
+                }
+                value={`${urls.noAuto.click}&${slotParam(slot)}id={{recipient_id}}`}
+              />
+            </div>
+          ))}
         </CardContent>
       </Card>
 

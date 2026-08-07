@@ -81,4 +81,23 @@ export interface AccountsProvider {
           "bad-config" | "bad-secret" | "unknown-key" | "claimed-elsewhere";
       }
   >;
+  /**
+   * Registry status for one test, authorized by its stats secret:
+   * claimed (and by which org), and whether each redirect destination
+   * is a verified domain (unverified ones get the interstitial on
+   * deployments that show it). Optional like registerWithSecret.
+   */
+  testStatusWithSecret?(input: {
+    encoded: string;
+    statsSecret: string;
+  }): Promise<
+    | { ok: false; reason: "bad-config" | "bad-secret" }
+    | {
+        ok: true;
+        testId: string;
+        claimed: boolean;
+        org: { id: string; name: string } | null;
+        destinations: Array<{ host: string; verified: boolean }>;
+      }
+  >;
 }
