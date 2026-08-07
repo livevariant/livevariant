@@ -987,10 +987,13 @@ export function Landing() {
           title="The whole test lives in the URL."
           sub="Compose it from plain parameters right in your newsletter template: no create step, because the configuration is the test's identity. Swap the variant URLs and each campaign becomes its own fresh test; add your stats key hash (kh) once and one secret reads them all."
         />
-        <p className="mx-auto mt-10 max-w-4xl break-all font-mono text-sm sm:text-base">
+        {/* Each parameter group is an unbreakable unit, so line wraps
+            land between parameters (&s=cta never splits into s=c/ta). */}
+        <p className="mx-auto mt-10 max-w-4xl font-mono text-sm sm:text-base">
           {DEMO_URL.map((part, i) => (
             <span
               key={i}
+              className="inline-block"
               style={
                 part.variant !== undefined
                   ? { color: VARIANT_COLORS[part.variant] }
