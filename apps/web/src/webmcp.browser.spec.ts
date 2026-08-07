@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildOpenApiDocument, TOOLS, toolPath } from "@livevariant/tools";
 import { registerWebMcpTools } from "./lib/webmcp";
 
 /**
- * WebMCP registration: browsers with navigator.modelContext get the
- * site's key actions as tools; the tool calls must hit the documented
- * REST endpoints with the documented shapes, because they carry no
- * authority of their own.
+ * WebMCP registration derives from /openapi.json, the document the
+ * registry itself generates: every published tool registers, with the
+ * registry's own descriptions and schemas, and calls land on the
+ * documented REST paths. No hand-maintained subset to drift.
  */
 
 interface RegisteredTool {
@@ -20,56 +21,64 @@ afterEach(() => {
   delete (navigator as { modelContext?: unknown }).modelContext;
 });
 
+function stubModelContext(): { provided: () => RegisteredTool[] | null } {
+  let context: { tools: RegisteredTool[] } | null = null;
+  (navigator as { modelContext?: unknown }).modelContext = {
+    provideContext(given: { tools: RegisteredTool[] }) {
+      context = given;
+    }
+  };
+  return { provided: () => context?.tools ?? null };
+}
+
 describe("WebMCP tools", () => {
-  it("does nothing at all without navigator.modelContext", () => {
-    expect(() => registerWebMcpTools()).not.toThrow();
+  it("does nothing at all without navigator.modelContext", async () => {
+    await expect(registerWebMcpTools()).resolves.toBeUndefined();
   });
 
-  it("registers the site's actions and calls the REST API", async () => {
-    let provided: { tools: RegisteredTool[] } | null = null;
-    (navigator as { modelContext?: unknown }).modelContext = {
-      provideContext(context: { tools: RegisteredTool[] }) {
-        provided = context;
-      }
-    };
+  it("registers nothing when the spec cannot be fetched", async () => {
+    const { provided } = stubModelContext();
+    vi.stubGlobal("fetch", async () => new Response("nope", { status: 500 }));
+    await registerWebMcpTools();
+    expect(provided()).toBeNull();
+  });
+
+  it("registers EVERY tool the deployment publishes, from its own spec", async () => {
+    const { provided } = stubModelContext();
+    const doc = buildOpenApiDocument({ serverUrl: "https://self.example" });
     const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
     vi.stubGlobal(
       "fetch",
       async (url: RequestInfo | URL, init?: RequestInit) => {
+        if (String(url) === "/openapi.json") {
+          return Response.json(doc);
+        }
         calls.push({ url: String(url), body: JSON.parse(String(init?.body)) });
         return Response.json({ ok: true });
       }
     );
 
-    registerWebMcpTools();
-    expect(provided).not.toBeNull();
-    const tools = provided!.tools;
-    expect(tools.map(tool => tool.name)).toEqual([
-      "build_ab_test",
-      "inspect_test",
-      "get_stats"
-    ]);
-    for (const tool of tools) {
-      expect(tool.description.length).toBeGreaterThan(40);
+    await registerWebMcpTools();
+    const tools = provided();
+    expect(tools).not.toBeNull();
+    // The whole registry, not a curated subset.
+    expect(tools!.map(tool => tool.name).sort()).toEqual(
+      TOOLS.map(tool => tool.name).sort()
+    );
+    for (const tool of tools!) {
+      // The registry's own long-form descriptions and object schemas.
+      expect(tool.description.length).toBeGreaterThan(80);
       expect(tool.inputSchema).toHaveProperty("type", "object");
     }
 
-    // build_ab_test maps bare URLs into the documented variant objects.
-    await tools[0].execute({
-      variants: ["https://a.example/x.jpg", "https://a.example/y.jpg"],
-      name: "August"
+    // Execution posts the input to the documented path, verbatim.
+    const buildTest = tools!.find(tool => tool.name === "build_test")!;
+    await buildTest.execute({
+      variants: [{ url: "https://a.example/x.jpg" }]
     });
-    expect(calls[0].url).toBe("/api/v1/build-test");
+    expect(calls[0].url).toBe(toolPath("build_test"));
     expect(calls[0].body).toEqual({
-      variants: [
-        { url: "https://a.example/x.jpg" },
-        { url: "https://a.example/y.jpg" }
-      ],
-      name: "August"
+      variants: [{ url: "https://a.example/x.jpg" }]
     });
-
-    await tools[2].execute({ test: "cfg", statsSecret: "s3cret-value" });
-    expect(calls[1].url).toBe("/api/v1/get-stats");
-    expect(calls[1].body).toEqual({ test: "cfg", statsSecret: "s3cret-value" });
   });
 });

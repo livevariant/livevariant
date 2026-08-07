@@ -1,9 +1,11 @@
 /**
- * WebMCP (navigator.modelContext): exposes this site's key actions as
- * tools to browser-driven agents. Feature-detected, so browsers without
- * the API skip everything silently. The tools call the same public REST
- * endpoints the docs describe, with the same authority model: nothing
- * registered here grants anything a plain fetch could not.
+ * WebMCP (navigator.modelContext): exposes the deployment's tool
+ * registry to browser-driven agents. The tools are derived at runtime
+ * from /openapi.json, which is generated from the same registry as
+ * MCP, REST and the SKILL, so this surface registers EVERY tool the
+ * deployment publishes and can never drift from it. Feature-detected:
+ * browsers without the API skip everything, and a failed spec fetch
+ * registers nothing rather than a stale subset.
  */
 
 interface WebMcpTool {
@@ -17,88 +19,58 @@ interface ModelContext {
   provideContext(context: { tools: WebMcpTool[] }): void;
 }
 
-async function call(tool: string, body: unknown): Promise<unknown> {
-  const res = await fetch(`/api/v1/${tool}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  return res.json();
+interface OpenApiOperation {
+  operationId?: string;
+  summary?: string;
+  description?: string;
+  requestBody?: {
+    content?: Record<string, { schema?: Record<string, unknown> }>;
+  };
 }
 
-export function registerWebMcpTools(): void {
+export async function registerWebMcpTools(): Promise<void> {
   const modelContext = (navigator as { modelContext?: ModelContext })
     .modelContext;
   if (typeof modelContext?.provideContext !== "function") {
     return;
   }
-  modelContext.provideContext({
-    tools: [
-      {
-        name: "build_ab_test",
-        description:
-          "Build a LiveVariant A/B test from two or more variant URLs " +
-          "(first is the control). Returns ready-made serve/click/manage " +
-          "URLs and a stats secret that is shown exactly once: relay the " +
-          "manage URL to the human.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            variants: {
-              type: "array",
-              minItems: 2,
-              items: {
-                type: "string",
-                description: "Variant target URL"
-              }
-            },
-            name: { type: "string", description: "Human label for the test" }
-          },
-          required: ["variants"]
-        },
-        execute: input =>
-          call("build-test", {
-            variants: (input.variants as string[]).map(url => ({ url })),
-            ...(input.name ? { name: input.name } : {})
-          })
+  let doc: { paths?: Record<string, { post?: OpenApiOperation }> };
+  try {
+    const res = await fetch("/openapi.json");
+    if (!res.ok) {
+      return;
+    }
+    doc = (await res.json()) as typeof doc;
+  } catch {
+    return;
+  }
+  const tools: WebMcpTool[] = [];
+  for (const [path, item] of Object.entries(doc.paths ?? {})) {
+    const op = item.post;
+    if (!op?.operationId) {
+      continue;
+    }
+    tools.push({
+      name: op.operationId,
+      description: op.description ?? op.summary ?? op.operationId,
+      inputSchema: op.requestBody?.content?.["application/json"]?.schema ?? {
+        type: "object"
       },
-      {
-        name: "inspect_test",
-        description:
-          "Explain what a LiveVariant URL or config does, and lint it " +
-          "for the mistakes that only surface once a campaign is out.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            test: {
-              type: "string",
-              description: "Any LiveVariant URL or encoded config"
-            }
-          },
-          required: ["test"]
-        },
-        execute: input => call("inspect-test", { test: input.test })
-      },
-      {
-        name: "get_stats",
-        description:
-          "Read a test's results: per-combination win probabilities and " +
-          "an honest stop/continue call. Requires the stats secret the " +
-          "test was built with.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            test: { type: "string" },
-            statsSecret: { type: "string" }
-          },
-          required: ["test", "statsSecret"]
-        },
-        execute: input =>
-          call("get-stats", {
-            test: input.test,
-            statsSecret: input.statsSecret
-          })
+      execute: async input => {
+        // Same-origin cookies ride along so the account-scoped tools
+        // (list_tests) work for a signed-in visitor; every other tool
+        // carries its authority in the arguments, like the docs say.
+        const res = await fetch(path, {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(input ?? {})
+        });
+        return res.json();
       }
-    ]
-  });
+    });
+  }
+  if (tools.length > 0) {
+    modelContext.provideContext({ tools });
+  }
 }

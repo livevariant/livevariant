@@ -37,9 +37,10 @@ const router = createBrowserRouter([
   }
 ]);
 
-// Browser-driven agents get the site's key actions as WebMCP tools;
-// browsers without navigator.modelContext skip this silently.
-registerWebMcpTools();
+// Browser-driven agents get the deployment's WHOLE tool registry as
+// WebMCP tools, derived from /openapi.json; browsers without
+// navigator.modelContext skip this silently.
+void registerWebMcpTools();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
