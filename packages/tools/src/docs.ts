@@ -562,7 +562,10 @@ Hosted service terms: ${base}/terms · privacy: ${base}/privacy
  */
 export function renderAuthMd(origin: string): string {
   const base = origin.replace(/\/+$/, "");
-  return `# Agent access to LiveVariant
+  // The H1 names the convention, not just the service: consumers of
+  // Auth.md identify the document by its heading, and a title that
+  // only said "Agent access to LiveVariant" read as an ordinary page.
+  return `# Auth.md: agent access to LiveVariant
 
 There is NO registration, no API key, no OAuth flow, and none is
 missing. Every tool is open at \`POST ${base}/api/v1/<tool-name>\` and

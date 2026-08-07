@@ -632,6 +632,9 @@ describe("agent discovery well-knowns", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/markdown");
     const text = await res.text();
+    // Consumers identify the document by its H1, so it must name the
+    // convention rather than just the service.
+    expect(text).toMatch(/^# Auth\.md/i);
     expect(text).toContain("NO registration");
     expect(text).toContain("https://self.example/api/v1/");
     // No aspirational OAuth: the honest story is the whole story.
