@@ -111,8 +111,9 @@ https://livevariant.link/s?v=https://cdn.you.com/hero-a.jpg&v=https://cdn.you.co
 Replace your email's image URL with that, and the integration is done.
 Every recipient sticks to their variant across opens, traffic shifts
 toward the winner while the campaign runs, and clicks (`/c`) plus a
-thank-you-page pixel (`/px`) close the loop. Add `&kh=<hash>` from the
-builder to make results readable with your stats secret.
+thank-you-page pixel (`/px`) close the loop. Add `&kh=<your-stats-key>`
+(a stable value: generate one under Settings, or take the builder's) to
+make results readable with your stats secret.
 
 Multiple elements? Slots test the **combination**, not isolated pieces
 (wrapped here for reading; variant values are full URLs):
