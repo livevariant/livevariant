@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { ArrowRight } from "lucide-react";
 import { createTest, type LiveTest } from "@livevariant/sdk";
@@ -9,8 +9,9 @@ import { InstallCard } from "@/components/InstallCard";
 
 /**
  * The marketing page, implementing DESIGN.md's approved composition
- * (round9): headline, the email window whose image slot cycles the
- * three assistant-drafted scenes, the per-segment streamgraph (lanes
+ * (round9): headline, the conversation that plans and builds the demo
+ * test beside the email window running it (scenes cycle in the hero
+ * slot, labels in the button slot), the per-segment streamgraph (lanes
  * are segments, bands are variants), one URL, the skills-first install
  * card, the scoreboard, and the AGPL/deploy closer. Midnight theme is
  * scoped here; the builder stays light.
@@ -263,6 +264,17 @@ function Scene({ scene }: { scene: number }) {
   );
 }
 
+/* The two slots of the demo test the conversation below plans: the
+   hero scene (the three Scene drawings) and the email's button. Shared
+   by the chat and the email window so the story stays one test. */
+
+const SCENE_LABELS = ["packshot", "cafe", "fireside"] as const;
+const CTA_VARIANTS = [
+  "Shop the roast",
+  "Start your ritual",
+  "Brew better today"
+] as const;
+
 /* ------------------------------------------------------------------ */
 
 function SectionTitle({ title, sub }: { title: string; sub?: string }) {
@@ -277,12 +289,19 @@ function SectionTitle({ title, sub }: { title: string; sub?: string }) {
 function EmailWindow() {
   const reduced = usePrefersReducedMotion();
   const [active, setActive] = useState(1);
+  const [cta, setCta] = useState(1);
   useEffect(() => {
     if (reduced) {
       return;
     }
     const id = setInterval(() => setActive(current => (current + 1) % 3), 5000);
-    return () => clearInterval(id);
+    // The button is the second slot: its own cadence, deliberately out
+    // of phase with the scenes, so the COMBINATION visibly changes.
+    const ctaId = setInterval(() => setCta(current => (current + 1) % 3), 7000);
+    return () => {
+      clearInterval(id);
+      clearInterval(ctaId);
+    };
   }, [reduced]);
 
   return (
@@ -320,6 +339,20 @@ function EmailWindow() {
               LIVE · {VARIANT_NAMES[active]}
             </span>
           </div>
+          <div className="flex justify-center py-1">
+            <span className="relative inline-grid rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">
+              {CTA_VARIANTS.map((label, variant) => (
+                <span
+                  key={label}
+                  aria-hidden={variant !== cta}
+                  className="col-start-1 row-start-1 whitespace-nowrap text-center transition-opacity duration-700"
+                  style={{ opacity: variant === cta ? 1 : 0 }}
+                >
+                  {label}
+                </span>
+              ))}
+            </span>
+          </div>
           <div className="flex items-center gap-2">
             {[0, 1, 2].map(scene => (
               <button
@@ -338,13 +371,268 @@ function EmailWindow() {
               </button>
             ))}
             <span className="ml-auto font-mono text-xs text-muted-foreground">
-              a / b / c
+              hero {VARIANT_NAMES[active].toLowerCase()} · cta{" "}
+              {VARIANT_NAMES[cta].toLowerCase()}
             </span>
           </div>
         </CardContent>
       </Card>
       <figcaption className="sr-only">
-        The email window's image slot cycles through the three drafted scenes.
+        The email window's image slot cycles through the three drafted scenes
+        while the button cycles its three labels: one test, two slots, nine
+        combinations.
+      </figcaption>
+    </figure>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* The conversation that creates the test. Scripted and honest about
+   the flow the skill teaches agents: propose a plan (two slots, named
+   variants), wait for the human's yes, only then build. It plays once
+   when scrolled into view and ends in a live state; reduced motion
+   shows the finished conversation. */
+
+interface ChatMessageProps {
+  from: "you" | "assistant";
+  children: ReactNode;
+}
+
+function ChatMessage({ from, children }: ChatMessageProps) {
+  const you = from === "you";
+  return (
+    <div className={`chat-enter ${you ? "ml-auto max-w-[85%]" : "max-w-full"}`}>
+      <p
+        className={`mb-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground ${
+          you ? "text-right" : ""
+        }`}
+      >
+        {from}
+      </p>
+      <div
+        className={`space-y-3 rounded-lg px-3.5 py-2.5 text-sm ${
+          you
+            ? "bg-primary text-primary-foreground"
+            : "border border-border bg-background/40"
+        }`}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ChatTyping() {
+  return (
+    <div className="chat-enter">
+      <div className="inline-flex items-center gap-1 rounded-lg border border-border px-3.5 py-3">
+        {[0, 1, 2].map(dot => (
+          <span
+            key={dot}
+            className="chat-typing-dot size-1.5 rounded-full bg-muted-foreground"
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* What a two-slot email test really hands back: one serve link per
+   slot (each goes in its element's <img>) and the click link that
+   records the win and redirects. The encoded config is elided to a
+   base64-looking stub so the lines stay readable. */
+const BUILT_LINKS = [
+  {
+    label: "img hero",
+    url: "livevariant.link/s/eyJz…?slot=hero&id={{email_or_any_id}}&auto=0"
+  },
+  {
+    label: "img cta",
+    url: "livevariant.link/s/eyJz…?slot=cta&id={{email_or_any_id}}&auto=0"
+  },
+  { label: "click", url: "livevariant.link/c/eyJz…?id={{email_or_any_id}}" },
+  { label: "manage", url: "livevariant.com/manage/eyJz…#kq4xw…" }
+];
+
+/** Message count when the whole conversation is on screen. */
+const CHAT_DONE = 4;
+
+function ChatFlow() {
+  const reduced = usePrefersReducedMotion();
+  const [step, setStep] = useState(0);
+  const [typing, setTyping] = useState(false);
+  const [started, setStarted] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries.some(entry => entry.isIntersecting)) {
+          setStarted(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.3 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (reduced) {
+      setStep(CHAT_DONE);
+      setTyping(false);
+      return;
+    }
+    if (!started) {
+      return;
+    }
+    const timers: number[] = [];
+    const at = (ms: number, fn: () => void) =>
+      timers.push(window.setTimeout(fn, ms));
+    at(400, () => setStep(1));
+    at(1000, () => setTyping(true));
+    at(2600, () => {
+      setTyping(false);
+      setStep(2);
+    });
+    at(5600, () => setStep(3));
+    at(6200, () => setTyping(true));
+    at(7400, () => {
+      setTyping(false);
+      setStep(CHAT_DONE);
+    });
+    return () => timers.forEach(id => clearTimeout(id));
+  }, [started, reduced]);
+
+  return (
+    <figure className="m-0" ref={rootRef}>
+      <Card className="overflow-hidden border-border bg-card py-0 shadow-none">
+        <div className="flex items-center gap-1.5 border-b border-border px-4 py-3">
+          <span className="size-2.5 rounded-full bg-[#f87171]" />
+          <span className="size-2.5 rounded-full bg-[#fbbf24]" />
+          <span className="size-2.5 rounded-full bg-[#34d399]" />
+          <span className="ml-3 font-mono text-xs text-muted-foreground">
+            your assistant
+          </span>
+        </div>
+        <div
+          role="log"
+          aria-label="Example conversation that sets up the test"
+          className="space-y-4 px-4 py-4"
+        >
+          {step >= 1 && (
+            <ChatMessage from="you">
+              <p>
+                I want to A/B test my next "Daily brew" newsletter with
+                livevariant.com. Give me some ideas and set it up.
+              </p>
+            </ChatMessage>
+          )}
+          {step >= 2 && (
+            <ChatMessage from="assistant">
+              <p>
+                Two things are worth testing together here: the hero scene and
+                the button. One test, two slots, so it learns the winning
+                combination instead of two separate answers.
+              </p>
+              <div className="space-y-1.5">
+                <p className="font-mono text-xs text-muted-foreground">
+                  slot: hero
+                </p>
+                <div className="flex gap-2">
+                  {SCENE_LABELS.map((name, scene) => (
+                    <figure key={name} className="m-0 w-16">
+                      <div
+                        className="h-9 overflow-hidden rounded border-b-2"
+                        style={{ borderColor: VARIANT_COLORS[scene] }}
+                      >
+                        <Scene scene={scene} />
+                      </div>
+                      <figcaption className="mt-1 text-center font-mono text-[10px] text-muted-foreground">
+                        {name}
+                      </figcaption>
+                    </figure>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  I drafted three scenes. The mug never changes; the scene does.
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <p className="font-mono text-xs text-muted-foreground">
+                  slot: cta
+                </p>
+                <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+                  {CTA_VARIANTS.map((label, variant) => (
+                    <span
+                      key={label}
+                      className="border-b-2 pb-0.5 font-mono text-xs"
+                      style={{ borderColor: VARIANT_COLORS[variant] }}
+                    >
+                      "{label}"
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <p className="font-mono text-xs text-muted-foreground">
+                  ctx: utm_source · country (merge tag)
+                </p>
+              </div>
+              <p>
+                Nine combinations, sticky per reader via your merge tag, clicks
+                count as the win, and a different combination can win per
+                audience. Build it?
+              </p>
+            </ChatMessage>
+          )}
+          {step >= 3 && (
+            <ChatMessage from="you">
+              <p>Looks good!</p>
+            </ChatMessage>
+          )}
+          {step >= CHAT_DONE && (
+            <ChatMessage from="assistant">
+              <p>
+                Built. Three links for the template (one image link per slot,
+                and the click link that records the win and redirects), plus
+                your manage link.
+              </p>
+              <div className="overflow-x-auto rounded bg-muted px-2.5 py-2 font-mono text-xs leading-relaxed">
+                {BUILT_LINKS.map(link => (
+                  <p key={link.label} className="whitespace-nowrap">
+                    <span className="text-muted-foreground">
+                      {link.label.padEnd(9)}
+                    </span>
+                    {link.url}
+                  </p>
+                ))}
+              </div>
+              <p className="text-muted-foreground">
+                The manage link shows live results in the browser and saves the
+                test to a dashboard in one click; it carries your stats secret,
+                so share it only with people who may see results.
+              </p>
+              <p>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-live/40 px-2 py-0.5 font-mono text-xs text-live">
+                  <span className="live-dot size-1.5 rounded-full bg-live" />
+                  LIVE · 9 combinations · still testing
+                </span>
+              </p>
+            </ChatMessage>
+          )}
+          {typing && <ChatTyping />}
+        </div>
+      </Card>
+      <figcaption className="sr-only">
+        An example conversation: you ask for ideas, the assistant proposes a
+        hero and a button slot with three variants each, you approve, and the
+        test goes live.
       </figcaption>
     </figure>
   );
@@ -355,9 +643,16 @@ function EmailWindow() {
    segment; the three BANDS inside a lane are the variants sharing that
    segment's traffic. Widths drift to say "still deciding, forever". */
 
+/* The same segments the conversation above configures (ctx:
+   utm_source plus the country merge tag), so the page tells one test's
+   story end to end. */
 const LANES = [
-  { label: "source: newsletter", weights: [0.28, 0.52, 0.2], speed: 0.9 },
-  { label: "source: blog", weights: [0.42, 0.3, 0.28], speed: 1.15 },
+  {
+    label: "utm_source: newsletter",
+    weights: [0.28, 0.52, 0.2],
+    speed: 0.9
+  },
+  { label: "utm_source: blog", weights: [0.42, 0.3, 0.28], speed: 1.15 },
   { label: "country: DE (merge tag)", weights: [0.22, 0.34, 0.44], speed: 0.75 }
 ];
 const POINTS = 44;
@@ -589,6 +884,10 @@ sub.textContent = test.slots.sub.text;`;
         <p className="font-mono text-xs text-muted-foreground">
           the test running on this page
         </p>
+        <p className="rounded-md border border-border bg-background px-3 py-1.5 font-mono text-sm">
+          <span className="text-muted-foreground">$ </span>npm i
+          @livevariant/sdk
+        </p>
         <CodeBlock code={snippet} />
         <p className="text-sm text-muted-foreground">
           {pageTest.fallback ? (
@@ -610,18 +909,56 @@ sub.textContent = test.slots.sub.text;`;
 
 /* ------------------------------------------------------------------ */
 
-const DEMO_URL = {
-  base: "https://livevariant.link/s?",
-  parts: [
-    { text: "s=hero", color: undefined },
-    { text: "&" },
-    { text: "v=a.jpg", color: VARIANT_COLORS[0] },
-    { text: "&" },
-    { text: "v=b.jpg", color: VARIANT_COLORS[1] },
-    { text: "&" },
-    { text: "v=c.jpg", color: VARIANT_COLORS[2] }
-  ]
-};
+/* The URL strip: the two serve links of the same two-slot test the
+   conversation builds, in full. Writing these parameters IS creating
+   the test, so both links carry the complete config (named slots,
+   named variants, kh, merge tag) and differ only in which element
+   their slot= renders; v=/vn= pairs are tinted per variant, the
+   machinery stays ink. */
+const DEMO_CONFIG: {
+  parts: { text: string; variant?: number }[];
+  comment?: string;
+}[] = [
+  { parts: [{ text: "s=hero" }], comment: "an element to test" },
+  {
+    parts: [{ text: "&v=a.jpg&vn=packshot", variant: 0 }],
+    comment: "a variant: its image, and its name in stats"
+  },
+  { parts: [{ text: "&v=b.jpg&vn=cafe", variant: 1 }] },
+  { parts: [{ text: "&v=c.jpg&vn=fireside", variant: 2 }] },
+  { parts: [{ text: "&s=cta" }], comment: "a second element: the button" },
+  { parts: [{ text: "&v=x.jpg&vn=shop", variant: 0 }] },
+  { parts: [{ text: "&v=y.jpg&vn=ritual", variant: 1 }] },
+  { parts: [{ text: "&v=z.jpg&vn=brew", variant: 2 }] },
+  {
+    parts: [{ text: "&r=https://dailybrew.shop" }],
+    comment: "where every click lands"
+  },
+  {
+    parts: [{ text: "&kh=<your-stats-key>" }],
+    comment: "yours and stable: one key reads every campaign"
+  },
+  {
+    parts: [{ text: "&id={{email_or_any_id}}" }],
+    comment: "your ESP's merge tag: sticky combination per reader"
+  }
+];
+
+/* The same config three times: each slot's image link serves its
+   element, the click link records the win and redirects. */
+const DEMO_LINKS = [
+  {
+    label: "img hero",
+    base: "https://livevariant.link/s?",
+    tail: "&auto=0&slot=hero"
+  },
+  {
+    label: "img cta",
+    base: "https://livevariant.link/s?",
+    tail: "&auto=0&slot=cta"
+  },
+  { label: "click", base: "https://livevariant.link/c?", tail: "" }
+];
 
 export function Landing() {
   const serveUrl = useServeUrl();
@@ -649,8 +986,18 @@ export function Landing() {
 
       <section className="border-t border-border py-14">
         <SectionTitle
-          title="The product never changes; the scene does."
-          sub="LLM's are great at creating variations of your content."
+          title="The whole setup is one conversation."
+          sub="Ask for ideas, approve the plan, and the newsletter is testing: a hero slot and a button slot, learned as one combination."
+        />
+        <div className="mx-auto mt-12 max-w-2xl">
+          <ChatFlow />
+        </div>
+      </section>
+
+      <section className="border-t border-border py-14">
+        <SectionTitle
+          title="The newsletter, running the test it just built."
+          sub="The hero and the button keep testing as one combination, and every reader sticks to theirs."
         />
         <div className="mx-auto mt-12 max-w-2xl">
           <EmailWindow />
@@ -660,7 +1007,7 @@ export function Landing() {
       <section className="border-t border-border py-14">
         <SectionTitle
           title="It keeps testing, for every audience."
-          sub="Three variants, competing inside the optional audience segments you define, forever."
+          sub="Three variants, competing inside the audience segments the assistant configured, forever."
         />
         <div className="mx-auto mt-12 max-w-5xl">
           <Streamgraph />
@@ -670,25 +1017,89 @@ export function Landing() {
       <section className="border-t border-border py-14 text-center">
         <SectionTitle
           title="The whole test lives in the URL."
-          sub="Paste it in your newsletter or website; every recipient sticks to their combination, and it keeps optimizing."
+          sub="Compose it from plain parameters right in your newsletter template: no create step, because the configuration is the test's identity. Swap the variant URLs and each campaign becomes its own fresh test; add your stats key (kh), the stable value from your Settings page or the builder, and one secret reads them all."
         />
-        <p className="mt-10 overflow-x-auto whitespace-nowrap pb-1 font-mono text-sm sm:text-xl">
-          {DEMO_URL.base}
-          {DEMO_URL.parts.map((part, i) => (
-            <span
-              key={i}
-              style={part.color ? { color: part.color } : undefined}
-            >
-              {part.text}
-            </span>
-          ))}
+        {/* The config string once, then the three links that reuse it
+            verbatim: the {config} token shows the templated part shared
+            by all three. Parameter groups are unbreakable units, so
+            wraps land between parameters (&s=cta never splits). */}
+        <div className="mx-auto mt-10 inline-block max-w-full text-left">
+          <div className="flex gap-3 font-mono text-sm sm:text-base">
+            <span className="w-20 shrink-0 text-muted-foreground">config</span>
+            {/* One parameter group per line, its comment in a shared
+                second column like annotated code; on phones the comment
+                drops under its parameter instead of forcing overflow. */}
+            <div className="grid min-w-0 grid-cols-1 items-baseline gap-x-6 gap-y-1 sm:grid-cols-[auto_1fr]">
+              {DEMO_CONFIG.map((line, i) => (
+                <Fragment key={i}>
+                  <span>
+                    {line.parts.map((part, j) => (
+                      <span
+                        key={j}
+                        className="inline-block"
+                        style={
+                          part.variant !== undefined
+                            ? { color: VARIANT_COLORS[part.variant] }
+                            : undefined
+                        }
+                      >
+                        {part.text}
+                      </span>
+                    ))}
+                  </span>
+                  {line.comment ? (
+                    <span className="pl-4 text-xs text-muted-foreground sm:pl-0">
+                      {`// ${line.comment}`}
+                    </span>
+                  ) : (
+                    <span className="hidden sm:block" />
+                  )}
+                </Fragment>
+              ))}
+            </div>
+          </div>
+          <div className="mt-5 space-y-2">
+            {DEMO_LINKS.map(link => (
+              <div
+                key={link.label}
+                className="flex gap-3 font-mono text-sm sm:text-base"
+              >
+                <span className="w-20 shrink-0 text-muted-foreground">
+                  {link.label}
+                </span>
+                <span className="min-w-0">
+                  <span className="inline-block">{link.base}</span>
+                  <span className="inline-block rounded bg-muted px-1.5 text-muted-foreground">
+                    {"{config}"}
+                  </span>
+                  <span className="inline-block">{link.tail}</span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <p className="mx-auto mt-6 max-w-2xl font-mono text-xs text-muted-foreground">
+          the config string is the test; all three links carry it verbatim, and
+          slot= picks which element a link renders. Swap the v= URLs next
+          campaign, and it is a fresh test.
         </p>
       </section>
 
       <section className="border-t border-border py-14">
-        <div className="text-center">
-          <SectionTitle title="Have your LLM create the tests, or do it yourself." />
-          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+        <SectionTitle title="Have your LLM create the tests." />
+        <div className="mx-auto mt-12 max-w-3xl">
+          <InstallCard
+            onConvert={() => {
+              // Copying an install command is the LLM-path conversion.
+              void pageTest.test?.trackConversion();
+            }}
+          />
+        </div>
+        <div className="mt-10 text-center">
+          <p className="font-mono text-xs text-muted-foreground">
+            or do it manually
+          </p>
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
             <Button size="lg" asChild>
               <Link
                 to="/builder"
@@ -720,20 +1131,12 @@ export function Landing() {
             </Button>
           </div>
         </div>
-        <div className="mx-auto mt-12 max-w-3xl">
-          <InstallCard
-            onConvert={() => {
-              // Copying an install command is the LLM-path conversion.
-              void pageTest.test?.trackConversion();
-            }}
-          />
-        </div>
       </section>
 
       <section className="border-t border-border py-14">
         <SectionTitle
-          title="This page is a test, too."
-          sub="Two slots, nine combinations, tested together per country and device. This is the code running right now."
+          title="Test your website, too."
+          sub="Install the SDK, or point your coding agent at it, and test images and content directly on the page: headlines, heroes, whole sections, per country and device. This page is a test, too; the code below is running right now."
         />
         <div className="mx-auto mt-12 max-w-3xl">
           <PageTestSnippet serveUrl={serveUrl} pageTest={pageTest} />

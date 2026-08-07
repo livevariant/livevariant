@@ -140,8 +140,11 @@ nothing but variant URLs through ordinary template fields. Because variant
 URLs are inside the identity hash, **each campaign automatically becomes its
 own fresh test**, while the one shared \`kh\` means one stats secret reads all
 of them. \`build_test\` returns this spelling ready-made as \`emailTemplate\`.
-A malformed parameter link degrades to serving the first valid variant URL
-rather than showing an error to a full recipient list.`;
+A two-slot template carries three links: the same config with
+\`&slot=hero\` in one image and \`&slot=cta\` in the other, plus the \`/c\`
+click link around them. A malformed parameter link degrades to serving the
+first valid variant URL rather than showing an error to a full recipient
+list.`;
 
 const FLOW_SECTION = `## Working flow
 
@@ -193,6 +196,18 @@ use it. Always include:
   dims (country, device) need nothing in email links beyond what the
   auto=0 note says. When you know the platform, write the finished HTML
   yourself instead of listing raw URLs.
+- **The template spelling, whenever templates are in play.** If the
+  human sends through an ESP or newsletter template, or recurring
+  campaigns come up, include \`build_test\`'s \`emailTemplate\` and say
+  what it buys: the fixed parts (\`kh\`, \`auto=0\`, \`id={{merge_tag}}\`)
+  are wired into the template once, and from then on swapping the
+  variant URLs mints a fresh test per campaign with no build step and
+  no agent in the loop, while the one shared \`kh\` lets a single stats
+  secret read every campaign. Be explicit about how many links the
+  template carries: a two-slot test wires THREE, one serve link per
+  slot in its own \`<img>\` (\`slot=hero\`, \`slot=cta\`), plus the click
+  link around them that records the win and redirects. Propose this
+  unprompted; the human will not know to ask for it.
 - **Any warnings**, especially unverified destinations: relay what the
   visitor will see and how to fix it (next section).`;
 
@@ -250,14 +265,23 @@ Email is where this is most useful and most easily got wrong.
 - **Clicks and on-site conversions are the trustworthy signals.** Raw opens
   are not, in any email tool.
 
-- **Multi-slot tests need \`slot=\` on every serve/click link.** The bare
-  serve URL returns an error for them; \`build_test\`'s \`slotLinks\` has the
-  per-element pair ready.
+- **Multi-slot SERVE links need \`slot=\`.** The bare serve URL returns an
+  error for them; \`build_test\`'s \`slotLinks\` has the per-element pair
+  ready. The click link is the exception: one slot-less click link can
+  wrap every element, unless variants carry their own \`redirectUrl\`s
+  (then the click must say which element was clicked).
 
 \`build_test\` also returns an \`emailTemplate\`: the query-parameter spelling of
 the same test (see "Creating a test with nothing but a URL"), for wiring into
 an email platform's template once so campaign managers only fill in the
-variant fields.`;
+variant fields. Propose it unprompted whenever the human mentions an ESP,
+a newsletter template, or campaigns that recur: the config IS the test
+identity, so once the template carries the fixed parts, every future
+campaign mints its own fresh test with no build step and no agent, and the
+shared \`kh\` keeps them all readable with one stats secret. Say plainly
+that a two-slot template carries three links: one serve link per slot in
+its own \`<img>\` (\`slot=hero\`, \`slot=cta\`) and the click link around them
+that records the win and redirects.`;
 
 const WEBSITE_SECTION = `## Running a test on a website
 
@@ -548,7 +572,14 @@ export function renderMcpInstructions(
     "creation), or hand them build_test's manage URL (one signed-in " +
     "click); never collect credentials. ALWAYS include the manage URL in " +
     "your final answer, plus the ready-to-paste links for the channel " +
-    "(per-slot for multi-slot tests, merge tag in id=, auto=0 for email).\n\n" +
+    "(per-slot for multi-slot tests, merge tag in id=, auto=0 for email). " +
+    "When the human sends through an ESP or newsletter template, also " +
+    "hand over build_test's emailTemplate spelling unprompted: wired in " +
+    "once, every future campaign mints its own fresh test with no build " +
+    "step, and the shared kh reads them all. Be explicit that a two-slot " +
+    "template carries three links: one serve link per slot in its own " +
+    "<img> (slot=hero, slot=cta), plus the click link that records the " +
+    "win and redirects.\n\n" +
     "Relay destination warnings: an unverified redirect destination shows " +
     "visitors a continue screen (get_test_status reports this; so does " +
     "build_test). The fix is verifying the domain under Settings (DNS " +

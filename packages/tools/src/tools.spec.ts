@@ -117,6 +117,14 @@ describe("build_test", () => {
     expect(out.emailTemplate.hero.imageSrc).toContain("slot=hero");
     expect(out.emailTemplate.cta.imageSrc).toContain("slot=cta");
     expect(out.emailTemplate.hero.imageSrc).toContain("s=hero");
+    // Hypothesis names ride along, so every campaign's stats keep them.
+    expect(out.emailTemplate.hero.imageSrc).toContain("vn=warm");
+    // ONE slot-less click link shared by every element: the template's
+    // destination never depends on which image was clicked.
+    expect(out.emailTemplate.hero.linkHref).not.toContain("slot=");
+    expect(out.emailTemplate.hero.linkHref).toBe(
+      out.emailTemplate.cta.linkHref
+    );
     // The bare serve URL 400s for multi-slot tests, so ready per-slot
     // links must be part of the answer.
     expect(out.slotLinks).toEqual({
@@ -191,15 +199,23 @@ describe("build_test", () => {
     expect(out.warnings.join(" ")).toMatch(/cannot be served by redirect/i);
   });
 
-  it("builds an ESP template whose variant fields come first", async () => {
+  it("builds an ESP template from one shared config string", async () => {
     const out = await twoVariantTest();
-    const { imageSrc } = out.emailTemplate.main;
+    const { imageSrc, linkHref } = out.emailTemplate.main;
     expect(imageSrc).toContain("v={{variant_1_url}}");
     expect(imageSrc).toContain("v={{variant_2_url}}");
-    // The fixed hash last, so the editable fields are readable up front.
-    expect(imageSrc).toMatch(/&kh=[0-9a-f]{64}$/);
+    expect(imageSrc).toMatch(/kh=[0-9a-f]{64}/);
     // Email defaults to no derived context, which is the honest setting.
     expect(imageSrc).toContain("auto=0");
+    // r is identity: it must ride on the image link too, or the click
+    // would reward a different test than the one being served.
+    expect(imageSrc).toContain("r={{landing_url}}");
+    expect(linkHref).toContain("r={{landing_url}}");
+    const configOf = (link: string) =>
+      new URL(link.replace(/\{\{/g, "X").replace(/\}\}/g, "Y")).search
+        .replace(/&(auto|id|slot)=[^&]*/g, "")
+        .replace(/\?(auto|id|slot)=[^&]*&?/, "?");
+    expect(configOf(linkHref)).toBe(configOf(imageSrc));
   });
 });
 

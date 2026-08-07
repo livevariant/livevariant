@@ -64,6 +64,62 @@ async function until(check: () => boolean, ms = 4000): Promise<void> {
 const hero = (container: HTMLElement) =>
   container.querySelector("h1")?.parentElement as HTMLElement;
 
+function stubFetchQuiet() {
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    const path = new URL(url, window.location.origin).pathname;
+    if (path === "/config") {
+      return Response.json({
+        serveUrl: window.location.origin,
+        region: null,
+        gtmId: null,
+        publishableKey: null
+      });
+    }
+    return new Response("404", { status: 404 });
+  });
+}
+
+describe("the setup conversation", () => {
+  it("shows the finished conversation under reduced motion", async () => {
+    // The animation is a scripted reveal; reduced motion must render
+    // the whole conversation immediately, plan through built test.
+    vi.stubGlobal(
+      "matchMedia",
+      (query: string) =>
+        ({
+          matches: query.includes("prefers-reduced-motion"),
+          media: query,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined
+        }) as unknown as MediaQueryList
+    );
+    stubFetchQuiet();
+    const container = render();
+    await until(() => container.textContent?.includes("Looks good!") ?? false);
+    const text = container.textContent ?? "";
+    // The plan names both slots and the built message hands back the
+    // three links a two-slot email test really needs: one serve link
+    // per slot and the click redirect that records the win.
+    expect(text).toContain("slot: hero");
+    expect(text).toContain("slot: cta");
+    expect(text).toContain("Daily brew");
+    expect(text).toContain("slot=hero");
+    expect(text).toContain("slot=cta");
+    expect(text).toContain("livevariant.link/c/");
+    expect(text).toContain("livevariant.com/manage/");
+    expect(text).toContain("9 combinations");
+    // The install card leads with the paste-into-any-AI prompt.
+    expect(text).toContain("ask any AI agent");
+    expect(text).toContain("Nothing to install");
+  });
+});
+
 describe("the landing hero test", () => {
   it("hides the headline until the decision is in, and registers under the deployment's key", async () => {
     let releaseConfig!: () => void;

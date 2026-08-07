@@ -3,6 +3,7 @@ import {
   analyzeOutcomes,
   buildTestUrls,
   cellCount,
+  configToTemplateQuery,
   encodeConfig,
   generateStatsSecret,
   hashStatsSecret,
@@ -266,18 +267,25 @@ export const buildTest = defineTool({
       .optional()
       .describe(
         "Multi-slot tests only: the serve/click URL per element. The bare " +
-          "urls.serve/click return 400 for these tests, because a link " +
-          "must say which element it renders; use these instead."
+          "urls.serve returns 400 for these tests, because a serve must " +
+          "say which element it renders. The bare urls.click works when " +
+          "the destination is uniform (a config redirectUrl or ?to=); " +
+          "per-slot clicks matter only for per-variant redirectUrls."
       ),
     emailTemplate: z
       .record(
         z.string(),
         z.object({ imageSrc: z.string(), linkHref: z.string() })
       )
+      .optional()
       .describe(
         "Query-parameter spelling per slot for an ESP template: wire it " +
-          "once, then campaign managers fill only the variant fields. " +
-          "Multi-slot links carry &slot= to say which element each serves."
+          "once, then campaign managers fill only the merge fields. All " +
+          "links share one identical config string (names, ctx dims, kh " +
+          "and the landing r= included, so serve and click stay ONE " +
+          "test); image links add &slot= per element, the click link " +
+          "needs none. Absent when a variant has inline content or its " +
+          "own redirectUrl, which the parameter form cannot express."
       ),
     warnings: z.array(z.string()),
     registeredTo: z
@@ -363,37 +371,29 @@ export const buildTest = defineTool({
       );
     }
 
-    // ESP-template spelling. Every link carries the whole test (all
-    // slots), and in a multi-slot test each link adds &slot= to say which
-    // element it renders.
-    const templateBase = entries
-      .map(
-        ([key, variants]) =>
-          (multiSlot ? `s=${key}&` : "") +
-          variants
-            .map(
-              (_, i) =>
-                `v={{${multiSlot ? `${key}_` : ""}variant_${i + 1}_url}}`
-            )
-            .join("&")
-      )
-      .join("&");
-    const templateTail = `&auto=0&id={{recipient_id}}&kh=${configInput.statsKeyHash}`;
-    const emailTemplate = Object.fromEntries(
-      entries.map(([key]) => [
-        key,
-        {
-          imageSrc:
-            `${serveOrigin}/s?${templateBase}` +
-            (multiSlot ? `&slot=${key}` : "") +
-            templateTail,
-          linkHref:
-            `${serveOrigin}/c?${templateBase}` +
-            (multiSlot ? `&slot=${key}` : "") +
-            `&r={{landing_url}}${templateTail}`
-        }
-      ])
-    );
+    // ESP-template spelling: ONE query string from the core serializer
+    // (so vn names, ctx dims and kh all survive into every future
+    // campaign), plus runtime tails per link. r rides inside that shared
+    // string because it is part of the test's identity: a click link
+    // that carried r alone would reward a different test than the one
+    // the images serve. The click link needs no slot=, since the
+    // template's destination never depends on the clicked element.
+    const templateQuery = configToTemplateQuery(parsed);
+    const templateTail = "&auto=0&id={{recipient_id}}";
+    const emailTemplate =
+      templateQuery === null
+        ? undefined
+        : Object.fromEntries(
+            entries.map(([key]) => [
+              key,
+              {
+                imageSrc:
+                  `${serveOrigin}/s?${templateQuery}${templateTail}` +
+                  (multiSlot ? `&slot=${key}` : ""),
+                linkHref: `${serveOrigin}/c?${templateQuery}${templateTail}`
+              }
+            ])
+          );
 
     return {
       testId: encoded.testId,
@@ -426,7 +426,7 @@ export const buildTest = defineTool({
             )
           }
         : {}),
-      emailTemplate,
+      ...(emailTemplate ? { emailTemplate } : {}),
       warnings,
       ...(await maybeRegister(
         context,

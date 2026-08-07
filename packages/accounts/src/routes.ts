@@ -29,6 +29,7 @@ import {
   removeDomain,
   removePublishableKey,
   removeTest,
+  setKeyLabel,
   setLockReads
 } from "./registry.js";
 import { member, organization } from "./schema.js";
@@ -53,7 +54,15 @@ const claimSchema = z.object({
   label: z.string().max(120).optional()
 });
 
-const lockSchema = z.object({ lockReads: z.boolean() });
+const keyPatchSchema = z
+  .object({
+    lockReads: z.boolean().optional(),
+    /** Null clears the name; naming promotes a key into Settings. */
+    label: z.string().max(120).nullable().optional()
+  })
+  .refine(body => body.lockReads !== undefined || body.label !== undefined, {
+    message: "nothing to change"
+  });
 
 const statusSchema = z.object({
   encoded: z.string().min(1).max(8192),
@@ -226,7 +235,7 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
     if (!who) {
       return c.json(unauthorized, 401);
     }
-    const body = lockSchema.safeParse(await c.req.json().catch(() => null));
+    const body = keyPatchSchema.safeParse(await c.req.json().catch(() => null));
     if (!body.success) {
       return c.json({ error: "invalid request" }, 400);
     }
@@ -234,17 +243,36 @@ export function createAccountRoutes(deps: AccountRoutesDeps): Hono {
     if (!who.orgId || !canAdmin(who, who.orgId)) {
       return c.json({ error: "requires an owner or admin role" }, 403);
     }
-    const changed = await setLockReads(
-      deps.db,
-      who.orgId,
-      kh,
-      body.data.lockReads
-    );
-    if (!changed) {
-      return c.json({ error: "no such key in this organization" }, 404);
+    if (body.data.lockReads !== undefined) {
+      const changed = await setLockReads(
+        deps.db,
+        who.orgId,
+        kh,
+        body.data.lockReads
+      );
+      if (!changed) {
+        return c.json({ error: "no such key in this organization" }, 404);
+      }
+    }
+    if (body.data.label !== undefined) {
+      const changed = await setKeyLabel(
+        deps.db,
+        who.orgId,
+        kh,
+        body.data.label
+      );
+      if (!changed) {
+        return c.json({ error: "no such key in this organization" }, 404);
+      }
     }
     deps.provider.invalidateKey(kh);
-    return c.json({ kh, lockReads: body.data.lockReads });
+    return c.json({
+      kh,
+      ...(body.data.lockReads !== undefined
+        ? { lockReads: body.data.lockReads }
+        : {}),
+      ...(body.data.label !== undefined ? { label: body.data.label } : {})
+    });
   });
 
   app.delete("/account/keys/:kh", async c => {

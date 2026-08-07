@@ -861,10 +861,7 @@ export function createApp(options: AppOptions): Hono {
       return ctx.error;
     }
     const { decoded, params, identity, query } = ctx;
-    const slot = resolveSlot(decoded, c.req.query("slot"));
-    if ("error" in slot) {
-      return slot.error;
-    }
+    const requestedSlot = c.req.query("slot");
     const to = c.req.query("to");
     // Validate every destination BEFORE recording anything: an error that
     // has already counted a conversion would skew the test, and an error
@@ -875,10 +872,42 @@ export function createApp(options: AppOptions): Hono {
         400
       );
     }
-    const candidates =
-      to !== undefined
-        ? [to]
-        : slot.variants.map(v => v.redirectUrl ?? decoded.config.redirectUrl);
+    // A multi-slot email wraps every element in ONE click link, so a
+    // click needs no ?slot= when the destination cannot depend on the
+    // slot anyway: an explicit ?to=, or a config-level redirectUrl with
+    // no per-variant redirects. Only when variants carry their own
+    // destinations does the click have to say which element was clicked.
+    const entries = slotEntries(decoded.config);
+    const uniformDestination =
+      to ??
+      (entries.every(([, variants]) =>
+        variants.every(v => v.redirectUrl === undefined)
+      )
+        ? decoded.config.redirectUrl
+        : undefined);
+    let candidates: Array<string | undefined>;
+    let pickTarget: (choice: number[]) => string | undefined;
+    if (
+      requestedSlot === undefined &&
+      entries.length > 1 &&
+      uniformDestination !== undefined
+    ) {
+      candidates = [uniformDestination];
+      pickTarget = () => uniformDestination;
+    } else {
+      const slot = resolveSlot(decoded, requestedSlot);
+      if ("error" in slot) {
+        return slot.error;
+      }
+      candidates =
+        to !== undefined
+          ? [to]
+          : slot.variants.map(v => v.redirectUrl ?? decoded.config.redirectUrl);
+      pickTarget = choice =>
+        to ??
+        slot.variants[choice[slot.index]].redirectUrl ??
+        decoded.config.redirectUrl;
+    }
     if (candidates.some(target => target === undefined)) {
       return c.json(
         { error: "no redirect target: pass ?to= or set a redirectUrl" },
@@ -895,10 +924,7 @@ export function createApp(options: AppOptions): Hono {
     // A click implies a serve, so assign (sticky or fresh) before rewarding.
     const { cell } = await service.assign(params, identity);
     const choice = decodeCell(params.slotSizes, cell);
-    const variant = slot.variants[choice[slot.index]];
-    const target = (to ??
-      variant.redirectUrl ??
-      decoded.config.redirectUrl) as string;
+    const target = pickTarget(choice) as string;
     // Never reward an identity BORN on this request: a crawler or link
     // scanner presenting browser headers would otherwise mint a cookie
     // and count a conversion in one hit. A real first-time visitor

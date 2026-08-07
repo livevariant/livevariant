@@ -118,11 +118,12 @@ describe("claiming", () => {
 
   it("yields exactly one winner under concurrency", async () => {
     const kh = freshKh();
+    // Labeled, because listKeys (checked below) lists named keys only.
     const results = await Promise.all([
-      claimKey(db, { kh, ...orgA }),
-      claimKey(db, { kh, ...orgB }),
-      claimKey(db, { kh, ...orgA }),
-      claimKey(db, { kh, ...orgB })
+      claimKey(db, { kh, ...orgA, label: "raced" }),
+      claimKey(db, { kh, ...orgB, label: "raced" }),
+      claimKey(db, { kh, ...orgA, label: "raced" }),
+      claimKey(db, { kh, ...orgB, label: "raced" })
     ]);
     const winners = results.filter(r => r.status !== "conflict");
     const owners = new Set(

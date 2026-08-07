@@ -222,6 +222,51 @@ describe("multi-slot serving", () => {
     expect(sumConversions(await stats(encoded))).toBe(1);
   });
 
+  it("clicks need no slot when the destination is uniform", async () => {
+    // A multi-slot email wraps every element in ONE click link. With a
+    // config-level redirectUrl and no per-variant redirects, the slot
+    // cannot change where the click lands, so it is not required.
+    const { encoded } = await makeMultiTest();
+    await app.request(`/s/${encoded}?id=c9&slot=hero`);
+    const click = await app.request(`/c/${encoded}?id=c9`);
+    expect(click.status).toBe(302);
+    expect(click.headers.get("location")).toContain(
+      "https://example.com/thanks"
+    );
+    const s = await stats(encoded);
+    // The click rewarded the SAME assignment the serve created.
+    expect(s.totalAssignments).toBe(1);
+    expect(sumConversions(s)).toBe(1);
+  });
+
+  it("clicks still need the slot when variants carry their own destinations", async () => {
+    const { encoded } = await makeMultiTest({
+      slots: {
+        hero: [
+          {
+            name: "warm",
+            url: "https://example.com/hero-warm",
+            redirectUrl: "https://example.com/warm-lp"
+          },
+          { name: "cool", url: "https://example.com/hero-cool" }
+        ],
+        cta: [
+          { name: "go", url: "https://example.com/cta-go" },
+          { name: "wait", url: "https://example.com/cta-wait" }
+        ]
+      }
+    } as Partial<TestConfigInput>);
+    const bare = await app.request(`/c/${encoded}?id=c10`);
+    expect(bare.status).toBe(400);
+    expect((await bare.json()).error).toMatch(/slot/);
+    // An explicit ?to= restores the uniform destination and the
+    // slot-less click with it.
+    const to = await app.request(
+      `/c/${encoded}?id=c10&to=${encodeURIComponent("https://example.com/thanks")}`
+    );
+    expect(to.status).toBe(302);
+  });
+
   it("defaults the slot only when there is exactly one", async () => {
     const { encoded } = await makeTest();
     const res = await app.request(`/s/${encoded}?id=one`);

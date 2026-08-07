@@ -5,7 +5,7 @@
  * upserts with a read-back, so concurrency yields exactly one winner
  * instead of a double claim.
  */
-import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import { assetRefs, domains, keys, publishableKeys, tests } from "./schema.js";
 import { decodeConfig } from "@livevariant/core";
 import type { Db } from "./auth.js";
@@ -86,6 +86,31 @@ export async function setLockReads(
   return result.meta.changes > 0;
 }
 
+/**
+ * Naming a key is what makes it deliberate: Settings lists only labeled
+ * keys, so renaming (or naming an incidentally-claimed one) is how a key
+ * is promoted into the managed list. Null clears the name again.
+ */
+export async function setKeyLabel(
+  db: Db,
+  orgId: string,
+  kh: string,
+  label: string | null
+): Promise<boolean> {
+  const result = await db
+    .update(keys)
+    .set({ label })
+    .where(and(eq(keys.kh, kh), eq(keys.orgId, orgId)));
+  return result.meta.changes > 0;
+}
+
+/**
+ * NAMED keys only: a label is what makes a key deliberate (a template
+ * key), and Settings manages exactly those. Unnamed keys accumulate one
+ * per individually claimed test and live with their tests; returning
+ * them here would grow the payload (and the per-row test-count
+ * subquery) with account age, so they are simply never listed.
+ */
 export async function listKeys(db: Db, orgId: string) {
   const rows = await db
     .select({
@@ -98,7 +123,7 @@ export async function listKeys(db: Db, orgId: string) {
       )`
     })
     .from(keys)
-    .where(eq(keys.orgId, orgId))
+    .where(and(eq(keys.orgId, orgId), isNotNull(keys.label)))
     .orderBy(desc(keys.claimedAt));
   return rows.map(row => ({ ...row, claimedAt: row.claimedAt.getTime() }));
 }

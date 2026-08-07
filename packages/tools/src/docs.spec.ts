@@ -64,6 +64,19 @@ describe("the agent docs source", () => {
     expect(instructions).not.toContain("self.example//");
   });
 
+  it("tells the agent to propose the template spelling on its own", () => {
+    // The human will not know to ask: when newsletter templates are in
+    // play, the emailTemplate deliverable and its three-link shape must
+    // be offered unprompted, on every surface.
+    const skill = renderSkillMd();
+    expect(skill).toMatch(/Propose this\s+unprompted/);
+    expect(skill).toMatch(/Propose it\s+unprompted/);
+    expect(skill).toMatch(/three links|wires THREE/i);
+    const instructions = renderMcpInstructions();
+    expect(instructions).toContain("emailTemplate spelling unprompted");
+    expect(instructions).toContain("three links");
+  });
+
   it("tells an agent without network access to ask for an install", () => {
     // The skill's fallback ladder must end with every install route, not
     // with a silent dead end.

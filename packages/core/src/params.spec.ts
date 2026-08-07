@@ -123,6 +123,83 @@ describe("configToParams", () => {
   });
 });
 
+describe("configToTemplateQuery", () => {
+  it("keeps everything but the variant URLs, which become merge fields", async () => {
+    const { configToTemplateQuery } = await import("./params.js");
+    const kh = "a".repeat(64);
+    const { config } = await configFromParams(
+      query(
+        `s=hero&v=${A}&v=${B}&s=cta&v=https://example.com/x&v=https://example.com/y` +
+          `&vn=packshot&vn=cafe&vn=shop&vn=ritual&ctx=source:utm_source,country` +
+          `&kh=${kh}`
+      )
+    );
+    const template = configToTemplateQuery(config);
+    expect(template).not.toBeNull();
+    // Slot-scoped placeholders, in declaration order.
+    expect(template).toContain("v={{hero_variant_1_url}}");
+    expect(template).toContain("v={{cta_variant_2_url}}");
+    // Names, dims and the stats key survive verbatim: template campaigns
+    // must not silently lose the segments or labels the plan configured.
+    expect(template).toContain("vn=packshot");
+    expect(template).toContain("vn=ritual");
+    expect(template).toContain(encodeURIComponent("source:utm_source"));
+    expect(template).toContain(`kh=${kh}`);
+    // No redirectUrl in the config: the landing page becomes a merge
+    // field too, on the ONE shared string every link reuses.
+    expect(template).toContain("r={{landing_url}}");
+  });
+
+  it("keeps a configured redirectUrl instead of a placeholder", async () => {
+    const { configToTemplateQuery } = await import("./params.js");
+    const { config } = await configFromParams(
+      query(`v=${A}&v=${B}&r=https://shop.example.com/lp`)
+    );
+    const template = configToTemplateQuery(config);
+    expect(template).toContain(
+      `r=${encodeURIComponent("https://shop.example.com/lp")}`
+    );
+    expect(template).not.toContain("{{landing_url}}");
+    // Single-slot placeholders carry no slot prefix.
+    expect(template).toContain("v={{variant_1_url}}");
+  });
+
+  it("filled in, serve and click spellings hash to ONE test", async () => {
+    // The invariant the whole template rests on: r is identity, so it
+    // must ride on every link; a template whose click link disagreed
+    // with its image links would reward a test nobody is serving.
+    const { configToTemplateQuery } = await import("./params.js");
+    const { config } = await configFromParams(
+      query(`s=hero&v=${A}&v=${B}&s=cta&v=${A}&v=${B}&kh=${"b".repeat(64)}`)
+    );
+    const filled = (configToTemplateQuery(config) as string)
+      .replace("{{hero_variant_1_url}}", encodeURIComponent(A))
+      .replace("{{hero_variant_2_url}}", encodeURIComponent(B))
+      .replace("{{cta_variant_1_url}}", encodeURIComponent(A))
+      .replace("{{cta_variant_2_url}}", encodeURIComponent(B))
+      .replace("{{landing_url}}", encodeURIComponent("https://example.com/lp"));
+    // Runtime params differ per link and must not affect identity.
+    const serveHero = await configFromParams(
+      query(`${filled}&auto=0&id=r1&slot=hero`)
+    );
+    const serveCta = await configFromParams(
+      query(`${filled}&auto=0&id=r1&slot=cta`)
+    );
+    const click = await configFromParams(query(`${filled}&id=r1`));
+    expect(serveCta.testId).toBe(serveHero.testId);
+    expect(click.testId).toBe(serveHero.testId);
+  });
+
+  it("has no spelling when the config has none", async () => {
+    const { configToTemplateQuery } = await import("./params.js");
+    const { testConfigSchema } = await import("./schema.js");
+    const inline = testConfigSchema.parse({
+      variants: ["warm copy", "cool copy"]
+    });
+    expect(configToTemplateQuery(inline)).toBeNull();
+  });
+});
+
 describe("passthroughParams", () => {
   it("keeps attribution and drops everything of ours", async () => {
     const params = passthroughParams(

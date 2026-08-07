@@ -22,6 +22,13 @@
       "when": 1786035123442,
       "tag": "0002_asset-refs",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786112952288,
+      "tag": "0003_keys-org-named-index",
+      "breakpoints": true
     }
   ]
 }

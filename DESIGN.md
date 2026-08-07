@@ -119,27 +119,55 @@ supporting act, never the headline.
 2. **Hero:** giant serif "The test that _keeps_ testing." + one
    subline: "Your LLM drafts the scenes, builds the test, and hands you
    one URL for your newsletter."
-3. **Left focal object, the email window:** minimal mail client; its
-   hero-image slot cycles the three assistant-drafted scenes (A
-   packshot / B cafe / C fireplace) with a filmstrip pager underlined
-   in variant colors and a green `LIVE - B 59%` chip. Caption: "the
-   image slot cycles through the three scenes your assistant drafted."
-4. **Right focal object, the living streamgraph:** three horizontal
-   SEGMENT lanes (`source: newsletter`, `source: blog`, `country: DE
-(merge tag)`), each lane internally sharing its height between the
+3. **First band, the conversation above the email window:** a chat
+   window playing the scripted setup conversation once when it scrolls
+   into view, growing as messages arrive (no inner scroll): ask for
+   ideas; the assistant proposes two slots, `hero` with the three
+   scene thumbnails and `cta` with three button labels, each
+   underlined in its variant color, plus a `ctx: utm_source · country
+(merge tag)` line; "Looks good!"; built, handing back the three
+   template links (serve per slot, click redirect) and a pulsing LIVE
+   chip, with the manage link listed among the returned links. Then
+   its own band, headed "The newsletter, running the test it just
+   built.": the email window running that test, a minimal mail client
+   whose hero-image slot cycles the three assistant-drafted scenes (A
+   packshot / B cafe / C fireplace) on a 5s cycle while the CTA button
+   cycles its three labels out of phase (7s), filmstrip pager
+   underlined in variant colors, green `LIVE - B` chip, mono
+   combination readout (`hero b - cta c`). Reduced motion: the
+   finished conversation, statically.
+4. **The living streamgraph:** three horizontal SEGMENT lanes matching
+   the conversation's ctx (`utm_source: newsletter`, `utm_source:
+blog`, `country: DE (merge tag)`), each lane internally sharing its
+   height between the
    three VARIANT bands (blue/orange/violet), widths drifting over a
    -7d to now axis, all lanes converging into one pulsing LIVE dot.
    Caption: "three variants, competing inside every audience segment,
    forever." **Semantics rule: lanes are segments, bands are variants.
    Never color a lane by variant.**
-5. **URL strip:** `https://livevariant.link/s?s=hero&v=a.jpg&v=b.jpg&v=c.jpg`
-   in large mono, `v=` params tinted per variant. Caption: "the whole
-   test lives in this URL."
-6. **Install card, tabbed, skills-first:** tabs `skills` (default:
-   `npx skills add livevariant/livevariant`), `Claude Code / Cowork`,
-   `Codex`, `any agent (MCP)`. MCP is the fallback tab, never the
-   headline. Beside it the mono scoreboard: `hero.image A 22% / B 59% /
-C 19% · n=12,483 · still testing`.
+5. **URL strip, definition then uses:** a `config` row spelling the
+   two-slot test one parameter group per line, annotated with muted
+   `// comments` (element declarations, a variant's image + stats
+   name, `kh=<your-stats-key>` as the stable yours-once value,
+   `id={{email_or_any_id}}` as the merge tag), `v=…&vn=…` pairs
+   tinted per variant. The click destination is `r=` INSIDE the shared
+   string (r is identity: it must ride on every link). Placeholder
+   grammar: `<…>` is a constant pasted once, `{{…}}` is a
+   per-recipient merge value. Below it the THREE template links,
+   labeled `img hero` / `img cta` / `click`, each reusing the string
+   via a muted `{config}` chip; the images tail `&auto=0&slot=…`, the
+   `/c` click link needs no tail at all.
+   Sub says composing the parameters IS creating the test and that kh
+   comes from the builder or any of your tests. Mono footnote: all
+   three links carry the config verbatim; `slot=` picks the element;
+   swapping `v=` URLs next campaign mints a fresh test.
+6. **Install card, tabbed, prompt-first:** tabs `ask any AI agent`
+   (default: a copyable prompt naming the deployment, zero install),
+   `skills` (`npx skills add livevariant/livevariant`), `Claude Code /
+Cowork`, `Codex`, `any agent (MCP)`. MCP is the fallback tab, never
+   the headline. Below the card, a mono "or do it manually" lead-in
+   with the Create a test / Deploy your own buttons: the manual path
+   follows the agent path, never precedes it.
 7. **Footer:** "AGPL open source. Deploy your own on Cloudflare in one
    click."
 8. **Dogfooding (site implementation):** the page's own hero
@@ -166,14 +194,19 @@ C 19% · n=12,483 · still testing`.
 
 ## Decisions Log
 
-| Date       | Decision                                                                 | Rationale                                                                |
-| ---------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| 2026-08-04 | Initial system via /design-consultation (research + Codex + indie voice) | Category converges on platform-SaaS look; we go anti-platform, URL-first |
-| 2026-08-04 | Midnight Editorial chosen over cream parlor and Swiss instrument         | User picked round-3 C; parlor ornament read as clutter                   |
-| 2026-08-04 | Refine loop removed from the journey                                     | Tests never end; a refine arrow contradicts the core claim               |
-| 2026-08-04 | Variant demo = fixed product, changing scenes                            | Truthful to what generation does well; clearer story than 3 lookalikes   |
-| 2026-08-04 | Installer is skills-first with tabs; MCP demoted to "any agent"          | `npx -y @livevariant/mcp` runs a server, it installs nothing             |
-| 2026-08-04 | Streamgraph semantics: lanes = segments, bands = variants                | First draft colored lanes as variants; wrong with 3 variants x 2 dims    |
-| 2026-08-05 | Accounts are optional ownership, never a gate                            | Claim a stats key from the manage link; local storage stays the default  |
-| 2026-08-05 | Unverified redirect destinations get a continue screen, not a block      | Names the destination, kills one-hop phishing, verification removes it   |
-| 2026-08-05 | One stats page in the React app; server manage shell deleted             | Two implementations meant every feature built twice or silently once     |
+| Date       | Decision                                                                  | Rationale                                                                |
+| ---------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 2026-08-04 | Initial system via /design-consultation (research + Codex + indie voice)  | Category converges on platform-SaaS look; we go anti-platform, URL-first |
+| 2026-08-04 | Midnight Editorial chosen over cream parlor and Swiss instrument          | User picked round-3 C; parlor ornament read as clutter                   |
+| 2026-08-04 | Refine loop removed from the journey                                      | Tests never end; a refine arrow contradicts the core claim               |
+| 2026-08-04 | Variant demo = fixed product, changing scenes                             | Truthful to what generation does well; clearer story than 3 lookalikes   |
+| 2026-08-04 | Installer is skills-first with tabs; MCP demoted to "any agent"           | `npx -y @livevariant/mcp` runs a server, it installs nothing             |
+| 2026-08-04 | Streamgraph semantics: lanes = segments, bands = variants                 | First draft colored lanes as variants; wrong with 3 variants x 2 dims    |
+| 2026-08-05 | Accounts are optional ownership, never a gate                             | Claim a stats key from the manage link; local storage stays the default  |
+| 2026-08-05 | Unverified redirect destinations get a continue screen, not a block       | Names the destination, kills one-hop phishing, verification removes it   |
+| 2026-08-05 | One stats page in the React app; server manage shell deleted              | Two implementations meant every feature built twice or silently once     |
+| 2026-08-07 | First band shows the setup conversation beside the email window           | The flow (plan, approve, build) is the product story; the email is proof |
+| 2026-08-07 | Conversation and newsletter are separate headed bands, stacked            | Two focal artifacts in one band blurred both; each earns its own header  |
+| 2026-08-07 | Install card leads with a paste-into-any-AI prompt; manual buttons follow | Naming the site to any agent is the widest zero-install funnel           |
+| 2026-08-07 | URL strip shows the full template spelling, wrapped, slots and vn named   | The no-create-step claim needs the real parameters visible on screen     |
+| 2026-08-07 | Stats keys join Settings: generate client-side, secret shown exactly once | kh must be findable somewhere stable; the backend routes already existed |
