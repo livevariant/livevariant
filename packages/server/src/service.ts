@@ -23,8 +23,10 @@ import {
   urlSignals,
   validCell,
   variantName,
+  enumerateBucketLabels,
   type AssignmentRecord,
   type CloudflareGeo,
+  type CtxDim,
   type DecodedConfig,
   type DerivedState,
   type ExclusionPolicy,
@@ -208,7 +210,8 @@ export interface TestBackend {
   ): Promise<TestPolicy>;
   stats(
     params: ServingParams,
-    labels?: Array<{ key: string; variants: string[] }>
+    labels?: Array<{ key: string; variants: string[] }>,
+    ctxDims?: CtxDim[]
   ): Promise<TestStats>;
 }
 
@@ -228,9 +231,10 @@ export class TestService implements TestBackend {
   /** Stats from the event log, with the cap policy applied. */
   async stats(
     params: ServingParams,
-    labels?: Array<{ key: string; variants: string[] }>
+    labels?: Array<{ key: string; variants: string[] }>,
+    ctxDims?: CtxDim[]
   ): Promise<TestStats> {
-    return buildStats(this.store, params, labels);
+    return buildStats(this.store, params, labels, ctxDims);
   }
 
   /** Creator-authorized quarantine; the caller checks the stats secret. */
@@ -541,8 +545,16 @@ export interface TestStats {
    * doing overall"; for a single-slot test it mirrors `combinations`.
    */
   slots: Record<string, VariantStats[]>;
-  /** Per-context-bucket outcomes, arrays indexed by cell. */
-  buckets: Record<string, { pulls: number[]; conversions: number[] }>;
+  /**
+   * Per-context-bucket outcomes, arrays indexed by cell. `label` is the
+   * recovered readable context ("country=nl") when every dimension in
+   * the bucket has a declared `values` list; absent for free-form
+   * dimensions, whose keys stay the opaque hashes they are stored as.
+   */
+  buckets: Record<
+    string,
+    { pulls: number[]; conversions: number[]; label?: string }
+  >;
   /** What the creator's quarantine removed, so the numbers are auditable. */
   excluded: {
     total: number;
@@ -567,7 +579,8 @@ export interface TestStats {
 export async function buildStats(
   store: StateStore,
   params: ServingParams,
-  labels?: Array<{ key: string; variants: string[] }>
+  labels?: Array<{ key: string; variants: string[] }>,
+  ctxDims?: CtxDim[]
 ): Promise<TestStats> {
   const all: AssignmentRecord[] = [];
   for await (const rec of store.scanAssignments(params.testId)) {
@@ -613,6 +626,18 @@ export async function buildStats(
       bucket.pulls[rec.cell]++;
       if (rec.rewardTotal > 0) {
         bucket.conversions[rec.cell]++;
+      }
+    }
+  }
+
+  if (ctxDims && Object.keys(buckets).length > 0) {
+    // Readable names for the opaque bucket keys, recovered by hashing
+    // every enumerable context and matching; never guessed.
+    const bucketNames = await enumerateBucketLabels(params.testId, ctxDims);
+    for (const [key, bucket] of Object.entries(buckets)) {
+      const label = bucketNames.get(key);
+      if (label !== undefined) {
+        bucket.label = label;
       }
     }
   }

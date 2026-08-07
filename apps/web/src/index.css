@@ -196,6 +196,24 @@
   color: var(--foreground);
 }
 
+/* Metrics tick with a short odometer roll when they change (DESIGN.md
+   motion: "decision systems, not confetti"); frozen for reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .stat-roll {
+    animation: stat-roll 300ms ease-out;
+  }
+}
+@keyframes stat-roll {
+  from {
+    transform: translateY(0.45em);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 /* Band drift for the streamgraph; a slow breathing loop. */
 @media (prefers-reduced-motion: no-preference) {
   .live-dot {
