@@ -74,7 +74,16 @@ export function AppLayout() {
       )}
     >
       <header className="mx-auto flex h-16 w-full max-w-6xl items-center gap-6 px-6">
-        <Link to="/" className="font-display text-2xl">
+        <Link to="/" className="font-display flex items-center gap-2 text-2xl">
+          {/* Decorative next to the wordmark, so no alt text; the pair
+              switches with the site's own theme toggle, which a CSS
+              media query cannot see. */}
+          <img
+            src={theme === "dark" ? "/logo-dark.svg" : "/logo-light.svg"}
+            alt=""
+            aria-hidden="true"
+            className="h-5 w-auto"
+          />
           LiveVariant
         </Link>
         <nav className="flex items-center gap-4">

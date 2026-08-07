@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="LiveVariant app icon, light mode">
+  <rect width="1024" height="1024" rx="224" fill="#F2EDE3"/>
+  <g stroke-linecap="round">
+    <line x1="322" y1="322" x2="322" y2="432" stroke="#201C17" stroke-width="64"/>
+    <line x1="702" y1="322" x2="702" y2="552" stroke="#201C17" stroke-width="64"/>
+    <line x1="512" y1="322" x2="512" y2="676" stroke="#D64A22" stroke-width="64"/>
+  </g>
+  <circle cx="322" cy="500" r="76" fill="#201C17"/>
+  <circle cx="702" cy="620" r="76" fill="#201C17"/>
+  <circle cx="512" cy="744" r="76" fill="#D64A22"/>
+  <line x1="248" y1="276" x2="776" y2="276" stroke="#201C17" stroke-width="80" stroke-linecap="round"/>
+</svg>

@@ -105,6 +105,17 @@ function buildClaude(dir, skill) {
 }
 
 function buildChatgpt(dir, skill) {
+  // Byte-copies from the committed renders (scripts/generate-icons.mjs
+  // produces them), so this stays deterministic for the CI drift check.
+  fs.mkdirSync(path.join(dir, "assets"), { recursive: true });
+  fs.copyFileSync(
+    path.join(root, "design-assets", "generated", "icon-512.png"),
+    path.join(dir, "assets", "icon.png")
+  );
+  fs.copyFileSync(
+    path.join(root, "design-assets", "generated", "icon-512-dark.png"),
+    path.join(dir, "assets", "icon-dark.png")
+  );
   writeJson(path.join(dir, ".codex-plugin", "plugin.json"), {
     name: PLUGIN.name,
     description: PLUGIN.description,
@@ -116,6 +127,11 @@ function buildChatgpt(dir, skill) {
     mcpServers: "./.mcp.json",
     interface: {
       displayName: PLUGIN.displayName,
+      // Light is the default wherever only one icon fits; logoDark is
+      // the explicit dark-mode counterpart.
+      composerIcon: "./assets/icon.png",
+      logo: "./assets/icon.png",
+      logoDark: "./assets/icon-dark.png",
       shortDescription: "A/B tests that pick their own winner.",
       longDescription:
         "Build bandit-driven A/B tests from a set of variants, get ready-made " +

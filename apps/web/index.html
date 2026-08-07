@@ -8,6 +8,12 @@
       name="description"
       content="Adaptive A/B testing where the entire test lives in a URL. Traffic shifts toward the winner while the test runs, several elements are optimized as one combination, and no raw visitor data is stored. No accounts, no platform."
     />
+    <!-- The SVG favicon follows the OS theme via its embedded media
+         query; the PNG is the fallback and, per our one-slot rule, the
+         light design. -->
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icon-32.png" type="image/png" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <!-- The hero test cannot choose before it knows the deployment's
          serve URL and publishable key; starting this fetch during HTML
          parse overlaps it with the bundle download instead of paying
