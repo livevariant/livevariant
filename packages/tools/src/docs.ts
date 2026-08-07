@@ -145,11 +145,28 @@ rather than showing an error to a full recipient list.`;
 
 const FLOW_SECTION = `## Working flow
 
-1. \`variant_brief\` for the constraints that apply to the channel and format.
-2. Draft the variants yourself against that brief.
-3. \`build_test\` to get the URLs and the stats secret. Store the secret.
-4. \`generate_priors\`, optionally, to warm-start from what you expect.
-5. \`get_stats\` to read results.
+Plan, confirm, build, deliver. Building is cheap, but a test's identity
+is the hash of its config: every edit afterwards is a NEW test with an
+empty history. So iteration happens on the PLAN, never on a live test.
+
+1. \`variant_brief\` for the constraints that apply to the channel and
+   format.
+2. **Plan the test with the human.** When the goal, elements or variants
+   are not already pinned down, propose them: which element(s) to test
+   (slots), what hypothesis each variant carries, and how many. Default
+   to assets the human already has (their images, pages, copy): ask what
+   exists before creating anything. Offer to GENERATE image variants
+   (see "No image variants yet? Make them") as a proposal, not as the
+   silent default.
+3. **Show the plan before building.** With a human in the loop, present
+   the proposed test in full (per slot: variant names and their content
+   or asset; plus context dimensions, destination, and what counts as a
+   conversion) and let them iterate until it is what they meant. Only
+   then build. Running unattended, skip the pause but still put the plan
+   in your output.
+4. \`build_test\` to get the URLs and the stats secret. Store the secret.
+5. \`generate_priors\`, optionally, to warm-start from what you expect.
+6. \`get_stats\` to read results.
 
 \`inspect_test\` answers "what does this link do?" for any LiveVariant URL, and
 lints it for the mistakes that only surface once a campaign has gone out.
@@ -280,10 +297,13 @@ loop yourself instead of handing snippets to a human:
 
 const IMAGES_SECTION = `## No image variants yet? Make them
 
-Missing creative is not a blocker: \`upload_image\` stores an image on the
-deployment and returns a protected URL to use as a variant (it only serves
-inside the test's flow, so hotlinking is a non-issue). Get pixels however
-your environment allows, in this order:
+Missing creative is not a blocker, but generating it is a PROPOSAL you
+make during planning, never a silent default: the human's existing
+assets always come first, so ask what they have before creating
+anything. When generating is the agreed path, \`upload_image\` stores an
+image on the deployment and returns a protected URL to use as a variant
+(it only serves inside the test's flow, so hotlinking is a non-issue).
+Get pixels however your environment allows, in this order:
 
 1. **Your own image generation tool**, if you have one: generate the
    variations, then \`upload_image\` each.
@@ -474,11 +494,16 @@ export function renderMcpInstructions(): string {
     "302s), and website tests (text/html variants served on-page via the " +
     "tag or SDK with the ENCODED config). Multi-element tests use slots; " +
     "one model optimizes the combination.\n\n" +
-    "Typical flow: variant_brief to learn the constraints, draft the " +
-    "variants yourself, build_test for the URLs, optionally " +
-    "generate_priors to warm-start from what you expect, then get_stats " +
-    "to read results. Trust get_stats's win probabilities over comparing " +
-    "conversion rates by eye.\n\n" +
+    "Typical flow: variant_brief to learn the constraints, then PLAN " +
+    "with the human before building: propose which elements (slots) and " +
+    "variants to test, defaulting to assets they already have and " +
+    "offering to generate creative rather than silently doing so, and " +
+    "show the full proposed test for iteration. Only then build_test " +
+    "for the URLs (an edit after building is a NEW test with an empty " +
+    "history, so iterate on the plan). Optionally generate_priors to " +
+    "warm-start from what you expect, then get_stats to read results. " +
+    "Trust get_stats's win probabilities over comparing conversion " +
+    "rates by eye.\n\n" +
     "Missing image variants are not a blocker: author HTML/SVG, render " +
     "to fixed-size PNGs (browser screenshot or your image tool), and " +
     "upload_image each; all variants of one element must share exact " +
