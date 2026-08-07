@@ -135,7 +135,13 @@ function usePageTest(): PageTestState {
               serverUrl: deployment.serveUrl,
               publishableKey: deployment.publishableKey
             }
-          : {};
+          : {
+              // No key means the only way a key arrives is a GTM-loaded
+              // tag. Without GTM configured there is nothing to wait
+              // for, and waiting the full tag timeout held the hero
+              // invisible for seconds on dev and key-less self-hosts.
+              tagWaitMs: deployment.gtmId ? undefined : (false as const)
+            };
         created = await createTest(PAGE_TEST, {
           ...options,
           // Conversions are tracked manually on the CTA click; no GA

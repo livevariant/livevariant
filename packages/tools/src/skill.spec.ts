@@ -31,7 +31,12 @@ describe("the generated SKILL", () => {
       expect(skill).toContain(`\`${tool.name}\``);
       expect(skill).toContain(tool.summary);
     }
-    const documented = [...skill.matchAll(/^\| `([a-z_]+)`/gm)].map(m => m[1]);
+    // Only the Tools table: the parameter reference also has code-styled
+    // first columns, and those are config fields, not tools.
+    const toolsSection = skill.split("## Tools")[1].split("\n## ")[0];
+    const documented = [...toolsSection.matchAll(/^\| `([a-z_]+)`/gm)].map(
+      m => m[1]
+    );
     expect(documented.sort()).toEqual(TOOLS.map(t => t.name).sort());
   });
 

@@ -6,7 +6,8 @@
  * instead of a double claim.
  */
 import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
-import { domains, keys, publishableKeys, tests } from "./schema.js";
+import { assetRefs, domains, keys, publishableKeys, tests } from "./schema.js";
+import { decodeConfig } from "@livevariant/core";
 import type { Db } from "./auth.js";
 
 export interface ClaimResult {
@@ -109,6 +110,7 @@ export async function listKeys(db: Db, orgId: string) {
  */
 export async function registerTest(
   db: Db,
+  assetOrigins: string[],
   input: {
     testId: string;
     orgId: string;
@@ -130,6 +132,71 @@ export async function registerTest(
       addedAt: new Date()
     })
     .onConflictDoNothing();
+  await recordAssetRefs(db, assetOrigins, input);
+}
+
+/**
+ * Attribution for uploaded files, written at the one moment a config
+ * becomes attributable: registration. The config references its assets
+ * by /a/<sha256> URL; each unique hash gets a (asset, test, org) row,
+ * which is what abuse handling and future cleanup read. Anonymous
+ * tests never reach here, so their assets stay anonymous by design.
+ * Best-effort: a failed ref write must not fail a registration.
+ */
+async function recordAssetRefs(
+  db: Db,
+  assetOrigins: string[],
+  input: { testId: string; orgId: string; encoded?: string }
+): Promise<void> {
+  if (!input.encoded || assetOrigins.length === 0) {
+    return;
+  }
+  try {
+    const { config } = await decodeConfig(input.encoded);
+    const hashes = new Set<string>();
+    for (const variants of Object.values(config.slots)) {
+      for (const variant of variants) {
+        for (const value of [variant.url, variant.image]) {
+          if (!value) {
+            continue;
+          }
+          // The full ORIGIN decides whose asset this is: serving is
+          // bound to configured origins, so a foreign host, an http
+          // downgrade, or a nonstandard port of our own host all
+          // record nothing (the path shape alone is spoofable).
+          let url: URL;
+          try {
+            url = new URL(value);
+          } catch {
+            continue;
+          }
+          if (!assetOrigins.includes(url.origin)) {
+            continue;
+          }
+          const match = url.pathname.match(/^\/a\/([0-9a-f]{64})$/);
+          if (match) {
+            hashes.add(match[1]);
+          }
+        }
+      }
+    }
+    if (hashes.size === 0) {
+      return;
+    }
+    await db
+      .insert(assetRefs)
+      .values(
+        [...hashes].map(assetId => ({
+          assetId,
+          testId: input.testId,
+          orgId: input.orgId,
+          createdAt: new Date()
+        }))
+      )
+      .onConflictDoNothing();
+  } catch {
+    // Attribution is a byproduct; registration is the product.
+  }
 }
 
 export interface TestPage {
@@ -272,6 +339,22 @@ export async function removePublishableKey(
     .delete(publishableKeys)
     .where(and(eq(publishableKeys.key, key), eq(publishableKeys.orgId, orgId)));
   return result.meta.changes > 0;
+}
+
+/**
+ * Removes a test from an org's list. Org-scoped on purpose: a public
+ * publishable key lets anyone REGISTER a test into an org (that is the
+ * pk's job), so the org must symmetrically be able to remove what it
+ * did not ask for.
+ */
+export async function removeTest(
+  db: Db,
+  input: { testId: string; orgId: string }
+): Promise<boolean> {
+  const result = await db
+    .delete(tests)
+    .where(and(eq(tests.testId, input.testId), eq(tests.orgId, input.orgId)));
+  return (result as { meta?: { changes?: number } }).meta?.changes !== 0;
 }
 
 export async function publishableKeyOrg(

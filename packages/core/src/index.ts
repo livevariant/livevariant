@@ -44,6 +44,7 @@ export {
   CONFIG_HARD_LIMIT,
   CONFIG_SOFT_LIMIT,
   computeTestId,
+  IDENTITY_EXCLUDED,
   decodeConfig,
   encodeConfig,
   type DecodedConfig,

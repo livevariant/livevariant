@@ -50,7 +50,30 @@ async function json<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-export async function fetchMe(): Promise<{
+/**
+ * One /account/me per page load, shared by every useAccount consumer
+ * (the header, the builder, ...) and by StrictMode's double effects.
+ * refresh() invalidates it, which is how sign-in/out propagates.
+ */
+let mePromise: Promise<{
+  available: boolean;
+  me: AccountMe | null;
+}> | null = null;
+
+/** Test hook: specs stub fetch per test; the cache must not span them. */
+export function resetAccount(): void {
+  mePromise = null;
+}
+
+export function fetchMe(): Promise<{
+  available: boolean;
+  me: AccountMe | null;
+}> {
+  mePromise ??= fetchMeUncached();
+  return mePromise;
+}
+
+async function fetchMeUncached(): Promise<{
   available: boolean;
   me: AccountMe | null;
 }> {
@@ -75,13 +98,22 @@ export function useAccount(): AccountState {
     me: null
   });
   const refresh = useCallback(() => {
+    // A refresh means something changed (sign-in, sign-out, org
+    // switch): drop the shared cache so every consumer re-reads.
+    mePromise = null;
+    void fetchMe().then(({ available, me }) => {
+      setState({ ready: true, available, me });
+    });
+  }, []);
+  // Mount reads through the cache; only explicit refreshes invalidate.
+  const mount = useCallback(() => {
     void fetchMe().then(({ available, me }) => {
       setState({ ready: true, available, me });
     });
   }, []);
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    mount();
+  }, [mount]);
   return { ...state, refresh };
 }
 

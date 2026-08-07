@@ -4,6 +4,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { createServer } from "@livevariant/mcp";
 import { regionHint, sha256Hex, type CloudflareGeo } from "@livevariant/core";
 import { SERVER_VERSION } from "./version.js";
+import { renderLlmsTxt, renderSkillMd } from "@livevariant/tools";
 import type { AccountsProvider } from "./accounts-port.js";
 import {
   TOOLS,
@@ -108,6 +109,9 @@ export function createApi(options: ApiOptions): Hono {
       accounts:
         provider && raw
           ? {
+              registerWithSecret: provider.registerWithSecret
+                ? input => provider.registerWithSecret!(input)
+                : undefined,
               listTests: async listOptions => {
                 const orgIds = await provider.sessionOrgIds(raw);
                 if (orgIds.length === 0) {
@@ -197,6 +201,20 @@ export function createApi(options: ApiOptions): Hono {
       gtmId: options.gtmId?.trim() || null,
       publishableKey: options.publishableKey?.trim() || null,
       server: SERVER_VERSION
+    })
+  );
+
+  // Agent discovery: the same single-source docs the skill and MCP
+  // serve, rendered with THIS deployment's origin so a self-host
+  // describes itself. Markdown, because the readers are LLMs.
+  app.get("/llms.txt", c =>
+    c.text(renderLlmsTxt(serveUrl ?? new URL(c.req.url).origin), 200, {
+      "content-type": "text/markdown; charset=utf-8"
+    })
+  );
+  app.get("/skills/livevariant/SKILL.md", c =>
+    c.text(renderSkillMd(new URL(c.req.url).origin), 200, {
+      "content-type": "text/markdown; charset=utf-8"
     })
   );
 

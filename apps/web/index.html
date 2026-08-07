@@ -8,6 +8,27 @@
       name="description"
       content="Adaptive A/B testing where the entire test lives in a URL. Traffic shifts toward the winner while the test runs, several elements are optimized as one combination, and no raw visitor data is stored. No accounts, no platform."
     />
+    <link rel="llms-txt" href="/llms.txt" />
+    <link
+      rel="ai-skill"
+      type="text/markdown"
+      title="LiveVariant Agent Skill"
+      href="/skills/livevariant/SKILL.md"
+    />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "LiveVariant",
+        "description": "Adaptive A/B testing where the whole test lives in a URL. AI agents: load the LiveVariant skill (SKILL.md) or the MCP tools at /mcp before building tests; no account or API key is needed.",
+        "url": "https://livevariant.com",
+        "sameAs": [
+          "https://livevariant.com/skills/livevariant/SKILL.md",
+          "https://livevariant.com/llms.txt",
+          "https://github.com/livevariant/livevariant"
+        ]
+      }
+    </script>
     <script>
       // Theme before paint: stored choice wins, else the OS preference.
       (function () {
@@ -25,5 +46,13 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <noscript>
+      For AI agents (HTML-only fetch, no JavaScript): you can create and read
+      A/B tests here with no account. Load the
+      <a href="/skills/livevariant/SKILL.md">LiveVariant skill (SKILL.md)</a>
+      or connect to the MCP endpoint at <a href="/mcp">/mcp</a> (no auth). Site
+      guidance for agents: <a href="/llms.txt">llms.txt</a>. REST:
+      <a href="/openapi.json">openapi.json</a> and <a href="/docs">docs</a>.
+    </noscript>
   </body>
 </html>

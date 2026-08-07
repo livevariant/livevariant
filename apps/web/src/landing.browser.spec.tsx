@@ -3,6 +3,7 @@ import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { Landing } from "./pages/Landing";
+import { resetDeploymentConfig } from "./lib/serve-url";
 
 /**
  * The hero headline is served by a real test, which means it is not
@@ -18,6 +19,7 @@ let containers: HTMLElement[] = [];
 
 beforeEach(() => {
   localStorage.clear();
+  resetDeploymentConfig();
 });
 
 afterEach(() => {

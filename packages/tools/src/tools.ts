@@ -196,6 +196,17 @@ export const buildTest = defineTool({
           "Stamp the served combination into this parameter on redirect, e.g. " +
             '"utm_content", so the test shows up in the customer\'s own analytics.'
         ),
+      publishableKey: z
+        .string()
+        .regex(/^pk_[a-z0-9]{24}$/)
+        .optional()
+        .describe(
+          "Registers the new test to this key's organization at creation, " +
+            "so it appears under My tests immediately. The key is PUBLIC " +
+            "(from the dashboard's Settings); authority comes from the " +
+            "stats secret this call mints. Only works on deployments with " +
+            "accounts; elsewhere a warning says so and the test still works."
+        ),
       region: z
         .enum(TEST_REGIONS)
         .optional()
@@ -252,7 +263,14 @@ export const buildTest = defineTool({
           "once, then campaign managers fill only the variant fields. " +
           "Multi-slot links carry &slot= to say which element each serves."
       ),
-    warnings: z.array(z.string())
+    warnings: z.array(z.string()),
+    registeredTo: z
+      .string()
+      .optional()
+      .describe(
+        "The organization the test was registered to, when a " +
+          "publishableKey was given and accepted."
+      )
   }),
   async handler(input, context) {
     const statsSecret = generateStatsSecret();
@@ -371,10 +389,62 @@ export const buildTest = defineTool({
         clickNoAutoContext: urls.noAuto.click
       },
       emailTemplate,
-      warnings
+      warnings,
+      ...(await maybeRegister(
+        context,
+        encoded.encoded,
+        statsSecret,
+        input.publishableKey,
+        warnings
+      ))
     };
   }
 });
+
+/**
+ * Registration at creation: build_test holds the secret it just
+ * minted, so a publishable key is all the caller adds. Failure never
+ * fails the build; the test works regardless, and the warning says
+ * what to do.
+ */
+async function maybeRegister(
+  context: ToolContext,
+  encoded: string,
+  statsSecret: string,
+  publishableKey: string | undefined,
+  warnings: string[]
+): Promise<{ registeredTo?: string }> {
+  if (!publishableKey) {
+    return {};
+  }
+  if (!context.accounts?.registerWithSecret) {
+    warnings.push(
+      "publishableKey ignored: this deployment (or transport) has no " +
+        "accounts. Use the hosted MCP/API, or register later with " +
+        "register_test."
+    );
+    return {};
+  }
+  const result = await context.accounts.registerWithSecret({
+    encoded,
+    statsSecret,
+    publishableKey
+  });
+  if (result.ok) {
+    return { registeredTo: result.org };
+  }
+  warnings.push(
+    result.reason === "unknown-key"
+      ? "publishableKey not recognized on this deployment; the test was " +
+          "created but not registered."
+      : result.reason === "claimed-elsewhere"
+        ? "this test's stats key is already claimed by another " +
+          "organization; created but not registered."
+        : "the test was created but could not be registered " +
+          `(${result.reason}).`
+  );
+  return {};
+}
 
 // ---------------------------------------------------------------------------
 
@@ -1161,6 +1231,91 @@ const listTests = defineTool({
   }
 });
 
+const registerTestTool = defineTool({
+  name: "register_test",
+  title: "Register a test to an account",
+  summary: "Puts an existing test under an organization's My tests",
+  description:
+    "Registers a test you built earlier to the organization a publishable " +
+    "key belongs to, so it shows under My tests and its stats are readable " +
+    "from the dashboard without the secret.\n\n" +
+    "Authority is the STATS SECRET: its hash is inside the config, so " +
+    "presenting it proves you created (or were entrusted with) the test. " +
+    "The publishable key is public and only names the org; alone it grants " +
+    "nothing, which is why it is safe for a user to paste into chat. " +
+    "Prefer passing publishableKey to build_test directly: it registers at " +
+    "creation in one step. Keyless tests cannot be registered this way " +
+    "(nothing to prove with); they register through the tag on a verified " +
+    "domain. Because the key is public, an org's list is publicly " +
+    "writable by design, and the org can always remove a listing from " +
+    "its dashboard (the test itself keeps serving).",
+  readOnly: false,
+  reachesNetwork: true,
+  scope: "account",
+  input: z.object({
+    config: z
+      .string()
+      .min(1)
+      .describe("The encoded test config (from build_test or any test URL)."),
+    statsSecret: z
+      .string()
+      .min(1)
+      .describe("The test's stats secret, exactly as build_test returned it."),
+    publishableKey: z
+      .string()
+      .regex(/^pk_[a-z0-9]{24}$/)
+      .describe("The target organization's publishable key (pk_..., public).")
+  }),
+  output: z.object({
+    registered: z.literal(true),
+    org: z.string().describe("The organization that now owns the test."),
+    testId: z.string()
+  }),
+  async handler(input, context) {
+    if (!context.accounts?.registerWithSecret) {
+      throw new ToolInputError(
+        "this deployment has no accounts to register into",
+        404
+      );
+    }
+    const result = await context.accounts.registerWithSecret({
+      encoded: input.config,
+      statsSecret: input.statsSecret,
+      publishableKey: input.publishableKey
+    });
+    if (!result.ok) {
+      switch (result.reason) {
+        case "bad-secret":
+          throw new ToolInputError(
+            "the stats secret does not match this test",
+            401
+          );
+        case "unknown-key":
+          throw new ToolInputError(
+            "no organization matches that publishable key here",
+            404
+          );
+        case "claimed-elsewhere":
+          throw new ToolInputError(
+            "this test's stats key is already claimed by another organization",
+            409
+          );
+        default:
+          throw new ToolInputError(
+            "that config cannot be registered: keyless tests register " +
+              "through the tag on a verified domain",
+            400
+          );
+      }
+    }
+    return {
+      registered: true as const,
+      org: result.org,
+      testId: result.testId
+    };
+  }
+});
+
 /** Every tool, in the order a person meets them. */
 export const TOOLS = [
   buildTest,
@@ -1168,6 +1323,7 @@ export const TOOLS = [
   generatePriors,
   getStats,
   listTests,
+  registerTestTool,
   uploadImage,
   variantBrief
 ] as const;

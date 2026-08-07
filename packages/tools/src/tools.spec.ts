@@ -47,9 +47,14 @@ describe("the registry itself", () => {
   it("only reaches the network where it must", () => {
     expect(getStats.reachesNetwork).toBe(true);
     expect(uploadImage.reachesNetwork).toBe(true);
-    // The one genuinely non-read-only tool: it stores bytes.
+    // Genuinely non-read-only tools: one stores bytes, one writes an
+    // ownership record.
     expect(uploadImage.readOnly).toBe(false);
-    for (const tool of TOOLS.filter(t => t !== getStats && t !== uploadImage)) {
+    const registerTest = TOOLS.find(t => t.name === "register_test")!;
+    expect(registerTest.reachesNetwork).toBe(true);
+    expect(registerTest.readOnly).toBe(false);
+    const writers = new Set(["get_stats", "upload_image", "register_test"]);
+    for (const tool of TOOLS.filter(t => !writers.has(t.name))) {
       expect(tool.reachesNetwork).toBe(false);
       expect(tool.readOnly).toBe(true);
     }

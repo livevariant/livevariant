@@ -6,6 +6,8 @@ import { AppLayout } from "./App";
 import { Builder } from "./pages/Builder";
 import { TestDetail } from "./pages/TestDetail";
 import { loadTests } from "./lib/tests-store";
+import { resetAccount } from "./lib/account";
+import { resetDeploymentConfig } from "./lib/serve-url";
 
 /**
  * The create flow inside the real dashboard, one E2E per test type:
@@ -20,6 +22,8 @@ let containers: HTMLElement[] = [];
 
 beforeEach(() => {
   localStorage.clear();
+  resetDeploymentConfig();
+  resetAccount();
   stubServer();
 });
 
@@ -182,5 +186,67 @@ describe("creating each test type from the dashboard", () => {
       () =>
         container.textContent?.includes("https://serve.example/sdk.js") ?? false
     );
+  });
+});
+
+describe("the LLM card's prefilled prompt", () => {
+  it("carries the signed-in user's publishable key, copy-ready", async () => {
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.href
+            : input.url;
+      const path = new URL(url, window.location.origin).pathname;
+      if (path === "/config") {
+        return Response.json({
+          serveUrl: "https://serve.example",
+          region: null,
+          gtmId: null,
+          publishableKey: null
+        });
+      }
+      if (path === "/account/me") {
+        return Response.json({
+          userId: "u1",
+          activeOrgId: "org-1",
+          orgs: [{ id: "org-1", name: "Personal" }]
+        });
+      }
+      if (path === "/account/publishable-keys") {
+        return Response.json({
+          keys: [{ key: "pk_promptkey1234567890abcd", label: null }]
+        });
+      }
+      return new Response("404", { status: 404 });
+    });
+    const container = render("/builder");
+    await until(
+      () => container.textContent?.includes("heavy lifting") ?? false
+    );
+    click(container, "Use your LLM to do the heavy lifting");
+    await until(
+      () =>
+        container.textContent?.includes("pk_promptkey1234567890abcd") ?? false
+    );
+    // The whole prompt is one copyable block containing the key.
+    const block = [...container.querySelectorAll("pre")].find(pre =>
+      pre.textContent?.includes("pk_promptkey1234567890abcd")
+    );
+    expect(block).not.toBeUndefined();
+    expect(block!.textContent).toContain("Register the test");
+  });
+
+  it("points key-less users at Settings instead", async () => {
+    const container = render("/builder");
+    await until(
+      () => container.textContent?.includes("heavy lifting") ?? false
+    );
+    click(container, "Use your LLM to do the heavy lifting");
+    await until(
+      () => container.textContent?.includes("create a publishable key") ?? false
+    );
+    expect(container.querySelector('a[href="/settings"]')).not.toBeNull();
   });
 });

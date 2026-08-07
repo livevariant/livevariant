@@ -8,14 +8,20 @@
  * interstitials, bearer secrets keep working), never availability.
  */
 import { eq } from "drizzle-orm";
-import { listTests, publishableKeyOrg, registerTest } from "./registry.js";
+import { decodeConfig, verifyStatsSecret } from "@livevariant/core";
+import {
+  claimKey,
+  listTests,
+  publishableKeyOrg,
+  registerTest
+} from "./registry.js";
 import type {
   AccountsProvider,
   KeyPolicy,
   RedirectVerdict,
   TrustPolicy
 } from "@livevariant/server";
-import { domains, keys, tests } from "./schema.js";
+import { domains, keys, organization, tests } from "./schema.js";
 import type { Auth, Db } from "./auth.js";
 
 /** Positive entries live this long before a re-read. */
@@ -64,7 +70,9 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
 
   constructor(
     private db: Db,
-    private auth: () => Auth
+    private auth: () => Auth,
+    /** Origins whose /a/ URLs are this deployment's own assets. */
+    private assetOrigins: string[] = []
   ) {}
 
   async keyPolicy(kh: string): Promise<KeyPolicy | null> {
@@ -201,7 +209,7 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
       }
       for (const candidate of parentDomains(host)) {
         if ((await this.domainOwner(candidate)) === orgId) {
-          await registerTest(this.db, {
+          await registerTest(this.db, this.assetOrigins, {
             testId: input.testId,
             orgId,
             name: input.name,
@@ -215,6 +223,93 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
     } catch {
       // Registration is best-effort by design.
     }
+  }
+
+  /**
+   * Agent-path registration: the stats secret proves authority over the
+   * test (its hash is inside the config's identity), the publishable
+   * key only NAMES the org. Neither alone moves ownership: the pk is
+   * public, and a config (with its kh) is a public artifact, so
+   * kh-without-secret must never grant an org read access.
+   */
+  async registerWithSecret(input: {
+    encoded: string;
+    statsSecret: string;
+    publishableKey: string;
+  }): Promise<
+    | { ok: true; org: string; testId: string }
+    | {
+        ok: false;
+        reason:
+          "bad-config" | "bad-secret" | "unknown-key" | "claimed-elsewhere";
+      }
+  > {
+    let decoded;
+    try {
+      decoded = await decodeConfig(input.encoded);
+    } catch {
+      return { ok: false, reason: "bad-config" };
+    }
+    const kh = decoded.config.statsKeyHash;
+    if (!kh) {
+      // Keyless tests have no secret to prove with; they register
+      // through the verified-domain tag path instead.
+      return { ok: false, reason: "bad-config" };
+    }
+    if (!(await verifyStatsSecret(input.statsSecret, kh))) {
+      // Indistinguishable from any other wrong-secret failure.
+      return { ok: false, reason: "bad-secret" };
+    }
+    const orgId = await publishableKeyOrg(this.db, input.publishableKey);
+    if (!orgId) {
+      return { ok: false, reason: "unknown-key" };
+    }
+    const existing = await this.keyPolicy(kh);
+    if (existing && existing.orgId !== orgId) {
+      return { ok: false, reason: "claimed-elsewhere" };
+    }
+    if (!existing) {
+      // Audit trail names the key that performed the claim; claimedBy
+      // is deliberately not a user FK.
+      const claim = await claimKey(this.db, {
+        kh,
+        orgId,
+        userId: `pk:${input.publishableKey}`,
+        label: decoded.config.name
+      });
+      this.invalidateKey(kh);
+      if (claim.status === "conflict") {
+        // Lost a concurrent race for an unclaimed key: the winner is
+        // authoritative. Same org, proceed; different org, refuse
+        // rather than register a test whose keyring belongs elsewhere.
+        const winner = await this.keyPolicy(kh);
+        if (!winner || winner.orgId !== orgId) {
+          return { ok: false, reason: "claimed-elsewhere" };
+        }
+      }
+    }
+    // Claim-then-register, deliberately in that order and not atomic:
+    // a failure here leaves a claimed key without a listed test, and a
+    // RETRY of the same call heals it (the same-org claim path falls
+    // through to registerTest). The reverse order could list a test
+    // whose keyring a concurrent claimer then took elsewhere.
+    await registerTest(this.db, this.assetOrigins, {
+      testId: decoded.testId,
+      orgId,
+      kh,
+      name: decoded.config.name,
+      encoded: input.encoded,
+      region: decoded.config.region
+    });
+    this.invalidateTest(decoded.testId);
+    const org = await this.db.query.organization.findFirst({
+      where: eq(organization.id, orgId)
+    });
+    return {
+      ok: true,
+      org: org?.name ?? "your organization",
+      testId: decoded.testId
+    };
   }
 
   /** Invalidate after a claim/verify so the acting isolate sees it now. */

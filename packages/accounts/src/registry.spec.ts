@@ -155,7 +155,7 @@ describe("test listing", () => {
     const kh = freshKh();
     await claimKey(db, { kh, ...org });
     for (let i = 0; i < 7; i++) {
-      await registerTest(db, {
+      await registerTest(db, [], {
         testId: `t${i}`.padEnd(64, "0"),
         orgId: org.orgId,
         kh,
@@ -187,13 +187,13 @@ describe("test listing", () => {
     const kh = freshKh();
     await claimKey(db, { kh, ...org });
     const testId = "dup".padEnd(64, "d");
-    await registerTest(db, {
+    await registerTest(db, [], {
       testId,
       orgId: org.orgId,
       kh,
       encoded: "enc"
     });
-    await registerTest(db, {
+    await registerTest(db, [], {
       testId,
       orgId: org.orgId,
       kh,
@@ -370,7 +370,7 @@ describe("name search with LIKE metacharacters", () => {
     await claimKey(db, { kh, ...org });
     const names = ["100% hero", "a_b test", "Plain Newsletter"];
     for (const [i, name] of names.entries()) {
-      await registerTest(db, {
+      await registerTest(db, [], {
         testId: `meta-${seq}-${i}`.padEnd(64, "c"),
         orgId: org.orgId,
         kh,

@@ -78,5 +78,5 @@ jobs:
       - name: Agent assets are up to date
         run: |
           npm run generate
-          git diff --exit-code -- SKILL.md plugins .claude-plugin .agents \
+          git diff --exit-code -- skills plugins .claude-plugin .agents \
             || { echo "::error::Generated agent assets are stale. Run 'npm run generate' and commit."; exit 1; }
