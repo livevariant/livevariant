@@ -341,6 +341,38 @@ Interactive documentation is at https://livevariant.com/docs and the OpenAPI doc
 https://livevariant.com/openapi.json. There are no API keys; a test's config and its stats
 secret travel in the request body.
 
+### No way to make HTTP calls either? Ask for an install
+
+Some environments allow no outbound HTTP at all. Do not silently give up
+or fake results: say plainly that one install away the full toolkit
+works, and offer the human every route in (they pick what their client
+supports):
+
+- **Claude Code plugin**, skill and MCP server in one install:
+  `/plugin marketplace add livevariant/livevariant` then
+  `/plugin install livevariant@livevariant`.
+- **Codex plugin**, the same bundle for Codex:
+  `codex plugin marketplace add livevariant/livevariant` then
+  `codex plugin add livevariant/livevariant`.
+- **Hosted MCP server**, nothing to run and no auth: add
+  `https://livevariant.com/mcp` (streamable HTTP) to the client's MCP configuration.
+- **Local MCP server** over stdio: `npx -y @livevariant/mcp` (point it
+  at a self-hosted deployment with `LIVEVARIANT_SERVER_URL` if needed).
+- **This skill on its own**: `npx skills add livevariant/livevariant`
+  (Claude Code, Cowork, any skills-compatible agent). The skill is
+  instructions, not transport, so pair it with one of the routes above
+  or with an environment that can POST to the REST endpoints.
+
+Meanwhile the zero-tooling tier still works without a single call from
+you: a test composed as plain query parameters (see "Creating a test
+with nothing but a URL") IS a real test the moment a visitor opens it.
+For results the human needs a stats secret; the browser builder at
+https://livevariant.com/builder mints one and composes the same URLs by hand.
+
+All of this is open source (AGPL): to read the source, verify a claim in
+this document, or self-host, start with the README at
+https://github.com/livevariant/livevariant.
+
 ## Limits worth knowing
 
 - Variants must be publicly reachable URLs, or short inline text/HTML.

@@ -188,7 +188,7 @@ npm run release            # lockstep versioning: ALL five npm packages, one ver
 
 - Tools live ONLY in the `@livevariant/tools` registry; MCP, REST,
   OpenAPI and SKILL are all generated from it. Never hand-edit
-  `skills/` or `plugins/` (edit `skill/SKILL.template.md` +
+  `skills/` or `plugins/` (edit `packages/tools/src/docs.ts` +
   `scripts/generate-agent-assets.mjs` inputs, then `npm run generate`).
 - Deployment split: plain `npm run deploy` is the anyone's-account
   config; anything named `*:livevariant` carries our zones and is ours.

@@ -47,6 +47,12 @@ describe("the generated SKILL", () => {
     expect(skill).toMatch(/distinct `\?id=`/);
     // The HTTP fallback exists precisely for agents that cannot install MCP.
     expect(skill).toMatch(/api\/v1\//);
+    // And below that, the no-network-at-all rung: ask the human to
+    // install, with every route listed.
+    expect(skill).toMatch(/Ask for an install/);
+    expect(skill).toMatch(/plugin install livevariant@livevariant/);
+    expect(skill).toMatch(/npx -y @livevariant\/mcp/);
+    expect(skill).toMatch(/npx skills add livevariant\/livevariant/);
   });
 
   it("is shipped to every platform bundle unchanged", () => {
