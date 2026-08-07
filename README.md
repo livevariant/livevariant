@@ -204,6 +204,10 @@ Node 24 (`nvm use`). `npm ci`, `npm run build`, `npm test`
 reference lives in [CLAUDE.md](CLAUDE.md), which is also what your
 coding agent reads; the design system in [DESIGN.md](DESIGN.md).
 
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Your
+first pull request asks you to sign the
+[Contributor License Agreement](.github/CLA.md).
+
 ## License
 
 [AGPL-3.0](LICENSE). Self-hosting for your own use is unrestricted; if
