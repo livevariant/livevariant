@@ -195,7 +195,7 @@ const ME_COUNTRIES = new Set([
  * European audience.
  */
 export function regionHint(
-  geo: CloudflareGeo | null | undefined
+  geo: RequestGeo | null | undefined
 ): TestRegion | null {
   const country = geo?.country?.toUpperCase();
   switch (geo?.continent?.toUpperCase()) {
@@ -216,7 +216,13 @@ export function regionHint(
   }
 }
 
-export interface CloudflareGeo {
+/**
+ * What a platform can tell us about where a request came from. Named for
+ * the question rather than the vendor: Cloudflare hands it over as
+ * `request.cf`, other hosts as headers, and `geoFromRequest` normalizes
+ * both into this one shape.
+ */
+export interface RequestGeo {
   country?: string;
   continent?: string;
   regionCode?: string;
@@ -225,9 +231,54 @@ export interface CloudflareGeo {
   asOrganization?: string;
 }
 
+/** The original name for {@link RequestGeo}, kept so imports still work. */
+export type CloudflareGeo = RequestGeo;
+
+/** Percent-encoded on some platforms ("San%20Francisco"). */
+function decodeGeoValue(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+/**
+ * The request's geography, from whichever platform is serving it.
+ *
+ * Cloudflare puts it on `request.cf`, which is authoritative when present.
+ * Vercel puts it in `x-vercel-ip-*` headers. Anything else can pass its
+ * own resolver to the server rather than teaching this function a third
+ * header convention: these two are here because they are the deployments
+ * this repository ships, not because header names are a good extension
+ * point.
+ *
+ * Returns null when the platform says nothing, which is the honest answer
+ * and leaves the derived signals (device, language) as the only context.
+ */
+export function geoFromRequest(request: Request): RequestGeo | null {
+  const cf = (request as Request & { cf?: RequestGeo }).cf;
+  if (cf) {
+    return cf;
+  }
+  const header = (name: string): string | undefined =>
+    request.headers.get(name)?.trim() || undefined;
+  const geo: RequestGeo = {
+    country: header("x-vercel-ip-country"),
+    continent: header("x-vercel-ip-continent"),
+    regionCode: header("x-vercel-ip-country-region"),
+    city: decodeGeoValue(header("x-vercel-ip-city")),
+    timezone: header("x-vercel-ip-timezone")
+  };
+  return Object.values(geo).some(value => value !== undefined) ? geo : null;
+}
+
 /** Everything derivable about one request, normalized. */
 export function requestSignals(input: {
-  geo?: CloudflareGeo | null;
+  geo?: RequestGeo | null;
   userAgent?: string;
   acceptLanguage?: string;
 }): RequestSignals {

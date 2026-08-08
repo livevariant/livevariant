@@ -17,12 +17,46 @@ import { ToolInputError } from "./types.js";
 export interface ResolvedTest extends DecodedConfig {
   /** Present when a manage URL carried the secret in its #fragment. */
   statsSecret?: string;
-  /** The origin the URL pointed at, when it came from a URL. */
+  /**
+   * The deployment the URL pointed at, when it came from a URL: origin
+   * plus whatever prefix it is mounted under, so a later call to
+   * `${serverUrl}/stats/...` reaches the same place the link did.
+   */
   serverUrl?: string;
 }
 
 /** Path segments that are followed by an encoded config. */
 const CONFIG_ROUTES = new Set(["s", "c", "px", "manage", "stats", "recompute"]);
+
+/**
+ * Splits a serving URL's path into the deployment's base and the encoded
+ * config, if any.
+ *
+ * The route is found by looking for a known segment from the END rather
+ * than assuming it is the first. A deployment mounted under a prefix
+ * (AppOptions.basePath) serves `/lv/s/<config>`, and reading the first
+ * segment there yields route "lv" and config "s": the config fails to
+ * decode, and the serverUrl handed back points at a root the deployment
+ * does not own, so every follow-up call misses.
+ */
+function splitConfigPath(pathname: string): {
+  basePath: string;
+  encoded?: string;
+} {
+  const segments = pathname.split("/").filter(Boolean);
+  const base = (upto: number): string =>
+    upto > 0 ? `/${segments.slice(0, upto).join("/")}` : "";
+  const last = segments[segments.length - 1];
+  const secondLast = segments[segments.length - 2];
+  if (secondLast !== undefined && CONFIG_ROUTES.has(secondLast)) {
+    return { basePath: base(segments.length - 2), encoded: last };
+  }
+  // The query-parameter spelling: /s?v=... carries no config in the path.
+  if (last !== undefined && CONFIG_ROUTES.has(last)) {
+    return { basePath: base(segments.length - 1) };
+  }
+  return { basePath: "" };
+}
 
 export async function resolveTest(reference: string): Promise<ResolvedTest> {
   const ref = reference.trim();
@@ -50,10 +84,10 @@ export async function resolveTest(reference: string): Promise<ResolvedTest> {
   // The manage link keeps the secret in its fragment so it never reaches a
   // server log; taking it from there saves the caller pasting it twice.
   const statsSecret = url.hash.replace(/^#/, "") || undefined;
-  const serverUrl = url.origin;
+  const { basePath, encoded } = splitConfigPath(url.pathname);
+  const serverUrl = url.origin + basePath;
 
-  const [route, encoded] = url.pathname.replace(/^\//, "").split("/");
-  if (CONFIG_ROUTES.has(route) && encoded) {
+  if (encoded) {
     try {
       return { ...(await decodeConfig(encoded)), statsSecret, serverUrl };
     } catch (err) {

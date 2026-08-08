@@ -24,6 +24,11 @@ export interface AssetOptions {
   /** Origin baked into returned asset URLs (the serving domain). */
   serveUrl?: string;
   /**
+   * Path prefix the app is mounted under, appended to the request origin
+   * when no serveUrl is set. See AppOptions.basePath.
+   */
+  basePath?: string;
+  /**
    * Lifetime of a minted download URL. Default one hour: long enough for
    * a lazily-loaded image far down a page to still fetch, short enough
    * that a copied URL cannot serve as static hosting. A hotlinker would
@@ -111,10 +116,9 @@ export function createAssetRoutes(options: AssetOptions): Hono {
     const assetId = await sha256Hex(bytes);
     await options.store.put(assetId, bytes, contentType);
 
-    const origin = (options.serveUrl ?? new URL(c.req.url).origin).replace(
-      /\/+$/,
-      ""
-    );
+    const origin = (
+      options.serveUrl ?? new URL(c.req.url).origin + (options.basePath ?? "")
+    ).replace(/\/+$/, "");
     const url = `${origin}/a/${assetId}`;
     // A human wants to eyeball what they just uploaded; an hour is plenty
     // and the preview link still dies.

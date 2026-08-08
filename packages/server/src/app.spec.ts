@@ -880,6 +880,26 @@ describe("auto-context from the platform", () => {
     ctx: { dims: [{ key: "country", from: "country" as const }] }
   };
 
+  it("reads the header form when there is no platform object", async () => {
+    // Cloudflare is not the only host. On a platform that reports geo as
+    // headers the same declared dimension has to fill the same way, or a
+    // contextual test silently degrades to no context there.
+    const { encoded } = await makeTest(AUTO);
+    for (const [i, country] of ["NL", "NL", "DE"].entries()) {
+      const res = await app.request(
+        cfRequest(`/s/${encoded}?id=hdr${i}`, null, {
+          "x-vercel-ip-country": country
+        })
+      );
+      expect(res.status).toBe(302);
+    }
+    const s = await stats(encoded);
+    expect(s.bySignal.country).toEqual({
+      nl: { pulls: 2, conversions: 0 },
+      de: { pulls: 1, conversions: 0 }
+    });
+  });
+
   it("fills a declared dimension from geo the caller never sent", async () => {
     // This is the whole point: an email redirect has no JavaScript and
     // the sender usually does not know where the reader is.
@@ -2089,5 +2109,77 @@ describe("misses: the app for people, the truth for machines", () => {
       headers: { "sec-fetch-dest": "document", accept: "text/html" }
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("mounting under a base path", () => {
+  it("serves, clicks and reports under the prefix, and only there", async () => {
+    // A deployment that does not own the root of its origin: behind a
+    // reverse proxy, or embedded in an application that owns "/".
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      basePath: "/lv"
+    });
+    const { encoded } = await makeTest();
+
+    const served = await app.request(`/lv/s/${encoded}?id=alice`);
+    expect(served.status).toBe(302);
+    expect(served.headers.get("location")).toMatch(/example\.com/);
+
+    // The unprefixed path belongs to whoever else is on this origin.
+    expect((await app.request(`/s/${encoded}?id=alice`)).status).toBe(404);
+
+    const clicked = await app.request(`/lv/c/${encoded}?id=alice`);
+    expect(clicked.status).toBe(302);
+
+    const stats = await app.request(`/lv/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect(stats.status).toBe(200);
+    const body = (await stats.json()) as { combinations: unknown[] };
+    expect(body.combinations.length).toBeGreaterThan(0);
+  });
+
+  it("keeps the prefix out of the way when it is not set", async () => {
+    const app = createApp({ store: new MemoryStore(), rng: mulberry32(7) });
+    const { encoded } = await makeTest();
+    expect((await app.request(`/s/${encoded}?id=a`)).status).toBe(302);
+  });
+});
+
+describe("embedding without the tool API", () => {
+  it("drops the surfaces the host owns, and keeps the serving ones", async () => {
+    // An application embedding this app owns /, /docs, /llms.txt and the
+    // rest of its own origin, and exposes the tools through its own
+    // surfaces. Mounting ours over the top would fight it.
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      toolApi: false
+    });
+    const { encoded } = await makeTest();
+
+    for (const path of [
+      "/",
+      "/docs",
+      "/openapi.json",
+      "/llms.txt",
+      "/robots.txt",
+      "/sitemap.xml",
+      "/config",
+      "/api/v1/build-test"
+    ]) {
+      expect((await app.request(path)).status, path).toBe(404);
+    }
+
+    expect((await app.request(`/s/${encoded}?id=a`)).status).toBe(302);
+    expect((await app.request("/health")).status).toBe(200);
+  });
+
+  it("mounts them by default", async () => {
+    const app = createApp({ store: new MemoryStore(), rng: mulberry32(7) });
+    expect((await app.request("/config")).status).toBe(200);
+    expect((await app.request("/llms.txt")).status).toBe(200);
   });
 });

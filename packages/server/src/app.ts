@@ -23,7 +23,8 @@ import {
   sourceHash,
   randomSeed,
   verifyStatsSecret,
-  type CloudflareGeo,
+  geoFromRequest,
+  type RequestGeo,
   type DecodedConfig,
   type Rng,
   type Variant
@@ -154,6 +155,49 @@ export interface AppOptions {
   statsStreamIntervalMs?: number;
   /** Static app-shell fetcher for the homepage. See ApiOptions.spaFetch. */
   spaFetch?: (request: Request) => Promise<Response>;
+  /**
+   * Path prefix this app is mounted under, for deployments that do not own
+   * the root of their origin: behind a reverse proxy, or embedded in a
+   * larger application that owns "/". Leading slash, no trailing one
+   * ("/lv"). Empty (the default) is the one-domain shape.
+   *
+   * Set `serveUrl` to the origin PLUS the same prefix, so the links handed
+   * to visitors resolve; the link builders take a path there happily.
+   */
+  basePath?: string;
+  /**
+   * Where a request's geography comes from. Defaults to `geoFromRequest`,
+   * which reads Cloudflare's `request.cf` and Vercel's `x-vercel-ip-*`
+   * headers. Anything else passes its own resolver rather than having a
+   * third header convention baked into core.
+   */
+  geo?: (request: Request) => RequestGeo | null;
+  /**
+   * Keeps a promise alive past the response, for work that must not
+   * block it (today: SDK registration). Defaults to the platform's own
+   * `executionCtx.waitUntil` when there is one, and to letting the
+   * promise run unanchored when there is not. On Vercel, pass `after`
+   * from `next/server` or `waitUntil` from `@vercel/functions`, or the
+   * function can be frozen before the work lands.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
+  /**
+   * Mount the tool API, OpenAPI document, Swagger page, MCP endpoint and
+   * the agent-discovery routes (/, /llms.txt, /.well-known/*, /robots.txt,
+   * /sitemap.xml). Default true, which is the standalone deployment.
+   *
+   * An application embedding this app owns those paths itself and exposes
+   * the tools through its own surfaces, so it sets false and gets only the
+   * serving and creator endpoints.
+   */
+  toolApi?: boolean;
+  /**
+   * How many times GET /stats/:cfg/stream re-reads the log before closing
+   * and letting the client reconnect. Default 360, about half an hour at
+   * the default interval. Lower it to fit inside a platform's function
+   * duration cap.
+   */
+  statsStreamMaxTicks?: number;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -183,7 +227,31 @@ export function createApp(options: AppOptions): Hono {
       options.store as StateStore,
       options.rng ?? mulberry32(randomSeed())
     );
-  const app = new Hono();
+  const basePath = (options.basePath ?? "").replace(/\/+$/, "");
+  // Hono matches against the full incoming path, so the prefix has to be
+  // declared here rather than stripped by the host: every route below,
+  // every middleware pattern and the SPA fallback all inherit it.
+  const app = basePath ? new Hono().basePath(basePath) : new Hono();
+  const resolveGeo = options.geo ?? geoFromRequest;
+  const streamMaxTicks = options.statsStreamMaxTicks ?? MAX_STREAM_TICKS;
+  /**
+   * Anchors background work to the platform's request lifetime when there
+   * is one. Cloudflare has executionCtx; Node has nothing and the promise
+   * simply runs; a serverless host that freezes between invocations MUST
+   * pass its own, or the work is silently dropped.
+   */
+  const keepAlive = (c: Context, promise: Promise<unknown>): void => {
+    if (options.waitUntil) {
+      options.waitUntil(promise);
+      return;
+    }
+    try {
+      c.executionCtx.waitUntil(promise);
+    } catch {
+      // Node has no executionCtx; let it run unanchored (dev only).
+      void promise;
+    }
+  };
 
   // Browser-called endpoints must be CORS-open: the SDK runs on customer
   // sites (/choose, /reward) and the dashboard is a different origin than
@@ -245,9 +313,8 @@ export function createApp(options: AppOptions): Hono {
   function requestContext(c: {
     req: { raw: Request; header(name: string): string | undefined };
   }): RequestContext {
-    const cf = (c.req.raw as Request & { cf?: CloudflareGeo }).cf ?? null;
     return {
-      geo: cf,
+      geo: resolveGeo(c.req.raw),
       userAgent: c.req.header("user-agent"),
       acceptLanguage: c.req.header("accept-language"),
       assetFetch: isAssetFetch({
@@ -360,7 +427,7 @@ export function createApp(options: AppOptions): Hono {
    * the .link serving domain).
    */
   function ownAssetId(target: string, requestUrl: string): string | null {
-    const id = assetIdFromUrl(target);
+    const id = assetIdFromUrl(target, basePath);
     if (!id) {
       return null;
     }
@@ -712,7 +779,11 @@ export function createApp(options: AppOptions): Hono {
   if (options.assets) {
     app.route(
       "/",
-      createAssetRoutes({ ...options.assets, serveUrl: options.serveUrl })
+      createAssetRoutes({
+        ...options.assets,
+        serveUrl: options.serveUrl,
+        basePath
+      })
     );
   }
 
@@ -750,20 +821,24 @@ export function createApp(options: AppOptions): Hono {
   // The injected fetch routes back into this same app rather than over the
   // network, which is what lets get_stats read /stats: a Worker cannot
   // fetch its own hostname.
-  app.route(
-    "/",
-    createApi({
-      serveUrl: options.serveUrl,
-      apiToken: options.apiToken,
-      provider: options.provider,
-      gtmId: options.gtmId,
-      publishableKey: options.publishableKey,
-      openaiAppsChallengeToken: options.openaiAppsChallengeToken,
-      spaFetch: options.spaFetch,
-      fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
-        app.fetch(new Request(input as RequestInfo, init))) as typeof fetch
-    })
-  );
+  if (options.toolApi !== false) {
+    app.route(
+      "/",
+      createApi({
+        serveUrl: options.serveUrl,
+        basePath,
+        apiToken: options.apiToken,
+        provider: options.provider,
+        gtmId: options.gtmId,
+        publishableKey: options.publishableKey,
+        openaiAppsChallengeToken: options.openaiAppsChallengeToken,
+        spaFetch: options.spaFetch,
+        geo: resolveGeo,
+        fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+          app.fetch(new Request(input as RequestInfo, init))) as typeof fetch
+      })
+    );
+  }
 
   /**
    * Which slot a redirect request is serving. A single-slot test needs
@@ -1070,12 +1145,7 @@ export function createApp(options: AppOptions): Hono {
         publishableKey: r.publishableKey,
         origin: c.req.header("origin") ?? null
       });
-      try {
-        c.executionCtx.waitUntil(registration);
-      } catch {
-        // Node has no executionCtx; let it run unanchored (dev only).
-        void registration;
-      }
+      keepAlive(c, registration);
     }
     // Signatures for the WINNING combination's hosted assets only. The
     // SDK holds canonical asset URLs in its config that 403 on their own;
@@ -1224,7 +1294,7 @@ export function createApp(options: AppOptions): Hono {
     const ctxDims = decoded.config.ctx?.dims;
     return streamSSE(c, async stream => {
       let sent = "";
-      for (let tick = 0; tick < MAX_STREAM_TICKS && !stream.aborted; tick++) {
+      for (let tick = 0; tick < streamMaxTicks && !stream.aborted; tick++) {
         let payload: string;
         try {
           payload = JSON.stringify(

@@ -77,7 +77,9 @@ export {
   regionHint,
   requestSignals,
   type AutoSignal,
+  geoFromRequest,
   type CloudflareGeo,
+  type RequestGeo,
   type RequestSignals,
   type TestRegion
 } from "./signals.js";

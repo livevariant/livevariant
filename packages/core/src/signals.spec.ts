@@ -129,3 +129,41 @@ describe("regionHint", () => {
     expect(regionHint({})).toBeNull();
   });
 });
+
+describe("geoFromRequest", () => {
+  it("prefers the platform object when there is one", async () => {
+    const { geoFromRequest } = await import("./signals.js");
+    const request = Object.assign(new Request("https://x.test/s"), {
+      cf: { country: "NL", continent: "EU" }
+    });
+    expect(geoFromRequest(request)).toEqual({ country: "NL", continent: "EU" });
+  });
+
+  it("falls back to the header form, decoding what is encoded", async () => {
+    const { geoFromRequest } = await import("./signals.js");
+    const request = new Request("https://x.test/s", {
+      headers: {
+        "x-vercel-ip-country": "US",
+        "x-vercel-ip-continent": "NA",
+        "x-vercel-ip-country-region": "CA",
+        "x-vercel-ip-city": "San%20Francisco",
+        "x-vercel-ip-timezone": "America/Los_Angeles"
+      }
+    });
+    expect(geoFromRequest(request)).toEqual({
+      country: "US",
+      continent: "NA",
+      regionCode: "CA",
+      city: "San Francisco",
+      timezone: "America/Los_Angeles"
+    });
+  });
+
+  it("says nothing rather than something empty", async () => {
+    // Null leaves device and language as the only context, which is the
+    // honest answer; an object of undefineds would read as "we looked and
+    // the visitor is nowhere".
+    const { geoFromRequest } = await import("./signals.js");
+    expect(geoFromRequest(new Request("https://x.test/s"))).toBeNull();
+  });
+});
