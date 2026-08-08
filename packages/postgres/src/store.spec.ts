@@ -1,6 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import { beforeAll, describe, expect, it } from "vitest";
+import { counterKey, GLOBAL_SCOPE, modelKey } from "@livevariant/server";
 import { storeContract } from "@livevariant/server/testing";
 import { LIVEVARIANT_SCHEMA_SQL } from "./ddl.js";
 import { poolQueryable, type Queryable } from "./queryable.js";
@@ -72,6 +73,87 @@ const pglite = await PGlite.create();
 await pglite.exec(LIVEVARIANT_SCHEMA_SQL);
 
 storeContract(
+  "PostgresStore (PGlite)",
+  () => new PostgresStore(pgliteQueryable(pglite))
+);
+
+/**
+ * Two cases the shared contract does not reach, both found in review, both
+ * about what happens when this adapter is used the way a real deployment
+ * uses it rather than the way a sequential test does.
+ */
+function extraCases(name: string, make: () => PostgresStore): void {
+  describe(name, () => {
+    function freshTestId(): string {
+      const bytes = new Uint8Array(32);
+      crypto.getRandomValues(bytes);
+      return [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    it("refuses to create a blob for a caller expecting a version", async () => {
+      // A nonzero expected version means the caller believed a row was
+      // already there. There is nothing to compare and set against, so
+      // creating it would let a stale writer win by arriving late.
+      const store = make();
+      const key = modelKey(freshTestId());
+      expect(await store.putBlob(key, "stale", 5)).toBe(false);
+      expect(await store.getBlob(key)).toBeNull();
+    });
+
+    it("still lets a current writer set a later version", async () => {
+      // The obvious fix for the case above (gating the whole statement on
+      // version zero) breaks this one, which is the normal path: the model
+      // update loop reads, computes and compare-and-sets forever after.
+      const store = make();
+      const key = modelKey(freshTestId());
+      expect(await store.putBlob(key, "v1", 0)).toBe(true);
+      const first = await store.getBlob(key);
+      expect(await store.putBlob(key, "v2", first!.version)).toBe(true);
+      const second = await store.getBlob(key);
+      expect(second!.data).toBe("v2");
+      expect(second!.version).toBe(first!.version + 1);
+      expect(await store.putBlob(key, "late", first!.version)).toBe(false);
+    });
+
+    it("rebuilds derived state while traffic keeps incrementing", async () => {
+      // recompute is the repair path for every derived-cache failure, so
+      // it is the one thing that must not abort. Serving does not stop
+      // while it runs, and a counter row recreated between the wipe and
+      // the rewrite used to collide with the snapshot's insert.
+      const store = make();
+      const testId = freshTestId();
+      const key = counterKey(testId, GLOBAL_SCOPE);
+      await store.incrCounters(key, [5, 1, 5, 1]);
+      await Promise.all([
+        store.replaceDerived(testId, {
+          slotSizes: [2],
+          dim: 16,
+          cells: [
+            { pulls: 3, successes: 1 },
+            { pulls: 4, successes: 2 }
+          ],
+          model: {
+            aInv: Array.from({ length: 16 }, (_, i) =>
+              Array.from({ length: 16 }, (_, j) => (i === j ? 1 : 0))
+            ),
+            b: new Array<number>(16).fill(0)
+          }
+        }),
+        ...Array.from({ length: 20 }, () =>
+          store.incrCounters(key, [1, 0, 0, 0])
+        )
+      ]);
+      // The snapshot landed; the exact totals depend on interleaving, which
+      // is the point: a recompute racing traffic must survive, not be exact.
+      const counters = await store.getCounters(key, 4);
+      expect(counters[1]).toBe(1);
+      expect(counters[3]).toBe(2);
+      expect(counters[0]).toBeGreaterThanOrEqual(3);
+    });
+  });
+}
+
+extraCases(
   "PostgresStore (PGlite)",
   () => new PostgresStore(pgliteQueryable(pglite))
 );
@@ -152,6 +234,10 @@ if (postgresUrl) {
   const pool = new pg.Pool({ connectionString: postgresUrl, max: 20 });
   await pool.query(LIVEVARIANT_SCHEMA_SQL);
   storeContract(
+    "PostgresStore (server)",
+    () => new PostgresStore(poolQueryable(pool))
+  );
+  extraCases(
     "PostgresStore (server)",
     () => new PostgresStore(poolQueryable(pool))
   );

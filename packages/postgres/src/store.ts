@@ -309,20 +309,36 @@ export class PostgresStore implements StateStore {
     data: string,
     expectedVersion: number
   ): Promise<boolean> {
-    // Compare-and-set in one statement. The WHERE on the DO UPDATE is what
-    // makes it a CAS rather than a blind upsert: Postgres takes the row
-    // lock and re-evaluates the condition against the committed row, so of
-    // N writers holding the same version exactly one updates and the rest
-    // match nothing and return zero rows. The insert path can only be
-    // reached when no row exists at all, and then there is no writer to
-    // lose to.
+    // Compare-and-set, as two mutually exclusive arms of one statement.
+    //
+    // The UPDATE is the CAS: Postgres takes the row lock and re-evaluates
+    // `version = $3` against the committed row, so of N writers holding
+    // the same version exactly one updates and the rest match nothing.
+    //
+    // The INSERT is the first-write arm, and it is guarded on an expected
+    // version of ZERO. Creating the row for a caller who believed some
+    // other version was already there would let a stale writer win: it
+    // asked to replace something, and there is nothing to replace.
+    // ON CONFLICT DO NOTHING covers the race where another writer created
+    // the row first, which is a lost CAS like any other.
+    //
+    // The two arms cannot both produce a row (a version is either 0 or it
+    // is not), so a returned row means this call won.
     const { rowCount } = await this.db.query(
-      `INSERT INTO ${BLOBS} (test_id, data, version)
-       VALUES ($1, $2, $3::int + 1)
-       ON CONFLICT (test_id) DO UPDATE
-         SET data = EXCLUDED.data, version = ${BLOBS}.version + 1
-         WHERE ${BLOBS}.version = $3::int
-       RETURNING version`,
+      `WITH updated AS (
+         UPDATE ${BLOBS}
+         SET data = $2, version = version + 1
+         WHERE test_id = $1 AND version = $3::int
+         RETURNING version
+       ), created AS (
+         INSERT INTO ${BLOBS} (test_id, data, version)
+         SELECT $1, $2, 1 WHERE $3::int = 0
+         ON CONFLICT (test_id) DO NOTHING
+         RETURNING version
+       )
+       SELECT version FROM updated
+       UNION ALL
+       SELECT version FROM created`,
       [parseModelKey(key), data, expectedVersion]
     );
     return rowCount > 0;
@@ -348,10 +364,19 @@ export class PostgresStore implements StateStore {
         if (idx.length === 0) {
           continue;
         }
+        // Upsert, not a plain insert: serving traffic keeps incrementing
+        // while this rebuilds, so a concurrent incrCounters can recreate a
+        // row between the DELETE above and this write. A plain insert
+        // would hit the primary key and abort the whole repair, which is
+        // the one path that must not fail. The snapshot is authoritative,
+        // so it overwrites; anything that lands after it is a real event
+        // and survives on top.
         await tx.query(
           `INSERT INTO ${COUNTERS} (test_id, scope, idx, value)
            SELECT $1, $2, d.idx, d.value
-           FROM unnest($3::int[], $4::double precision[]) AS d(idx, value)`,
+           FROM unnest($3::int[], $4::double precision[]) AS d(idx, value)
+           ON CONFLICT (test_id, scope, idx)
+           DO UPDATE SET value = EXCLUDED.value`,
           [testId, scope, idx, value]
         );
       }
