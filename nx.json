@@ -67,6 +67,7 @@
       "@livevariant/tools",
       "@livevariant/server",
       "@livevariant/mcp",
+      "@livevariant/postgres",
       "@livevariant/sdk",
       "@livevariant/workers",
       "@livevariant/accounts",
