@@ -267,6 +267,67 @@ describe("multi-slot serving", () => {
     expect(to.status).toBe(302);
   });
 
+  it("sends each element's clicks to its own landing page", async () => {
+    // The newsletter whose hero leads to the campaign page and whose CTA
+    // leads to pricing: one test, one sticky combination, two
+    // destinations.
+    const { encoded } = await makeMultiTest({
+      slotRedirects: {
+        hero: "https://example.com/campaign",
+        cta: "https://example.com/pricing"
+      }
+    } as Partial<TestConfigInput>);
+    await app.request(`/s/${encoded}?id=sr1&slot=hero`);
+    const hero = await app.request(`/c/${encoded}?id=sr1&slot=hero`);
+    const cta = await app.request(`/c/${encoded}?id=sr1&slot=cta`);
+    const heroUrl = new URL(hero.headers.get("location")!);
+    const ctaUrl = new URL(cta.headers.get("location")!);
+    expect(heroUrl.origin + heroUrl.pathname).toBe(
+      "https://example.com/campaign"
+    );
+    expect(ctaUrl.origin + ctaUrl.pathname).toBe("https://example.com/pricing");
+    // Still ONE assignment: the destinations differ, the test does not.
+    expect((await stats(encoded)).totalAssignments).toBe(1);
+  });
+
+  it("clicks need the slot as soon as an element names a page", async () => {
+    // Same rule as per-variant redirects: the answer now depends on
+    // which element was clicked, so a slot-less click cannot be served.
+    const { encoded } = await makeMultiTest({
+      slotRedirects: { hero: "https://example.com/campaign" }
+    } as Partial<TestConfigInput>);
+    const bare = await app.request(`/c/${encoded}?id=sr2`);
+    expect(bare.status).toBe(400);
+    expect((await bare.json()).error).toMatch(/slot/);
+  });
+
+  it("lets a variant override its slot's landing page", async () => {
+    const { encoded } = await makeMultiTest({
+      slots: {
+        hero: [
+          {
+            name: "warm",
+            url: "https://example.com/hero-warm",
+            redirectUrl: "https://example.com/warm-lp"
+          },
+          { name: "cool", url: "https://example.com/hero-cool" }
+        ],
+        cta: [
+          { name: "go", url: "https://example.com/cta-go" },
+          { name: "wait", url: "https://example.com/cta-wait" }
+        ]
+      },
+      slotRedirects: { hero: "https://example.com/campaign" }
+    } as Partial<TestConfigInput>);
+    const serve = await app.request(`/s/${encoded}?id=sr3&slot=hero`);
+    const warm = serve.headers.get("location")!.includes("hero-warm");
+    const click = await app.request(`/c/${encoded}?id=sr3&slot=hero`);
+    const url = new URL(click.headers.get("location")!);
+    expect(url.origin + url.pathname).toBe(
+      warm ? "https://example.com/warm-lp" : "https://example.com/campaign"
+    );
+  });
+
   it("defaults the slot only when there is exactly one", async () => {
     const { encoded } = await makeTest();
     const res = await app.request(`/s/${encoded}?id=one`);
@@ -2303,6 +2364,29 @@ describe("context resolved by the deployment", () => {
     const s = await statsOf(app, encoded);
     expect(s.totalAssignments).toBe(2);
     expect(Object.keys(s.buckets)).toHaveLength(1);
+  });
+
+  it("tells the resolver when the connection is not the person", async () => {
+    // An email image is fetched by the mail provider, so a resolver that
+    // falls back to the connection would bucket a whole campaign into a
+    // datacenter's region. It cannot decide that without being told, and
+    // assignment is sticky, so getting it wrong is permanent.
+    const suppressed: boolean[] = [];
+    const app = appWith(async input => {
+      suppressed.push(
+        (input as { networkSignalsSuppressed: boolean })
+          .networkSignalsSuppressed
+      );
+      return { segment: "north" };
+    });
+    const { encoded } = await makeTest(RESOLVED);
+    await app.request(`/s/${encoded}?id=n1&c_postcode=1011`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    await app.request(`/s/${encoded}?id=n2&c_postcode=1011&auto=0`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(suppressed).toEqual([false, true]);
   });
 
   it("does nothing when the deployment has no such resolver", async () => {

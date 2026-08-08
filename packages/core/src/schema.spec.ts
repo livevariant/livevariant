@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   cellNames,
+  clickTarget,
+  destinationUrls,
+  hasPerElementDestinations,
   slotEntries,
   slotSizes,
   parseTestConfig,
@@ -103,6 +106,72 @@ describe("priors", () => {
         priors: { hero: [{ mean: 0.1, strength: 10 }] }
       })
     ).toThrow(/2 variants but 1 priors/);
+  });
+});
+
+describe("click destinations", () => {
+  const config = parseTestConfig({
+    slots: {
+      hero: ["https://a.example/1", "https://a.example/2"],
+      cta: [
+        { url: "https://a.example/3" },
+        { url: "https://a.example/4", redirectUrl: "https://own.example/x" }
+      ]
+    },
+    slotRedirects: { hero: "https://lp.example/campaign" },
+    redirectUrl: "https://lp.example/home",
+    statsKeyHash: KH
+  });
+
+  it("resolves to: then variant, then slot, then test", () => {
+    // One precedence, in one function, because the click route, the
+    // trust check and the tools must not each invent their own.
+    expect(
+      clickTarget(config, "cta", config.slots.cta[1], "https://to.example/q")
+    ).toBe("https://to.example/q");
+    expect(clickTarget(config, "cta", config.slots.cta[1])).toBe(
+      "https://own.example/x"
+    );
+    expect(clickTarget(config, "hero", config.slots.hero[0])).toBe(
+      "https://lp.example/campaign"
+    );
+    expect(clickTarget(config, "cta", config.slots.cta[0])).toBe(
+      "https://lp.example/home"
+    );
+  });
+
+  it("knows when a click has to name its element", () => {
+    expect(hasPerElementDestinations(config)).toBe(true);
+    const uniform = parseTestConfig({
+      variants: ["https://a.example/1", "https://a.example/2"],
+      redirectUrl: "https://lp.example/home",
+      statsKeyHash: KH
+    });
+    expect(hasPerElementDestinations(uniform)).toBe(false);
+    const slotOnly = parseTestConfig({
+      slots: { hero: ["https://a.example/1", "https://a.example/2"] },
+      slotRedirects: { hero: "https://lp.example/campaign" },
+      statsKeyHash: KH
+    });
+    expect(hasPerElementDestinations(slotOnly)).toBe(true);
+  });
+
+  it("enumerates every place a visitor can be sent", () => {
+    // Trust checks read this list; a destination missing from it is a
+    // destination nothing verified.
+    expect(destinationUrls(config)).toContain("https://lp.example/campaign");
+    expect(destinationUrls(config)).toContain("https://own.example/x");
+    expect(destinationUrls(config)).toContain("https://lp.example/home");
+  });
+
+  it("must name a slot that exists", () => {
+    expect(() =>
+      parseTestConfig({
+        slots: { hero: ["A", "B"] },
+        slotRedirects: { cta: "https://lp.example/x" },
+        statsKeyHash: KH
+      })
+    ).toThrow(/does not exist/);
   });
 });
 

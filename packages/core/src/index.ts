@@ -9,7 +9,10 @@ export {
 } from "./canonical.js";
 export {
   cellNames,
+  clickTarget,
   ctxDimSchema,
+  destinationUrls,
+  hasPerElementDestinations,
   slotEntries,
   slotSizes,
   parseTestConfig,

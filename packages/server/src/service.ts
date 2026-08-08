@@ -156,8 +156,10 @@ export async function resolveIdentity(
   // relays them untouched. They are as true for Gmail's fetcher as for
   // the reader, which makes them the one kind of derived context that
   // works properly in email, so nothing suppresses them.
-  const network =
-    request.assetFetch || request.noAuto ? {} : requestSignals(request);
+  const networkSignalsSuppressed = Boolean(
+    request.assetFetch || request.noAuto
+  );
+  const network = networkSignalsSuppressed ? {} : requestSignals(request);
   const signals = { ...network, ...urlSignals(request.query) };
   const dims = decoded.config.ctx?.dims;
   const autoCtx = deriveAutoCtx(dims, signals, ctx);
@@ -169,7 +171,8 @@ export async function resolveIdentity(
     const resolved = await resolveCtx({
       dims: dims ?? [],
       raw: rawCtx ?? {},
-      signals
+      signals,
+      networkSignalsSuppressed
     });
     Object.assign(autoCtx, deriveResolvedCtx(dims, resolved, ctx));
   }

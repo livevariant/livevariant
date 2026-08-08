@@ -169,8 +169,25 @@ const configObject = z
      * explicitly to share one test across domains.
      */
     scope: z.optional(z.string().check(z.minLength(1), z.maxLength(120))),
-    /** Fallback click-redirect target when the variant has none. */
+    /** Fallback click-redirect target when neither slot nor variant has one. */
     redirectUrl: z.optional(httpUrl),
+    /**
+     * Per-slot click destination, for a multi-element test whose elements
+     * point at different pages: a hero image leading to the campaign
+     * landing page while the CTA below it leads to the pricing page.
+     *
+     * Sits between the two destinations that already existed, so the full
+     * precedence is: an explicit `?to=`, then the variant's own
+     * `redirectUrl`, then this, then the config-level `redirectUrl`. The
+     * common test still names ONE destination and says nothing here.
+     *
+     * Identity-included like every other destination: a click link that
+     * disagreed with the image links about where clicks go would reward a
+     * different test than the one being served.
+     */
+    slotRedirects: z.optional(
+      z.record(z.string().check(z.regex(SLOT_KEY)), httpUrl)
+    ),
     /** GA4 event names the SDK auto-rewards on (dataLayer interception). */
     rewardEvents: z.optional(z.array(z.string().check(z.minLength(1)))),
     /**
@@ -219,6 +236,18 @@ const configObject = z
           `${cells} combinations exceeds the ${MAX_CELLS}-cell limit; use ` +
           "fewer variants per slot, or split into composed tests"
       });
+    }
+    for (const slotKey of Object.keys(config.slotRedirects ?? {})) {
+      if (!config.slots[slotKey]) {
+        ctx.issues.push({
+          code: "custom",
+          path: ["slotRedirects", slotKey],
+          input: config.slotRedirects,
+          message:
+            `slotRedirects name a slot that does not exist ` +
+            `(have: ${Object.keys(config.slots).join(", ")})`
+        });
+      }
     }
     for (const [slotKey, priors] of Object.entries(config.priors ?? {})) {
       const variants = config.slots[slotKey];
@@ -305,6 +334,61 @@ export function slotEntries(config: TestConfig): Array<[string, Variant[]]> {
 /** Variant counts per slot, canonical order. */
 export function slotSizes(config: TestConfig): number[] {
   return slotEntries(config).map(([, variants]) => variants.length);
+}
+
+/**
+ * Where a click on one variant lands: the single place that knows the
+ * precedence, so the click route, the trust check and every tool answer
+ * the question the same way.
+ *
+ * `to` wins because it is the caller being explicit, then the variant,
+ * then its slot, then the test. Undefined means the click has nowhere to
+ * go, which is a 400 rather than a guess.
+ */
+export function clickTarget(
+  config: TestConfig,
+  slotKey: string,
+  variant: Variant | undefined,
+  to?: string
+): string | undefined {
+  return (
+    to ??
+    variant?.redirectUrl ??
+    config.slotRedirects?.[slotKey] ??
+    config.redirectUrl
+  );
+}
+
+/**
+ * Whether any click destination in this test depends on WHICH element was
+ * clicked. When nothing does, one slot-less click link can wrap every
+ * element of a multi-slot email; when something does, each click link has
+ * to name its slot.
+ */
+export function hasPerElementDestinations(config: TestConfig): boolean {
+  if (Object.keys(config.slotRedirects ?? {}).length > 0) {
+    return true;
+  }
+  return Object.values(config.slots).some(variants =>
+    variants.some(variant => variant.redirectUrl !== undefined)
+  );
+}
+
+/** Every URL a config can send a visitor to, for trust checks. */
+export function destinationUrls(config: TestConfig): string[] {
+  const urls: string[] = [];
+  for (const variants of Object.values(config.slots)) {
+    for (const variant of variants) {
+      urls.push(
+        variant.url ?? "",
+        variant.image ?? "",
+        variant.redirectUrl ?? ""
+      );
+    }
+  }
+  urls.push(...Object.values(config.slotRedirects ?? {}));
+  urls.push(config.redirectUrl ?? "");
+  return urls.filter(Boolean);
 }
 
 /** A variant's display name, defaulting per slot to v1, v2, ... */

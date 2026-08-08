@@ -419,12 +419,13 @@ export class RegistryProvider implements AccountsProvider, TrustPolicy {
  */
 /**
  * Every host a visitor can be REDIRECTED to by this test: variant
- * destination pages, per-variant click destinations, and the config's
- * shared redirectUrl. Image URLs are excluded on purpose: an <img>
- * fetch renders inline and never shows an interstitial.
+ * destination pages, per-variant click destinations, per-slot landing
+ * pages, and the config's shared redirectUrl. Image URLs are excluded on
+ * purpose: an <img> fetch renders inline and never shows an interstitial.
  */
 export function destinationHosts(config: {
   slots?: Record<string, Array<{ url?: string; redirectUrl?: string }>>;
+  slotRedirects?: Record<string, string>;
   redirectUrl?: string;
 }): string[] {
   const urls: string[] = [];
@@ -438,6 +439,7 @@ export function destinationHosts(config: {
       }
     }
   }
+  urls.push(...Object.values(config.slotRedirects ?? {}));
   if (config.redirectUrl) {
     urls.push(config.redirectUrl);
   }

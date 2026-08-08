@@ -6,6 +6,7 @@ import {
   configToTemplateQuery,
   encodeConfig,
   generateStatsSecret,
+  hasPerElementDestinations,
   hashStatsSecret,
   slotEntries,
   slotSizes,
@@ -178,11 +179,28 @@ export const buildTest = defineTool({
           "Multi-element test: variants per element, keyed by a short name " +
             'like "hero" or "cta". The test serves and learns combinations.'
         ),
+      slotRedirects: z
+        .record(z.string().regex(SLOT_KEY_INPUT), z.string().url())
+        .optional()
+        .describe(
+          "Where clicks on ONE element land, when elements point at " +
+            "different pages (a hero leading to the campaign landing page, " +
+            "a CTA below it to pricing). Keyed like `slots`. Falls back to " +
+            "`redirectUrl`; a variant's own redirectUrl still wins over " +
+            "both. Setting any of these means every click link must name " +
+            "its slot, which slotLinks does for you."
+        ),
       name: z
         .string()
         .min(1)
         .optional()
-        .describe("A label for your own reference."),
+        .describe(
+          "A label for your own reference, and the one field worth " +
+            "spending a merge tag on in a recurring ESP template: it is " +
+            "part of the test's identity, so n={{campaign_name}} mints a " +
+            "separate, separately readable test per campaign, and the name " +
+            "is what list_tests searches."
+        ),
       context: z
         .array(contextDim)
         .max(8)
@@ -275,7 +293,8 @@ export const buildTest = defineTool({
           "urls.serve returns 400 for these tests, because a serve must " +
           "say which element it renders. The bare urls.click works when " +
           "the destination is uniform (a config redirectUrl or ?to=); " +
-          "per-slot clicks matter only for per-variant redirectUrls."
+          "per-slot clicks matter as soon as an element carries its own " +
+          "destination, via slotRedirects or a variant redirectUrl."
       ),
     emailTemplate: z
       .record(
@@ -287,10 +306,12 @@ export const buildTest = defineTool({
         "Query-parameter spelling per slot for an ESP template: wire it " +
           "once, then campaign managers fill only the merge fields. All " +
           "links share one identical config string (names, ctx dims, kh " +
-          "and the landing r= included, so serve and click stay ONE " +
-          "test); image links add &slot= per element, the click link " +
-          "needs none. Absent when a variant has inline content or its " +
-          "own redirectUrl, which the parameter form cannot express."
+          "and the landing r=/sr= included, so serve and click stay ONE " +
+          "test); image links add &slot= per element. The click link " +
+          "needs no slot unless the test sets slotRedirects, in which " +
+          "case each element's click link carries its own. Absent when a " +
+          "variant has inline content or its own redirectUrl, which the " +
+          "parameter form cannot express."
       ),
     warnings: z.array(z.string()),
     registeredTo: z
@@ -325,6 +346,9 @@ export const buildTest = defineTool({
       ...(input.name ? { name: input.name } : {}),
       ...(input.context?.length ? { ctx: { dims: input.context } } : {}),
       ...(input.redirectUrl ? { redirectUrl: input.redirectUrl } : {}),
+      ...(input.slotRedirects && Object.keys(input.slotRedirects).length > 0
+        ? { slotRedirects: input.slotRedirects }
+        : {}),
       ...(input.variantParam ? { variantParam: input.variantParam } : {}),
       ...((input.region ?? context.region)
         ? { region: input.region ?? context.region }
@@ -378,13 +402,15 @@ export const buildTest = defineTool({
 
     // ESP-template spelling: ONE query string from the core serializer
     // (so vn names, ctx dims and kh all survive into every future
-    // campaign), plus runtime tails per link. r rides inside that shared
-    // string because it is part of the test's identity: a click link
-    // that carried r alone would reward a different test than the one
-    // the images serve. The click link needs no slot=, since the
-    // template's destination never depends on the clicked element.
+    // campaign), plus runtime tails per link. r and sr ride inside that
+    // shared string because they are part of the test's identity: a
+    // click link that carried a destination alone would reward a
+    // different test than the one the images serve. The click link takes
+    // a slot= only when the destination depends on which element was
+    // clicked; otherwise one link can wrap the whole email.
     const templateQuery = configToTemplateQuery(parsed);
     const templateTail = "&auto=0&id={{recipient_id}}";
+    const clickNeedsSlot = multiSlot && hasPerElementDestinations(parsed);
     const emailTemplate =
       templateQuery === null
         ? undefined
@@ -395,7 +421,9 @@ export const buildTest = defineTool({
                 imageSrc:
                   `${serveOrigin}/s?${templateQuery}${templateTail}` +
                   (multiSlot ? `&slot=${key}` : ""),
-                linkHref: `${serveOrigin}/c?${templateQuery}${templateTail}`
+                linkHref:
+                  `${serveOrigin}/c?${templateQuery}${templateTail}` +
+                  (clickNeedsSlot ? `&slot=${key}` : "")
               }
             ])
           );
