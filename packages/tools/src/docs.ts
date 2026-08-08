@@ -103,7 +103,8 @@ const PARAMS_SECTION = `## Every config parameter, and when to use it
 | \`variant.image\` | yes | Image served for this variant; upload via \`upload_image\` or any public URL. |
 | \`variant.text/html/md\` | yes | Inline content for SDK-served website tests. |
 | \`variant.redirectUrl\` | yes | Per-variant CLICK destination, wins over the config-level one. |
-| \`name\` | yes | Human label for the whole test. |
+| \`slotRedirects\` | yes | Per-SLOT click destination, keyed like \`slots\`: the hero leads to the campaign page, the CTA under it to pricing. Sits between the variant's own \`redirectUrl\` and the config-level one. Setting any means every click link must name its slot. |
+| \`name\` | yes | Human label for the whole test, and what \`list_tests\` searches. In an ESP template it earns a merge tag of its own (\`n={{campaign_name}}\`): it is inside the identity, so each campaign becomes its own separately readable test. |
 | \`ctx.dims\` | yes | Audience dimensions the model learns separate winners for. \`{key}\` = caller-supplied value (hashed in the browser); \`{key, from}\` = filled automatically from the request. \`from\` may be: country, continent, region, city, timezone, device, language, organization, utm_source, utm_medium, utm_campaign, utm_content, utm_term. The utm ones survive email proxies; the network ones do not (see the email section). |
 | \`region\` | yes | Where the test's counters and model live. \`eu\` is a hard guarantee (data never leaves the EU); weur/eeur/wnam/enam/sam/apac/oc/afr/me are placement preferences. Unset = wherever the first request lands, which in email is often a mail provider's datacenter, so set it for email tests. Changing it later = a new test. |
 | \`redirectUrl\` | yes | Fallback click destination when neither \`?to=\` nor a per-variant redirectUrl says where to go. The click link REFUSES rather than 404s when all three are missing. |
@@ -135,7 +136,9 @@ Config parameters (these define the test, and therefore its identity):
 - \`n\`: test name; \`kh\`: the stats-secret HASH (never the secret);
 - \`ctx\`: audience dims, e.g. \`ctx=country:country,persona\` (\`key:from\` fills
   automatically, bare \`key\` expects a \`c_<key>=\` value on the link);
-- \`r\`: fallback click destination; \`stamp\`: write the served variant name
+- \`r\`: fallback click destination; \`sr\`: click destination for ONE element,
+  binding to the slot most recently opened (\`s=hero&sr=https://...&v=..&v=..\`),
+  exactly the way \`v\` binds; \`stamp\`: write the served variant name
   into this parameter on the destination; \`fw=0\`: stop forwarding unknown
   params.
 
@@ -146,15 +149,19 @@ destination), \`slot\`.
 
 Why this matters for email templates: wire the fixed parts (\`kh\`, \`auto=0\`,
 \`id={{merge_tag}}\`) into an ESP template once, and campaign managers fill in
-nothing but variant URLs through ordinary template fields. Because variant
-URLs are inside the identity hash, **each campaign automatically becomes its
-own fresh test**, while the one shared \`kh\` means one stats secret reads all
-of them. \`build_test\` returns this spelling ready-made as \`emailTemplate\`.
+nothing but variant URLs, landing pages and a campaign name through ordinary
+template fields. Because all of those are inside the identity hash, **each
+campaign automatically becomes its own fresh test**, while the one shared
+\`kh\` means one stats secret reads all of them. Spend a merge tag on \`n=\`
+too (\`n={{campaign_name}}\`): the name is what \`list_tests\` searches, and it
+is the difference between finding March's newsletter and reading a list of
+hashes. \`build_test\` returns this spelling ready-made as \`emailTemplate\`.
 A two-slot template carries three links: the same config with
 \`&slot=hero\` in one image and \`&slot=cta\` in the other, plus the \`/c\`
-click link around them. A malformed parameter link degrades to serving the
-first valid variant URL rather than showing an error to a full recipient
-list.`;
+click link around them, which takes a \`&slot=\` of its own only when the
+elements point at different pages. A malformed parameter link degrades to
+serving the first valid variant URL rather than showing an error to a full
+recipient list.`;
 
 const FLOW_SECTION = `## Working flow
 
@@ -278,8 +285,15 @@ Email is where this is most useful and most easily got wrong.
 - **Multi-slot SERVE links need \`slot=\`.** The bare serve URL returns an
   error for them; \`build_test\`'s \`slotLinks\` has the per-element pair
   ready. The click link is the exception: one slot-less click link can
-  wrap every element, unless variants carry their own \`redirectUrl\`s
-  (then the click must say which element was clicked).
+  wrap every element, unless an element carries its own destination
+  (\`slotRedirects\`, or a variant \`redirectUrl\`), in which case the click
+  must say which element was clicked.
+
+- **Elements can lead to different pages.** \`slotRedirects\` per slot is
+  the ordinary case for a newsletter whose hero points at the campaign
+  landing page and whose CTA points at pricing. Reach for a per-variant
+  \`redirectUrl\` only when the destination differs per CREATIVE, which is
+  rare and costs the parameter-form spelling.
 
 \`build_test\` also returns an \`emailTemplate\`: the query-parameter spelling of
 the same test (see "Creating a test with nothing but a URL"), for wiring into

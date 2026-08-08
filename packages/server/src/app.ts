@@ -5,7 +5,9 @@ import {
   assetIdFromUrl,
   autoContextDisabled,
   cellNames,
+  clickTarget,
   configFromParams,
+  hasPerElementDestinations,
   decodeCell,
   decorateDestination,
   fallbackTarget,
@@ -14,6 +16,7 @@ import {
   decodeConfig,
   decorateUrl,
   deriveAutoCtx,
+  destinationUrls,
   externalIdHash,
   isAssetFetch,
   mergeFeatureIndices,
@@ -573,15 +576,9 @@ export function createApp(options: AppOptions): Hono {
     } catch {
       return false;
     }
-    const candidates: Array<string | undefined> = [config.redirectUrl];
-    for (const variants of Object.values(config.slots)) {
-      for (const variant of variants) {
-        candidates.push(variant.url, variant.image, variant.redirectUrl);
-      }
-    }
-    return candidates.some(url => {
+    return destinationUrls(config).some(url => {
       try {
-        return url !== undefined && new URL(url).origin === origin;
+        return new URL(url).origin === origin;
       } catch {
         return false;
       }
@@ -977,16 +974,15 @@ export function createApp(options: AppOptions): Hono {
     // A multi-slot email wraps every element in ONE click link, so a
     // click needs no ?slot= when the destination cannot depend on the
     // slot anyway: an explicit ?to=, or a config-level redirectUrl with
-    // no per-variant redirects. Only when variants carry their own
-    // destinations does the click have to say which element was clicked.
+    // no per-slot and no per-variant redirects. As soon as an element
+    // carries its own destination, the click has to say which one was
+    // clicked, because the answer now differs per element.
     const entries = slotEntries(decoded.config);
     const uniformDestination =
       to ??
-      (entries.every(([, variants]) =>
-        variants.every(v => v.redirectUrl === undefined)
-      )
-        ? decoded.config.redirectUrl
-        : undefined);
+      (hasPerElementDestinations(decoded.config)
+        ? undefined
+        : decoded.config.redirectUrl);
     let candidates: Array<string | undefined>;
     let pickTarget: (choice: number[]) => string | undefined;
     if (
@@ -1004,11 +1000,14 @@ export function createApp(options: AppOptions): Hono {
       candidates =
         to !== undefined
           ? [to]
-          : slot.variants.map(v => v.redirectUrl ?? decoded.config.redirectUrl);
+          : slot.variants.map(v => clickTarget(decoded.config, slot.key, v));
       pickTarget = choice =>
-        to ??
-        slot.variants[choice[slot.index]].redirectUrl ??
-        decoded.config.redirectUrl;
+        clickTarget(
+          decoded.config,
+          slot.key,
+          slot.variants[choice[slot.index]],
+          to
+        );
     }
     if (candidates.some(target => target === undefined)) {
       return c.json(
