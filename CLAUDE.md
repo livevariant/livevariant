@@ -68,6 +68,7 @@ fields)`. Tampering derives a different test with empty state.
 | `@livevariant/core`     | Config codec, identity, the joint model, cells, priors, state |
 | `@livevariant/server`   | Hono app behind pluggable `StateStore` + `TestBackend`        |
 | `@livevariant/workers`  | Cloudflare: one SQLite Durable Object per test                |
+| `@livevariant/postgres` | Postgres `StateStore` + drizzle schema, for Node hosts        |
 | `@livevariant/sdk`      | Browser SDK: sticky combinations, GA auto-rewards, handoff    |
 | `@livevariant/tools`    | ONE registry of agent operations: MCP, REST, OpenAPI, SKILL   |
 | `@livevariant/mcp`      | MCP server (stdio) over that registry                         |
@@ -156,6 +157,20 @@ gets serialization for free; `ModelCache` (keyed by testId + blob
 version, copy-in/copy-out) makes decoded models hot; the model blob is
 JSON on purpose (benchmarked against base64-Float64: JSON is smaller
 and faster in V8; see `snapshot.ts`).
+
+`@livevariant/postgres` is the other adapter, for Node hosts. Everything
+the contract calls atomic is ONE statement there (no-op `DO UPDATE` so
+`RETURNING` fires on the conflict path, `xmax = 0` to tell an insert
+from a conflict, a `WHERE` on a `DO UPDATE` for the blob CAS); counters
+are one row per index, so a serve upserts one row instead of rewriting a
+1024-element array. Its `./schema` entry point exports the drizzle
+tables so an embedding app can `export * from "@livevariant/postgres/schema"`
+and let its own migration chain own them; `ddl.ts` is the same tables as
+plain SQL for everyone else, and a spec compares the two. The suite runs
+against PGlite by default AND against a real server when
+`LV_TEST_POSTGRES_URL` is set (CI sets it). Both matter: PGlite is one
+connection, so the concurrency cases serialize there and a
+read-modify-write adapter would pass them.
 
 ## Development
 

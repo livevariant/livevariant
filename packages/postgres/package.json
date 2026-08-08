@@ -1,0 +1,63 @@
+{
+  "name": "@livevariant/postgres",
+  "version": "0.0.3",
+  "description": "PostgreSQL state store for LiveVariant: a StateStore adapter whose event log and derived cache live in Postgres, plus the drizzle schema so an embedding application can own the migrations",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/livevariant/livevariant.git",
+    "directory": "packages/postgres"
+  },
+  "keywords": [
+    "ab-testing",
+    "multi-armed-bandit",
+    "postgres",
+    "drizzle",
+    "experimentation"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@livevariant/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./schema": {
+      "@livevariant/source": "./src/schema.ts",
+      "types": "./dist/schema.d.ts",
+      "import": "./dist/schema.js",
+      "default": "./dist/schema.js"
+    }
+  },
+  "dependencies": {
+    "@livevariant/core": "0.0.3",
+    "@livevariant/server": "0.0.3"
+  },
+  "peerDependencies": {
+    "drizzle-orm": ">=0.37.0 <1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist",
+    "!**/*.tsbuildinfo"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.4",
+    "@types/pg": "^8.21.0",
+    "drizzle-orm": "^0.37.0",
+    "pg": "^8.22.0"
+  }
+}
