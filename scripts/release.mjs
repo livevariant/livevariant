@@ -82,7 +82,43 @@ function assertReleaseGroupComplete() {
   }
 }
 
+/**
+ * A release rewrites package-lock.json, so it has to run on the npm the
+ * lockfile is pinned to, and only this checks that.
+ *
+ * npm versions disagree about what belongs in a lockfile. npm 11.6.2
+ * writes one with no entries for the nested @emnapi/*@2.0.0-alpha.3 that
+ * @rolldown/binding-wasm32-wasi pins, and npm 11.16.0 refuses to install
+ * that same lock: "Missing: @emnapi/core@2.0.0-alpha.3 from lock file".
+ * Nothing about the tree is wrong, the writer and the reader just
+ * disagree, so the failure only shows up later, in CI, on a commit whose
+ * only real content is the version bump. v0.0.4 and v0.0.5 both landed
+ * that way. The same pin drives the npm install step in ci.yml, which is
+ * what makes writer and reader the same program.
+ */
+function assertPinnedNpm() {
+  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+  const pinned = pkg.packageManager?.match(/^npm@(.+)$/)?.[1];
+  if (!pinned) {
+    console.error(
+      'release: package.json has no "packageManager": "npm@x.y.z"; the ' +
+        "lockfile this release writes would be at the mercy of whatever " +
+        "npm happens to be active"
+    );
+    process.exit(1);
+  }
+  const active = out("npm --version");
+  if (active !== pinned) {
+    console.error(
+      `release: npm ${active} is active but package.json pins npm ` +
+        `${pinned}. Run \`npm i -g npm@${pinned}\` and release again.`
+    );
+    process.exit(1);
+  }
+}
+
 assertReleaseGroupComplete();
+assertPinnedNpm();
 
 if (out("git status --porcelain") !== "") {
   console.error("release: working tree is not clean; commit or stash first");
@@ -118,11 +154,11 @@ if (dryRun) {
   process.exit(0);
 }
 
-// nx's lock-file update runs `npm install --package-lock-only`, and npm
-// has a long-standing habit of pruning nested platform-fallback entries
-// (rolldown's wasm binding pins @emnapi/*@2.0.0-alpha.3) in that mode. A
-// full install reconciles the lockfile so the release commit survives the
-// `npm ci` that CI and Workers Builds will run against it.
+// nx's lock-file update runs `npm install --package-lock-only`, which
+// only reasons about the lockfile. This full install writes the same
+// lockfile AND makes node_modules match it, so the publish step below
+// packs the versions the release commit claims rather than whatever the
+// tree held before the bump.
 run("npm install");
 run("git add package-lock.json");
 

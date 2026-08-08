@@ -184,7 +184,11 @@ read-modify-write adapter would pass them.
 
 ## Development
 
-Node 24 (`nvm use`), npm, nx monorepo.
+Node 24 (`nvm use`), npm, nx monorepo. The npm version is pinned in
+`package.json`'s `packageManager` field: CI installs exactly that one and
+`npm run release` refuses to run on another, because the npm that writes
+package-lock.json and the npm that runs `npm ci` have to agree on which
+nested entries the lock needs.
 
 ```bash
 npm ci

@@ -20,6 +20,8 @@ You only need to do this once; it covers all your future contributions. If you a
 
 You need [Node.js 24](https://nodejs.org) (the exact version is in [.nvmrc](.nvmrc), so `nvm use` works) and npm.
 
+The npm version is pinned in the `packageManager` field of the root `package.json`. Reading the lockfile works on any recent npm, so plain `npm ci` is fine for contributing. Writing it does not: npm versions disagree about which nested entries a lockfile needs, and a lockfile written by the wrong one fails `npm ci` in CI. So if your change touches dependencies, run `npm i -g npm@<pinned version>` first. CI installs the same version, and the release script refuses to run on any other.
+
 ```bash
 npm ci
 
