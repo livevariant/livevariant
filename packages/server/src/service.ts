@@ -55,6 +55,13 @@ import {
   type TestPolicy
 } from "./store/types.js";
 import type { ResolveCtxFn } from "./ctx-resolver.js";
+import type {
+  CombinationStats,
+  TestStats,
+  VariantStats
+} from "@livevariant/core";
+
+export type { CombinationStats, TestStats, VariantStats };
 
 /**
  * The serving logic both modes share. Redirect mode derives ServingParams
@@ -531,64 +538,6 @@ export class TestService implements TestBackend {
       }
     }
   }
-}
-
-export interface VariantStats {
-  name: string;
-  pulls: number;
-  conversions: number;
-  conversionRate: number | null;
-}
-
-export interface CombinationStats {
-  cell: number;
-  /** Variant name per slot, canonical slot order. */
-  choice: string[];
-  pulls: number;
-  conversions: number;
-  rewardTotal: number;
-  conversionRate: number | null;
-}
-
-export interface TestStats {
-  testId: string;
-  totalAssignments: number;
-  /** Exact outcomes per served combination (single-slot: per variant). */
-  combinations: CombinationStats[];
-  /**
-   * Per-slot marginal rollups: how each variant did across every
-   * combination it appeared in. The multi-slot answer to "how is hero B
-   * doing overall"; for a single-slot test it mirrors `combinations`.
-   */
-  slots: Record<string, VariantStats[]>;
-  /**
-   * Per-context-bucket outcomes, arrays indexed by cell. `label` is the
-   * recovered readable context ("country=nl") when every dimension in
-   * the bucket has a declared `values` list; absent for free-form
-   * dimensions, whose keys stay the opaque hashes they are stored as.
-   */
-  buckets: Record<
-    string,
-    { pulls: number[]; conversions: number[]; label?: string }
-  >;
-  /** What the creator's quarantine removed, so the numbers are auditable. */
-  excluded: {
-    total: number;
-    bySource: number;
-    byWindow: number;
-  };
-  /** Assignment count per opaque source bucket, before exclusions. */
-  perSource: Record<string, number>;
-  /**
-   * Pulls and conversions per derived signal value, e.g.
-   * { country: { nl: {...}, de: {...} }, device: { mobile: {...} } }.
-   * Recorded for every signal, not only those a test uses as context, so
-   * a plain test still gets a legible breakdown.
-   */
-  bySignal: Record<
-    string,
-    Record<string, { pulls: number; conversions: number }>
-  >;
 }
 
 /** Aggregates stats straight from the event log (the source of truth). */

@@ -1,17 +1,20 @@
 /**
- * Everything the stats page DERIVES from the raw counts, kept out of the
- * component so the arithmetic is unit-testable. The posterior work
- * (P(best), expected loss, stop advice) is core's analyzeOutcomes: the
- * same Beta-Bernoulli sampler the bandit itself runs, so the page's
- * verdicts agree with the mechanism that produced the data.
+ * Everything a results view DERIVES from the raw counts, kept out of any
+ * component so the arithmetic is unit-testable and so two different
+ * dashboards cannot disagree about what the same numbers mean.
+ *
+ * The posterior work (P(best), expected loss, stop advice) is
+ * analyzeOutcomes next door: the same Beta-Bernoulli sampler the bandit
+ * itself runs, so a view's verdicts agree with the mechanism that
+ * produced the data rather than approximating it.
  */
 import {
   analyzeOutcomes,
   MIN_PULLS_TO_CALL,
   type ArmOutcome,
   type DecisionAnalysis
-} from "@livevariant/core";
-import type { TestStats } from "./stats";
+} from "./decide.js";
+import type { TestStats } from "./stats.js";
 
 /**
  * Wilson 95% score interval for a conversion rate. Chosen over a normal
