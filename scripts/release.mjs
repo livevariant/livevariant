@@ -86,15 +86,16 @@ function assertReleaseGroupComplete() {
  * A release rewrites package-lock.json, so it has to run on the npm the
  * lockfile is pinned to, and only this checks that.
  *
- * npm versions disagree about what belongs in a lockfile. npm 11.6.2
- * writes one with no entries for the nested @emnapi/*@2.0.0-alpha.3 that
- * @rolldown/binding-wasm32-wasi pins, and npm 11.16.0 refuses to install
- * that same lock: "Missing: @emnapi/core@2.0.0-alpha.3 from lock file".
- * Nothing about the tree is wrong, the writer and the reader just
- * disagree, so the failure only shows up later, in CI, on a commit whose
- * only real content is the version bump. v0.0.4 and v0.0.5 both landed
- * that way. The same pin drives the npm install step in ci.yml, which is
- * what makes writer and reader the same program.
+ * npm versions disagree about what belongs in a lockfile, and each one
+ * rewrites the other's answer. npm 11.6.2 wrote the v0.0.5 lock without
+ * entries for the nested @emnapi/*@2.0.0-alpha.3 that
+ * @rolldown/binding-wasm32-wasi pins, and the npm 11.16.0 that Node
+ * 24.18.0 bundles refused to install it: "Missing:
+ * @emnapi/core@2.0.0-alpha.3 from lock file". They also disagree about
+ * devOptional versus dev, so releasing on the wrong one buries the real
+ * change under hundreds of lines of flag churn. The same pin drives the
+ * npm install step in ci.yml, which is what makes writer and reader the
+ * same program.
  */
 function assertPinnedNpm() {
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));
@@ -117,6 +118,41 @@ function assertPinnedNpm() {
   }
 }
 
+const lockedPackages = () =>
+  new Set(
+    Object.keys(JSON.parse(readFileSync("package-lock.json", "utf8")).packages)
+  );
+
+/**
+ * A release changes version numbers, so every package the lockfile
+ * listed before it must still be listed after. npm does not guarantee
+ * that: rewriting a lockfile against a node_modules that only holds the
+ * current machine's platform binaries can drop the other platforms'
+ * entries, silently and with no error. That is how main went red twice.
+ * The v0.0.5 rewrite dropped the nested @emnapi/* that
+ * @rolldown/binding-wasm32-wasi pins, and the manual regeneration meant
+ * to repair it dropped all eleven non-darwin @tailwindcss/oxide-*
+ * binaries instead, which left Linux unable to load tailwind at all.
+ *
+ * Both were invisible on the releaser's machine and only failed in CI,
+ * on a commit whose only intended content was the version bump.
+ */
+function assertNothingPruned(before) {
+  const after = lockedPackages();
+  const dropped = [...before].filter(name => !after.has(name));
+  if (dropped.length === 0) return;
+  console.error(
+    `release: the lockfile rewrite dropped ${dropped.length} package(s) ` +
+      "that a release has no business removing:\n  " +
+      dropped.join("\n  ") +
+      "\n\nNothing was committed or tagged. Reset with `git reset --hard`, " +
+      "rebuild the lockfile from scratch with `rm -rf node_modules " +
+      "package-lock.json && npm install`, commit that on its own, then " +
+      "release again."
+  );
+  process.exit(1);
+}
+
 assertReleaseGroupComplete();
 assertPinnedNpm();
 
@@ -131,6 +167,8 @@ if (out("git branch --show-current") !== "main" && !dryRun) {
 
 // No v* tag yet means nx has no previous release to diff against.
 const firstRelease = out("git tag --list 'v*'") === "";
+
+const lockedPackagesBefore = lockedPackages();
 
 const { workspaceVersion } = await releaseVersion({
   specifier,
@@ -160,6 +198,7 @@ if (dryRun) {
 // packs the versions the release commit claims rather than whatever the
 // tree held before the bump.
 run("npm install");
+assertNothingPruned(lockedPackagesBefore);
 run("git add package-lock.json");
 
 // The generated manifests embed the version, so they are part of the

@@ -20,7 +20,13 @@ You only need to do this once; it covers all your future contributions. If you a
 
 You need [Node.js 24](https://nodejs.org) (the exact version is in [.nvmrc](.nvmrc), so `nvm use` works) and npm.
 
-The npm version is pinned in the `packageManager` field of the root `package.json`. Reading the lockfile works on any recent npm, so plain `npm ci` is fine for contributing. Writing it does not: npm versions disagree about which nested entries a lockfile needs, and a lockfile written by the wrong one fails `npm ci` in CI. So if your change touches dependencies, run `npm i -g npm@<pinned version>` first. CI installs the same version, and the release script refuses to run on any other.
+The npm version is pinned in the `packageManager` field of the root `package.json`. Reading the lockfile works on any recent npm, so plain `npm ci` is all you need to contribute. Writing it is stricter, because npm versions disagree about lockfile contents and each rewrites the other's answer. If your change touches dependencies, `npm i -g npm@<pinned version>` first; CI installs the same version and the release script refuses to run on any other.
+
+Never repair a lockfile by rerunning `npm install` over the existing one. An incremental rewrite reasons about the `node_modules` in front of it, which only holds your machine's platform binaries, so it can quietly drop the Linux and Windows entries and hand CI a tree it cannot build. Rebuild it from scratch instead:
+
+```bash
+rm -rf node_modules package-lock.json && npm install
+```
 
 ```bash
 npm ci
