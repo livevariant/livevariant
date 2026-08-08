@@ -1,6 +1,6 @@
 import { AUTO_SIGNALS, type AutoSignal } from "./signals.js";
 import {
-  testConfigSchema,
+  parseTestConfig,
   type TestConfig,
   type TestConfigInput
 } from "./schema.js";
@@ -134,7 +134,7 @@ export async function configFromParams(
       : {}),
     ...(query.get("fw") === "0" ? { forwardParams: false } : {})
   };
-  const config = testConfigSchema.parse(input);
+  const config = parseTestConfig(input);
   return { config, testId: await computeTestId(config) };
 }
 

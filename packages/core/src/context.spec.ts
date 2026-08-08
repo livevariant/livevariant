@@ -10,10 +10,10 @@ import {
   normalizeCtx,
   splitAutoDims
 } from "./context.js";
-import { testConfigSchema } from "./schema.js";
+import { parseTestConfig } from "./schema.js";
 
 function configWithDims(dims: unknown[]) {
-  return testConfigSchema.parse({
+  return parseTestConfig({
     variants: ["A", "B"],
     ctx: { dims },
     statsKeyHash: "0".repeat(64)

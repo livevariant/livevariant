@@ -5,7 +5,7 @@ import {
   encodeConfig,
   CONFIG_HARD_LIMIT
 } from "./codec.js";
-import { testConfigSchema, type TestConfigInput } from "./schema.js";
+import { parseTestConfig, type TestConfigInput } from "./schema.js";
 
 const KH = "0".repeat(64);
 
@@ -111,12 +111,10 @@ describe("identity of placement and namespace", () => {
     // a public URL must self-isolate as a different test rather than
     // split one test's records across two homes.
     const base = { variants: ["https://a.example/x", "https://a.example/y"] };
-    const plain = await computeTestId(testConfigSchema.parse(base));
-    const eu = await computeTestId(
-      testConfigSchema.parse({ ...base, region: "eu" })
-    );
+    const plain = await computeTestId(parseTestConfig(base));
+    const eu = await computeTestId(parseTestConfig({ ...base, region: "eu" }));
     const weur = await computeTestId(
-      testConfigSchema.parse({ ...base, region: "weur" })
+      parseTestConfig({ ...base, region: "weur" })
     );
     expect(new Set([plain, eu, weur]).size).toBe(3);
   });
@@ -124,10 +122,10 @@ describe("identity of placement and namespace", () => {
   it("scope is part of the identity: two sites' identical inline tests differ", async () => {
     const inline = { variants: ["Book now", "Book"] };
     const siteA = await computeTestId(
-      testConfigSchema.parse({ ...inline, scope: "a.example" })
+      parseTestConfig({ ...inline, scope: "a.example" })
     );
     const siteB = await computeTestId(
-      testConfigSchema.parse({ ...inline, scope: "b.example" })
+      parseTestConfig({ ...inline, scope: "b.example" })
     );
     expect(siteA).not.toBe(siteB);
   });

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { effectivePriors } from "./priors.js";
-import { testConfigSchema } from "./schema.js";
+import { parseTestConfig } from "./schema.js";
 
 describe("effectivePriors", () => {
-  const config = testConfigSchema.parse({
+  const config = parseTestConfig({
     slots: { hero: ["A", "B"], cta: ["X", "Y"] },
     priors: {
       hero: [
@@ -41,7 +41,7 @@ describe("effectivePriors", () => {
   });
 
   it("returns nothing when the config has no priors", () => {
-    const bare = testConfigSchema.parse({
+    const bare = parseTestConfig({
       variants: ["A", "B"],
       statsKeyHash: "0".repeat(64)
     });

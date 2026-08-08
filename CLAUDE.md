@@ -210,6 +210,27 @@ npm run release            # lockstep versioning: ALL five npm packages, one ver
 - nx cache can mask env-dependent results: `--skip-nx-cache` when
   varying anything outside the repo.
 
+## Bundle weight
+
+`/sdk.js` goes on customer sites, so its size is a product decision.
+`packages/core` therefore uses **`zod/mini`** (`import * as z from
+"zod/mini"`, functional API: `z.optional(x)`, `z._default(x, v)`,
+`.check(z.minLength(1))`, `z.parse(schema, v)`). The classic
+`import { z } from "zod"` is a NAMESPACE object that defeats
+tree-shaking completely: one `z.string()` cost 65 KB gzipped, and the tag
+was 71 KB gz before the switch and 13 KB after. Call sites use the
+exported `parseTestConfig` / `safeParseTestConfig` rather than reaching
+for the schema's own methods, so the flavour lives in one file.
+
+`packages/tools` deliberately stays on classic zod (it needs
+`.describe()` and JSON Schema emission, and never reaches a browser) and
+re-exports `z` so an embedding host can extend a tool's input without a
+second zod copy. Classic and mini interoperate: `api-schemas.ts` composes
+core's mini `ctxDimSchema` inside a classic `z.array`.
+
+`packages/workers/src/tag-size.spec.ts` holds the ceiling. Raise it
+deliberately and say why; do not nudge it to make a build green.
+
 ## Conventions
 
 - Tools live ONLY in the `@livevariant/tools` registry; MCP, REST,

@@ -14,7 +14,7 @@ import {
   slotEntries,
   slotSizes,
   splitAutoDims,
-  testConfigSchema,
+  parseTestConfig,
   utf8ToBase64Url,
   validCell,
   variantName,
@@ -303,7 +303,7 @@ export async function createTest(
     input.statsKeyHash === undefined
       ? { ...input, scope: win.location.hostname }
       : input;
-  const resolved: TestConfig = testConfigSchema.parse(scoped) as TestConfig;
+  const resolved: TestConfig = parseTestConfig(scoped) as TestConfig;
   const testId = await computeTestId(resolved);
 
   const entries = slotEntries(resolved);

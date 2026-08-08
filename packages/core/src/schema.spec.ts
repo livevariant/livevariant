@@ -3,7 +3,7 @@ import {
   cellNames,
   slotEntries,
   slotSizes,
-  testConfigSchema,
+  parseTestConfig,
   variantName
 } from "./schema.js";
 
@@ -14,7 +14,7 @@ const KH = "0".repeat(64);
 
 describe("authoring sugar", () => {
   it("turns `variants` into a single main slot", () => {
-    const config = testConfigSchema.parse({
+    const config = parseTestConfig({
       variants: [{ text: "A" }, { text: "B" }],
       statsKeyHash: KH
     });
@@ -25,7 +25,7 @@ describe("authoring sugar", () => {
   it("reads bare strings as text or destination", () => {
     // The most readable spelling of the common cases: an example in the
     // docs should not need a single object literal.
-    const config = testConfigSchema.parse({
+    const config = parseTestConfig({
       variants: ["Ship faster", "https://example.com/b"],
       statsKeyHash: KH
     });
@@ -36,7 +36,7 @@ describe("authoring sugar", () => {
   it("has no algorithm to configure, by design", () => {
     // Users describe what to test; the model is our job. An alg field is
     // silently dropped rather than honored.
-    const config = testConfigSchema.parse({
+    const config = parseTestConfig({
       variants: ["A", "B"],
       alg: "bucketed",
       statsKeyHash: KH
@@ -49,7 +49,7 @@ describe("slots", () => {
   it("orders slots canonically by key, whatever the input order", () => {
     // Cell indices are defined against this order and canonical JSON
     // sorts keys, so it must survive serialization.
-    const config = testConfigSchema.parse({
+    const config = parseTestConfig({
       slots: { hero: ["A", "B"], cta: ["X", "Y", "Z"] },
       statsKeyHash: KH
     });
@@ -59,7 +59,7 @@ describe("slots", () => {
 
   it("requires at least two combinations", () => {
     expect(() =>
-      testConfigSchema.parse({ slots: { main: ["only"] }, statsKeyHash: KH })
+      parseTestConfig({ slots: { main: ["only"] }, statsKeyHash: KH })
     ).toThrow(/two combinations/);
   });
 
@@ -67,7 +67,7 @@ describe("slots", () => {
     // Cells are enumerated and counted; an unbounded product would be
     // unlearnable anyway.
     expect(() =>
-      testConfigSchema.parse({
+      parseTestConfig({
         slots: {
           a: Array.from({ length: 9 }, (_, i) => `a${i}`),
           b: Array.from({ length: 9 }, (_, i) => `b${i}`),
@@ -80,7 +80,7 @@ describe("slots", () => {
 
   it("rejects a variant with no content at all", () => {
     expect(() =>
-      testConfigSchema.parse({
+      parseTestConfig({
         variants: [{ name: "empty" }, "B"],
         statsKeyHash: KH
       })
@@ -92,13 +92,13 @@ describe("priors", () => {
   it("must name real slots with matching arity", () => {
     const base = { slots: { hero: ["A", "B"] }, statsKeyHash: KH };
     expect(() =>
-      testConfigSchema.parse({
+      parseTestConfig({
         ...base,
         priors: { cta: [{ mean: 0.1, strength: 10 }] }
       })
     ).toThrow(/does not exist/);
     expect(() =>
-      testConfigSchema.parse({
+      parseTestConfig({
         ...base,
         priors: { hero: [{ mean: 0.1, strength: 10 }] }
       })
@@ -108,7 +108,7 @@ describe("priors", () => {
 
 describe("names", () => {
   it("defaults readable per-slot names", () => {
-    const config = testConfigSchema.parse({
+    const config = parseTestConfig({
       slots: { cta: ["X", { name: "hero-b", text: "B" }] },
       statsKeyHash: KH
     });

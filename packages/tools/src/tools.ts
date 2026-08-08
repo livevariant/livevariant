@@ -9,7 +9,8 @@ import {
   hashStatsSecret,
   slotEntries,
   slotSizes,
-  testConfigSchema,
+  parseTestConfig,
+  type TestConfig,
   variantName,
   AUTO_SIGNALS,
   CONFIG_SOFT_LIMIT,
@@ -331,10 +332,10 @@ export const buildTest = defineTool({
       statsKeyHash: await hashStatsSecret(statsSecret)
     };
 
-    let parsed: ReturnType<typeof testConfigSchema.parse>;
+    let parsed: TestConfig;
     let encoded: Awaited<ReturnType<typeof encodeConfig>>;
     try {
-      parsed = testConfigSchema.parse(configInput);
+      parsed = parseTestConfig(configInput);
       encoded = await encodeConfig(parsed);
     } catch (err) {
       throw new ToolInputError(
@@ -812,7 +813,7 @@ export const generatePriors = defineTool({
       );
     }
 
-    const next = testConfigSchema.parse({ ...config, priors });
+    const next = parseTestConfig({ ...config, priors });
     const encoded = await encodeConfig(next);
     if (encoded.testId !== testId) {
       // Cannot happen: priors are identity-excluded. Loud if it ever does,

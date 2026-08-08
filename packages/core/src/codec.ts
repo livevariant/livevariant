@@ -5,7 +5,7 @@ import {
   utf8ToBase64Url
 } from "./canonical.js";
 import {
-  testConfigSchema,
+  parseTestConfig,
   type TestConfig,
   type TestConfigInput
 } from "./schema.js";
@@ -52,7 +52,7 @@ export interface EncodedConfig {
 export async function encodeConfig(
   input: TestConfigInput
 ): Promise<EncodedConfig> {
-  const config = testConfigSchema.parse(input);
+  const config = parseTestConfig(input);
   const encoded = utf8ToBase64Url(canonicalJson(config));
   if (encoded.length > CONFIG_HARD_LIMIT) {
     throw new Error(
@@ -92,6 +92,6 @@ export async function decodeConfig(encoded: string): Promise<DecodedConfig> {
   } catch {
     throw new Error("not a valid base64url-encoded config");
   }
-  const config = testConfigSchema.parse(parsed);
+  const config = parseTestConfig(parsed);
   return { config, testId: await computeTestId(config) };
 }

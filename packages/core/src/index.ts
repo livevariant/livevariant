@@ -12,6 +12,8 @@ export {
   ctxDimSchema,
   slotEntries,
   slotSizes,
+  parseTestConfig,
+  safeParseTestConfig,
   testConfigSchema,
   variantName,
   type CtxDim,
