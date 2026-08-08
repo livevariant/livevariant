@@ -2183,3 +2183,134 @@ describe("embedding without the tool API", () => {
     expect((await app.request("/llms.txt")).status).toBe(200);
   });
 });
+
+describe("context resolved by the deployment", () => {
+  /** A dimension that is a lookup, not a signal: postcode to segment. */
+  const RESOLVED = {
+    ctx: {
+      dims: [
+        {
+          key: "segment",
+          values: ["north", "south"],
+          resolve: "area-lookup" as const
+        }
+      ]
+    }
+  };
+
+  function appWith(
+    resolve: (input: {
+      raw: Readonly<Record<string, string>>;
+    }) => Promise<Record<string, string | undefined>>,
+    timeoutMs?: number
+  ): Hono {
+    return createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      ctxResolvers: { "area-lookup": { resolve } },
+      ...(timeoutMs === undefined ? {} : { ctxResolveTimeoutMs: timeoutMs })
+    });
+  }
+
+  async function statsOf(app: Hono, encoded: string) {
+    const res = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    return (await res.json()) as {
+      totalAssignments: number;
+      buckets: Record<string, unknown>;
+    };
+  }
+
+  it("buckets on the answer, and never stores the question", async () => {
+    // The whole point: a postcode arrives, a segment is what gets hashed.
+    const seen: string[] = [];
+    const app = appWith(async ({ raw }) => {
+      seen.push(raw.postcode);
+      return { segment: raw.postcode?.startsWith("1") ? "north" : "south" };
+    });
+    const { encoded } = await makeTest(RESOLVED);
+
+    for (const [i, postcode] of ["1011", "1012", "9999"].entries()) {
+      const res = await app.request(
+        `/s/${encoded}?id=v${i}&c_postcode=${postcode}`,
+        { headers: { accept: BROWSER_ACCEPT } }
+      );
+      expect(res.status).toBe(302);
+    }
+
+    expect(seen).toEqual(["1011", "1012", "9999"]);
+    const s = await statsOf(app, encoded);
+    expect(s.totalAssignments).toBe(3);
+    // Two segments, two buckets: the two northern postcodes share one.
+    expect(Object.keys(s.buckets)).toHaveLength(2);
+    // And the postcode itself is nowhere in what was stored.
+    expect(JSON.stringify(s)).not.toContain("1011");
+  });
+
+  it("serves anyway when the lookup fails", async () => {
+    // A serve is often an email image fetch. It must not 500 because a
+    // third party is down; the dimension is simply absent.
+    const app = appWith(async () => {
+      throw new Error("lookup is down");
+    });
+    const { encoded } = await makeTest(RESOLVED);
+    const res = await app.request(`/s/${encoded}?id=a&c_postcode=1011`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(302);
+    const s = await statsOf(app, encoded);
+    expect(s.totalAssignments).toBe(1);
+    expect(Object.keys(s.buckets)).toHaveLength(0);
+  });
+
+  it("serves anyway when the lookup hangs", async () => {
+    const app = appWith(
+      () => new Promise<Record<string, string>>(() => undefined),
+      20
+    );
+    const { encoded } = await makeTest(RESOLVED);
+    const res = await app.request(`/s/${encoded}?id=a&c_postcode=1011`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(302);
+    expect(Object.keys((await statsOf(app, encoded)).buckets)).toHaveLength(0);
+  });
+
+  it("refuses a bucket the config never declared", async () => {
+    // A resolver is not more trusted than a query parameter: without the
+    // allowlist, a compromised or buggy lookup could fragment a test into
+    // unbounded buckets.
+    const app = appWith(async () => ({ segment: "elsewhere" }));
+    const { encoded } = await makeTest(RESOLVED);
+    await app.request(`/s/${encoded}?id=a&c_postcode=1011`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(Object.keys((await statsOf(app, encoded)).buckets)).toHaveLength(0);
+  });
+
+  it("lets a caller-supplied value win, into the same bucket", async () => {
+    // Supplied and resolved values of one dimension must share a bucket,
+    // or one effective context learns at half speed in two halves.
+    const app = appWith(async () => ({ segment: "north" }));
+    const { encoded } = await makeTest(RESOLVED);
+    for (const query of ["id=said&c_segment=north", "id=looked&c_postcode=1"]) {
+      const res = await app.request(`/s/${encoded}?${query}`, {
+        headers: { accept: BROWSER_ACCEPT }
+      });
+      expect(res.status).toBe(302);
+    }
+    const s = await statsOf(app, encoded);
+    expect(s.totalAssignments).toBe(2);
+    expect(Object.keys(s.buckets)).toHaveLength(1);
+  });
+
+  it("does nothing when the deployment has no such resolver", async () => {
+    const app = createApp({ store: new MemoryStore(), rng: mulberry32(7) });
+    const { encoded } = await makeTest(RESOLVED);
+    const res = await app.request(`/s/${encoded}?id=a&c_postcode=1011`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(302);
+  });
+});

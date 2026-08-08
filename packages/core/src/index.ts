@@ -87,6 +87,7 @@ export {
   bucketKey,
   composeBucketKey,
   deriveAutoCtx,
+  deriveResolvedCtx,
   enumerateBucketLabels,
   mergeFeatureIndices,
   externalIdHash,

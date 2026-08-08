@@ -56,6 +56,16 @@ fields)`. Tampering derives a different test with empty state.
   on config-free paths: `/choose` and `/reward` bodies, `_lvr` handoff
   param. Defaults to the creator's region (`regionHint` from
   `request.cf`; `/config` exposes it to the builder).
+- **Resolved context.** A ctx dim can say `resolve: "<name>"` instead of
+  `from:`, for buckets that are a LOOKUP rather than a signal (a postcode
+  becomes a segment). The deployment supplies the named resolver
+  (`AppOptions.ctxResolvers`, port in `server/src/ctx-resolver.ts`); it
+  runs inside `resolveIdentity` between normalizing and hashing, reads the
+  caller's RAW ctx (so the input need not be a declared dim), and only its
+  answer reaches `ctxKey`/`featIdx`. Fails open on rejection, timeout
+  (`ctxResolveTimeoutMs`, default 150ms) or a value outside `values`.
+  Redirect paths only: `/choose` carries a page-computed hash by design.
+  Records store serve-time `featIdx`, so recompute never re-resolves.
 - **Scope.** Keyless inline SDK configs get `scope: location.hostname`
   injected so two sites running the same trivial test never share
   state. Explicit `scope` overrides; keyed or pre-encoded configs are

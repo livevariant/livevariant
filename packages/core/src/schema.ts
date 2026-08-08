@@ -65,18 +65,42 @@ const variantSchema = z.preprocess(value => {
 
 const SLOT_KEY = /^[a-z][a-z0-9_-]{0,31}$/;
 
-export const ctxDimSchema = z.object({
-  key: z.string().min(1),
-  /** Known values, if enumerable; omitted means free-form (hashed). */
-  values: z.array(z.string().min(1)).min(2).optional(),
-  /**
-   * Fill this dimension from a signal the server derives, so the caller
-   * never has to pass it (country, device, utm_source, ...). A supplied
-   * `c_<key>` still wins: you know your own users better than an IP
-   * database does.
-   */
-  from: z.enum(AUTO_SIGNALS).optional()
-});
+export const ctxDimSchema = z
+  .object({
+    key: z.string().min(1),
+    /** Known values, if enumerable; omitted means free-form (hashed). */
+    values: z.array(z.string().min(1)).min(2).optional(),
+    /**
+     * Fill this dimension from a signal the server derives, so the caller
+     * never has to pass it (country, device, utm_source, ...). A supplied
+     * `c_<key>` still wins: you know your own users better than an IP
+     * database does.
+     */
+    from: z.enum(AUTO_SIGNALS).optional(),
+    /**
+     * Fill this dimension by asking the DEPLOYMENT, naming one of the
+     * resolvers it was configured with. For buckets that are not a signal
+     * but a lookup: a postcode becomes a segment, an account id becomes a
+     * plan tier, and the thing that knows is a service, not this request.
+     *
+     * The resolver reads the caller's raw context, so its INPUT need not
+     * be a dimension at all, and only its answer is ever hashed or
+     * stored. A `values` list still binds, so a resolver cannot invent
+     * buckets the config never sanctioned.
+     *
+     * Server-side only: /choose carries a context hash computed on the
+     * page precisely so raw values never leave it, so a page that wants a
+     * resolved dimension resolves it there and passes the result.
+     */
+    resolve: z
+      .string()
+      .regex(/^[a-z][a-z0-9-]{0,31}$/)
+      .optional()
+  })
+  .refine(dim => !(dim.from && dim.resolve), {
+    message:
+      "a context dimension is filled from a signal or a resolver, not both"
+  });
 
 /**
  * Warm-start prior for one variant, typically an LLM's guess: "this will

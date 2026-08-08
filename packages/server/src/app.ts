@@ -64,6 +64,7 @@ import {
 import type { AccountsProvider } from "./accounts-port.js";
 import { SERVER_VERSION } from "./version.js";
 import type { StateStore } from "./store/types.js";
+import { bindCtxResolvers, type CtxResolvers } from "./ctx-resolver.js";
 
 export interface AppOptions {
   /** In-process backend over a StateStore (Node, tests). */
@@ -198,6 +199,20 @@ export interface AppOptions {
    * duration cap.
    */
   statsStreamMaxTicks?: number;
+  /**
+   * Named resolvers for context dimensions the config fills with
+   * `resolve: "<name>"`: buckets that are a lookup rather than a signal.
+   * See ./ctx-resolver.ts, which is also where the failure contract is
+   * written down. A config naming a resolver this deployment does not
+   * have simply leaves that dimension out.
+   */
+  ctxResolvers?: CtxResolvers;
+  /**
+   * Budget for the whole resolution step, in milliseconds (default 150).
+   * One budget, not one per resolver: a config naming three of them must
+   * not be able to hold a serve for three timeouts.
+   */
+  ctxResolveTimeoutMs?: number;
 }
 
 /** 1x1 transparent GIF for the no-JS conversion pixel. */
@@ -620,7 +635,13 @@ export function createApp(options: AppOptions): Hono {
         ...requestContext(c),
         noAuto: autoContextDisabled(c.req.query("auto")),
         query
-      }
+      },
+      bindCtxResolvers({
+        testId: decoded.testId,
+        resolvers: options.ctxResolvers,
+        timeoutMs: options.ctxResolveTimeoutMs,
+        request: c.req.raw
+      })
     );
     return { decoded, params, identity, query, setCookie: resolved.setCookie };
   }

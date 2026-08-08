@@ -55,6 +55,14 @@ export {
 } from "./store/types.js";
 export { type AccountsProvider, type KeyPolicy } from "./accounts-port.js";
 export {
+  bindCtxResolvers,
+  DEFAULT_CTX_RESOLVE_TIMEOUT_MS,
+  type CtxResolveInput,
+  type CtxResolver,
+  type CtxResolvers,
+  type ResolveCtxFn
+} from "./ctx-resolver.js";
+export {
   envTrustPolicy,
   originMatches,
   unlistedDestinationMode,
