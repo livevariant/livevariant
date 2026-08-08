@@ -1,64 +1,20 @@
 /**
- * The stats page's data layer: the /stats payload types, and a live
- * subscription over the server's SSE stream with an ordinary polling
- * fallback, so the page shows moving numbers on a current deployment and
- * still shows numbers on an old one.
+ * The stats page's transport: a live subscription over the server's SSE
+ * stream with an ordinary polling fallback, so the page shows moving
+ * numbers on a current deployment and still shows numbers on an old one.
  *
  * The stream is consumed with a streaming fetch rather than EventSource
  * because EventSource cannot send headers, and the stats secret travels
- * ONLY as a Bearer header (query params would land in access logs).
+ * ONLY as a Bearer header (query params would land in access logs). That
+ * is also why this stayed here rather than moving to core with the
+ * payload types and the derivation math: it is the one piece that assumes
+ * the browser holds the secret, which an embedding dashboard keeping the
+ * secret server-side would not do.
  */
+import { normalizeStats, type TestStats } from "@livevariant/core";
 
-export interface VariantStats {
-  name: string;
-  pulls: number;
-  conversions: number;
-  conversionRate: number | null;
-}
-
-export interface CombinationStats {
-  cell: number;
-  choice: string[];
-  pulls: number;
-  conversions: number;
-  rewardTotal: number;
-  conversionRate: number | null;
-}
-
-export interface BucketStats {
-  /** Arrays indexed by cell. */
-  pulls: number[];
-  conversions: number[];
-  /** Recovered readable context; absent when the key stays opaque. */
-  label?: string;
-}
-
-export interface TestStats {
-  totalAssignments: number;
-  combinations: CombinationStats[];
-  slots: Record<string, VariantStats[]>;
-  buckets: Record<string, BucketStats>;
-  bySignal: Record<
-    string,
-    Record<string, { pulls: number; conversions: number }>
-  >;
-  perSource: Record<string, number>;
-  excluded: { total: number; bySource: number; byWindow: number };
-}
-
-/** Fills the optional sections, so older servers render instead of crash. */
-export function normalizeStats(raw: unknown): TestStats {
-  const partial = (raw ?? {}) as Partial<TestStats>;
-  return {
-    totalAssignments: partial.totalAssignments ?? 0,
-    combinations: partial.combinations ?? [],
-    slots: partial.slots ?? {},
-    buckets: partial.buckets ?? {},
-    bySignal: partial.bySignal ?? {},
-    perSource: partial.perSource ?? {},
-    excluded: partial.excluded ?? { total: 0, bySource: 0, byWindow: 0 }
-  };
-}
+export { normalizeStats };
+export type { TestStats };
 
 export interface SSEEvent {
   event: string;

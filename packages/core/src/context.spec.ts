@@ -3,16 +3,17 @@ import {
   bucketKey,
   composeBucketKey,
   deriveAutoCtx,
+  deriveResolvedCtx,
   enumerateBucketLabels,
   featureIndices,
   mergeFeatureIndices,
   normalizeCtx,
   splitAutoDims
 } from "./context.js";
-import { testConfigSchema } from "./schema.js";
+import { parseTestConfig } from "./schema.js";
 
 function configWithDims(dims: unknown[]) {
-  return testConfigSchema.parse({
+  return parseTestConfig({
     variants: ["A", "B"],
     ctx: { dims },
     statsKeyHash: "0".repeat(64)
@@ -229,5 +230,68 @@ describe("splitAutoDims", () => {
     const ctx = { persona: "power" };
     expect(splitAutoDims(config.ctx?.dims, ctx)).toBe(ctx);
     expect(splitAutoDims(config.ctx?.dims, null)).toBeNull();
+  });
+});
+
+describe("deriveResolvedCtx", () => {
+  const dims = [
+    { key: "segment", values: ["north", "south"], resolve: "area-lookup" },
+    { key: "persona" }
+  ];
+
+  it("takes the resolver's answer for its own dimension only", () => {
+    const config = configWithDims(dims);
+    expect(
+      deriveResolvedCtx(
+        config.ctx?.dims,
+        { segment: "north", persona: "ignored" },
+        null
+      )
+    ).toEqual({ segment: "north" });
+  });
+
+  it("lets a caller-supplied value win", () => {
+    const config = configWithDims(dims);
+    expect(
+      deriveResolvedCtx(
+        config.ctx?.dims,
+        { segment: "north" },
+        {
+          segment: "south"
+        }
+      )
+    ).toEqual({ segment: "south" });
+  });
+
+  it("enforces the declared allowlist against the resolver too", () => {
+    // A resolver is not more trusted than a query parameter: without this
+    // a buggy lookup fragments a test into unbounded buckets.
+    const config = configWithDims(dims);
+    expect(
+      deriveResolvedCtx(config.ctx?.dims, { segment: "elsewhere" }, null)
+    ).toEqual({});
+    expect(deriveResolvedCtx(config.ctx?.dims, {}, null)).toEqual({});
+  });
+
+  it("buckets a resolved dimension the same way a derived one buckets", async () => {
+    // Composition has to be identical or the same effective context
+    // splits in two, and stats labels stop matching real buckets.
+    const config = configWithDims(dims);
+    const resolved = deriveResolvedCtx(
+      config.ctx?.dims,
+      { segment: "north" },
+      null
+    );
+    const key = await composeBucketKey("t", null, resolved);
+    const labels = await enumerateBucketLabels("t", config.ctx?.dims);
+    expect(labels.get(key!)).toBe("segment=north");
+  });
+});
+
+describe("a dimension is filled one way or the other", () => {
+  it("refuses both a signal and a resolver", () => {
+    expect(() =>
+      configWithDims([{ key: "x", from: "country", resolve: "lookup" }])
+    ).toThrow();
   });
 });

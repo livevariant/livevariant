@@ -19,6 +19,27 @@ jobs:
   main:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # The Postgres store runs its conformance suite twice: against PGlite
+    # (in-process, no server) and against this one. Only the second proves
+    # the concurrency cases, because PGlite is a single connection and the
+    # races serialize, which is exactly how a read-modify-write adapter
+    # sneaks through. Without this service that half of the suite skips.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: livevariant
+          POSTGRES_PASSWORD: livevariant
+          POSTGRES_DB: livevariant_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       # Full history so the gitleaks scan covers every commit. No
       # partial-clone filter: gitleaks reads every historical blob, and the
@@ -70,6 +91,8 @@ jobs:
       # biggest suite) starves past its timeout. One suite at a time
       # gives each browser the whole machine.
       - run: npx nx run-many -t test --parallel=1
+        env:
+          LV_TEST_POSTGRES_URL: postgres://livevariant:livevariant@localhost:5432/livevariant_test
 
       # The SKILL, the plugin bundles and the marketplace manifests are all
       # generated from the tool registry. Regenerating must be a no-op, or a

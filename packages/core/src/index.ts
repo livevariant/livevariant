@@ -12,6 +12,8 @@ export {
   ctxDimSchema,
   slotEntries,
   slotSizes,
+  parseTestConfig,
+  safeParseTestConfig,
   testConfigSchema,
   variantName,
   type CtxDim,
@@ -77,7 +79,9 @@ export {
   regionHint,
   requestSignals,
   type AutoSignal,
+  geoFromRequest,
   type CloudflareGeo,
+  type RequestGeo,
   type RequestSignals,
   type TestRegion
 } from "./signals.js";
@@ -85,6 +89,7 @@ export {
   bucketKey,
   composeBucketKey,
   deriveAutoCtx,
+  deriveResolvedCtx,
   enumerateBucketLabels,
   mergeFeatureIndices,
   externalIdHash,
@@ -151,3 +156,24 @@ export {
   stripHandoffParams,
   type Handoff
 } from "./handoff.js";
+export {
+  normalizeStats,
+  type BucketStats,
+  type CombinationStats,
+  type TestStats,
+  type VariantStats
+} from "./stats.js";
+export {
+  analyzeCombinations,
+  analyzeSlots,
+  decisionLine,
+  signalBreakdowns,
+  sourceRows,
+  summarizeBuckets,
+  wilson95,
+  type BucketSummaries,
+  type BucketSummary,
+  type SignalBreakdown,
+  type SlotAnalysis,
+  type SourceRow
+} from "./stats-derive.js";

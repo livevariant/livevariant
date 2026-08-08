@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod/mini";
 import { cellCount, MAX_CELLS } from "./cells.js";
 import { AUTO_SIGNALS, TEST_REGIONS } from "./signals.js";
 
@@ -30,53 +30,83 @@ const httpUrl = z.url({ protocol: /^https?$/ });
 const variantObject = z
   .object({
     /** Shown in stats and utm stamps. Defaults to v1, v2, ... per slot. */
-    name: z.string().min(1).max(64).optional(),
+    name: z.optional(z.string().check(z.minLength(1), z.maxLength(64))),
     /** Destination page for redirect-mode serving. */
-    url: httpUrl.optional(),
+    url: z.optional(httpUrl),
     /** Image asset URL, for email variants (hosted assets land here). */
-    image: httpUrl.optional(),
+    image: z.optional(httpUrl),
     /** Inline content, served by the SDK. */
-    html: z.string().optional(),
-    md: z.string().optional(),
-    text: z.string().optional(),
+    html: z.optional(z.string()),
+    md: z.optional(z.string()),
+    text: z.optional(z.string()),
     /** Where a click on this variant lands, when it differs per variant. */
-    redirectUrl: httpUrl.optional()
+    redirectUrl: z.optional(httpUrl)
   })
-  .refine(
-    v =>
-      v.url !== undefined ||
-      v.image !== undefined ||
-      v.html !== undefined ||
-      v.md !== undefined ||
-      v.text !== undefined,
-    { message: "variant must define url, image, html, md or text" }
+  .check(
+    z.refine(
+      v =>
+        v.url !== undefined ||
+        v.image !== undefined ||
+        v.html !== undefined ||
+        v.md !== undefined ||
+        v.text !== undefined,
+      { message: "variant must define url, image, html, md or text" }
+    )
   );
 
 /**
  * A bare string is the most readable spelling of the common cases:
  * "https://..." is a destination, anything else is text content.
  */
-const variantSchema = z.preprocess(value => {
-  if (typeof value === "string") {
-    return /^https?:\/\//i.test(value) ? { url: value } : { text: value };
-  }
-  return value;
-}, variantObject);
+const variantSchema = z.pipe(
+  z.transform(value => {
+    if (typeof value === "string") {
+      return /^https?:\/\//i.test(value) ? { url: value } : { text: value };
+    }
+    return value;
+  }),
+  variantObject
+);
 
 const SLOT_KEY = /^[a-z][a-z0-9_-]{0,31}$/;
 
-export const ctxDimSchema = z.object({
-  key: z.string().min(1),
-  /** Known values, if enumerable; omitted means free-form (hashed). */
-  values: z.array(z.string().min(1)).min(2).optional(),
-  /**
-   * Fill this dimension from a signal the server derives, so the caller
-   * never has to pass it (country, device, utm_source, ...). A supplied
-   * `c_<key>` still wins: you know your own users better than an IP
-   * database does.
-   */
-  from: z.enum(AUTO_SIGNALS).optional()
-});
+export const ctxDimSchema = z
+  .object({
+    key: z.string().check(z.minLength(1)),
+    /** Known values, if enumerable; omitted means free-form (hashed). */
+    values: z.optional(
+      z.array(z.string().check(z.minLength(1))).check(z.minLength(2))
+    ),
+    /**
+     * Fill this dimension from a signal the server derives, so the caller
+     * never has to pass it (country, device, utm_source, ...). A supplied
+     * `c_<key>` still wins: you know your own users better than an IP
+     * database does.
+     */
+    from: z.optional(z.enum(AUTO_SIGNALS)),
+    /**
+     * Fill this dimension by asking the DEPLOYMENT, naming one of the
+     * resolvers it was configured with. For buckets that are not a signal
+     * but a lookup: a postcode becomes a segment, an account id becomes a
+     * plan tier, and the thing that knows is a service, not this request.
+     *
+     * The resolver reads the caller's raw context, so its INPUT need not
+     * be a dimension at all, and only its answer is ever hashed or
+     * stored. A `values` list still binds, so a resolver cannot invent
+     * buckets the config never sanctioned.
+     *
+     * Server-side only: /choose carries a context hash computed on the
+     * page precisely so raw values never leave it, so a page that wants a
+     * resolved dimension resolves it there and passes the result.
+     */
+    resolve: z.optional(z.string().check(z.regex(/^[a-z][a-z0-9-]{0,31}$/)))
+  })
+  .check(
+    z.refine(dim => !(dim.from && dim.resolve), {
+      message:
+        "a context dimension is filled from a signal or a resolver, not both"
+    })
+  );
 
 /**
  * Warm-start prior for one variant, typically an LLM's guess: "this will
@@ -85,29 +115,34 @@ export const ctxDimSchema = z.object({
  * traffic, never the test.
  */
 const variantPriorSchema = z.object({
-  mean: z.number().min(0).max(1),
-  strength: z.number().nonnegative()
+  mean: z.number().check(z.minimum(0), z.maximum(1)),
+  strength: z.number().check(z.nonnegative())
 });
 
 const configObject = z
   .object({
-    v: z.literal(2).default(2),
-    name: z.string().optional(),
+    v: z._default(z.literal(2), 2),
+    name: z.optional(z.string()),
     /**
      * The elements under test, keyed by a stable name ("hero", "cta").
      * Canonical slot order is the SORTED key order: canonical JSON sorts
      * keys, and cell indices must survive serialization.
      */
-    slots: z.record(z.string().regex(SLOT_KEY), z.array(variantSchema).min(1)),
-    ctx: z.object({ dims: z.array(ctxDimSchema).min(1) }).optional(),
+    slots: z.record(
+      z.string().check(z.regex(SLOT_KEY)),
+      z.array(variantSchema).check(z.minLength(1))
+    ),
+    ctx: z.optional(
+      z.object({ dims: z.array(ctxDimSchema).check(z.minLength(1)) })
+    ),
     /**
      * Per-slot warm-start priors, one entry per variant.
      * Identity-excluded: adding or changing them keeps the test's id and
      * its history (a recompute rebuilds the model).
      */
-    priors: z.record(z.string(), z.array(variantPriorSchema)).optional(),
+    priors: z.optional(z.record(z.string(), z.array(variantPriorSchema))),
     /** Max pseudo-observations any prior may contribute per variant. */
-    priorStrengthCap: z.number().positive().default(50),
+    priorStrengthCap: z._default(z.number().check(z.positive()), 50),
     /**
      * Where the test's state lives. A location hint (wnam, enam, sam,
      * weur, eeur, apac, oc, afr, me) places the test's storage near its
@@ -122,7 +157,7 @@ const configObject = z
      * URL must self-isolate as a different test rather than split one
      * test's records across two homes.
      */
-    region: z.enum(TEST_REGIONS).optional(),
+    region: z.optional(z.enum(TEST_REGIONS)),
     /**
      * Identity namespace. Two sites inlining the same trivial config
      * ("Book" vs "Book now") would otherwise hash to the SAME test and
@@ -133,53 +168,53 @@ const configObject = z
      * SDK defaults it to the page's hostname for exactly those. Set it
      * explicitly to share one test across domains.
      */
-    scope: z.string().min(1).max(120).optional(),
+    scope: z.optional(z.string().check(z.minLength(1), z.maxLength(120))),
     /** Fallback click-redirect target when the variant has none. */
-    redirectUrl: httpUrl.optional(),
+    redirectUrl: z.optional(httpUrl),
     /** GA4 event names the SDK auto-rewards on (dataLayer interception). */
-    rewardEvents: z.array(z.string().min(1)).optional(),
+    rewardEvents: z.optional(z.array(z.string().check(z.minLength(1)))),
     /**
      * Append _lvt/_lvid/_lvvar to redirect destinations so an SDK on the
      * destination site can adopt the assignment (identity handoff).
      */
-    decorateRedirects: z.boolean().default(true),
+    decorateRedirects: z._default(z.boolean(), true),
     /**
      * Stamp the served combination into this query parameter on redirect,
      * e.g. "utm_content", so the test shows up in the customer's own
      * analytics without them installing anything.
      */
-    variantParam: z.string().min(1).max(32).optional(),
+    variantParam: z.optional(z.string().check(z.minLength(1), z.maxLength(32))),
     /**
      * Carry query parameters we do not recognize onto the redirect
      * target, so utm_source and friends survive the hop.
      */
-    forwardParams: z.boolean().default(true),
+    forwardParams: z._default(z.boolean(), true),
     /**
      * sha256 hex of the creator-held stats secret. Optional so a
      * variants-only query URL parses, but a test without one has no
      * readable stats, ever: no secret can match a hash that is not there.
      */
-    statsKeyHash: z
-      .string()
-      .regex(/^[0-9a-f]{64}$/)
-      .optional()
+    statsKeyHash: z.optional(z.string().check(z.regex(/^[0-9a-f]{64}$/)))
   })
-  .superRefine((config, issues) => {
+  .check(ctx => {
+    const config = ctx.value;
     const sizes = Object.entries(config.slots)
       .sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([, variants]) => variants.length);
     const cells = cellCount(sizes);
     if (cells < 2) {
-      issues.addIssue({
+      ctx.issues.push({
         code: "custom",
         path: ["slots"],
+        input: config.slots,
         message: "a test needs at least two combinations to choose between"
       });
     }
     if (cells > MAX_CELLS) {
-      issues.addIssue({
+      ctx.issues.push({
         code: "custom",
         path: ["slots"],
+        input: config.slots,
         message:
           `${cells} combinations exceeds the ${MAX_CELLS}-cell limit; use ` +
           "fewer variants per slot, or split into composed tests"
@@ -188,17 +223,19 @@ const configObject = z
     for (const [slotKey, priors] of Object.entries(config.priors ?? {})) {
       const variants = config.slots[slotKey];
       if (!variants) {
-        issues.addIssue({
+        ctx.issues.push({
           code: "custom",
           path: ["priors", slotKey],
+          input: priors,
           message:
             `priors name a slot that does not exist ` +
             `(have: ${Object.keys(config.slots).join(", ")})`
         });
       } else if (priors.length !== variants.length) {
-        issues.addIssue({
+        ctx.issues.push({
           code: "custom",
           path: ["priors", slotKey],
+          input: priors,
           message:
             `slot "${slotKey}" has ${variants.length} variants ` +
             `but ${priors.length} priors`
@@ -207,20 +244,43 @@ const configObject = z
     }
   });
 
-export const testConfigSchema = z.preprocess(value => {
-  // Single-slot sugar: `variants: [...]` reads better than a one-entry
-  // slots record, and most tests are single-slot.
-  if (
-    value !== null &&
-    typeof value === "object" &&
-    "variants" in value &&
-    !("slots" in value)
-  ) {
-    const { variants, ...rest } = value as Record<string, unknown>;
-    return { ...rest, slots: { main: variants } };
-  }
-  return value;
-}, configObject);
+export const testConfigSchema = z.pipe(
+  z.transform(value => {
+    // Single-slot sugar: `variants: [...]` reads better than a one-entry
+    // slots record, and most tests are single-slot.
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      "variants" in value &&
+      !("slots" in value)
+    ) {
+      const { variants, ...rest } = value as Record<string, unknown>;
+      return { ...rest, slots: { main: variants } };
+    }
+    return value;
+  }),
+  configObject
+);
+
+/**
+ * Parse and normalize a config. The one place that knows which zod
+ * flavour builds these schemas: core is bundled into the browser tag, so
+ * it uses zod/mini, whose functional API means `schema.parse(x)` does not
+ * exist. Callers say what they mean and stay out of it.
+ */
+export function parseTestConfig(input: unknown): TestConfig {
+  return z.parse(testConfigSchema, input) as TestConfig;
+}
+
+/** Non-throwing sibling, for callers that report their own errors. */
+export function safeParseTestConfig(
+  input: unknown
+): { success: true; data: TestConfig } | { success: false; error: Error } {
+  const result = z.safeParse(testConfigSchema, input);
+  return result.success
+    ? { success: true, data: result.data as TestConfig }
+    : { success: false, error: result.error };
+}
 
 export type TestConfig = z.output<typeof configObject>;
 export type TestConfigInput =

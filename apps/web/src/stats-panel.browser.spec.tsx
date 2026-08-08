@@ -2,8 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { StrictMode, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { StatsPanel } from "./components/StatsPanel";
-import { parseSSE, type TestStats } from "./lib/stats";
-import { analyzeSlots, summarizeBuckets, wilson95 } from "./lib/stats-derive";
+import { parseSSE } from "./lib/stats";
+import {
+  analyzeSlots,
+  summarizeBuckets,
+  wilson95,
+  type TestStats
+} from "@livevariant/core";
 
 /**
  * The live results panel in a real browser: the SSE consumption (with
@@ -49,6 +54,7 @@ async function until(check: () => boolean, ms = 4000): Promise<void> {
 
 function payload(overrides: Partial<TestStats> = {}): TestStats {
   return {
+    testId: "t".repeat(64),
     totalAssignments: 120,
     combinations: [
       {

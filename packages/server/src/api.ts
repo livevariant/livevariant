@@ -2,7 +2,12 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createServer } from "@livevariant/mcp";
-import { regionHint, sha256Hex, type CloudflareGeo } from "@livevariant/core";
+import {
+  geoFromRequest,
+  regionHint,
+  sha256Hex,
+  type RequestGeo
+} from "@livevariant/core";
 import { SERVER_VERSION } from "./version.js";
 import {
   renderAuthMd,
@@ -94,10 +99,28 @@ export interface ApiOptions {
    * 404s rather than pretending to have a shell.
    */
   spaFetch?: (request: Request) => Promise<Response>;
+  /**
+   * Path prefix this app is mounted under. See AppOptions.basePath: every
+   * origin computed from a request URL below has to carry it, or the
+   * links and the discovery documents point at a root this deployment
+   * does not own.
+   */
+  basePath?: string;
+  /** Where a request's geography comes from. See AppOptions.geo. */
+  geo?: (request: Request) => RequestGeo | null;
 }
 
 export function createApi(options: ApiOptions): Hono {
   const app = new Hono();
+  const basePath = (options.basePath ?? "").replace(/\/+$/, "");
+  const resolveGeo = options.geo ?? geoFromRequest;
+  /**
+   * This deployment's own base: the origin the request arrived on plus
+   * whatever prefix it is mounted under. Every self-referential URL here
+   * goes through it, so a mounted deployment describes itself correctly
+   * instead of pointing at the root of a host it shares.
+   */
+  const baseOf = (url: string): string => new URL(url).origin + basePath;
 
   /**
    * Built per request, so every generated URL points at whatever origin
@@ -112,15 +135,15 @@ export function createApi(options: ApiOptions): Hono {
   const serveUrl = options.serveUrl?.trim() || undefined;
   const provider = options.provider;
   const contextFor = (url: string, raw?: Request): ToolContext => {
-    const origin = new URL(url).origin;
+    const origin = baseOf(url);
     // The caller's own geography, so build_test can default a new
     // test's region to its CREATOR's location rather than to wherever
     // the first serve later comes from (in email: a mail proxy).
-    const cf = (raw as (Request & { cf?: CloudflareGeo }) | undefined)?.cf;
+    const geo = raw ? resolveGeo(raw) : null;
     return {
       serverUrl: origin,
       serveUrl: serveUrl ?? origin,
-      region: regionHint(cf) ?? undefined,
+      region: regionHint(geo) ?? undefined,
       fetch: options.fetch,
       // Identity resolves lazily per call: a session cookie on the
       // same-origin dashboard identifies the caller; without one the
@@ -215,11 +238,9 @@ export function createApi(options: ApiOptions): Hono {
   // and to a self-hoster's own origin on theirs, with nothing baked in.
   app.get("/config", c =>
     c.json({
-      serveUrl: serveUrl ?? new URL(c.req.url).origin,
+      serveUrl: serveUrl ?? baseOf(c.req.url),
       // The dashboard defaults a new test's region to its creator's.
-      region: regionHint(
-        (c.req.raw as Request & { cf?: CloudflareGeo }).cf ?? null
-      ),
+      region: regionHint(resolveGeo(c.req.raw)),
       gtmId: options.gtmId?.trim() || null,
       publishableKey: options.publishableKey?.trim() || null,
       server: SERVER_VERSION
@@ -233,18 +254,18 @@ export function createApi(options: ApiOptions): Hono {
   // only campaign-carried links (/s example, sdk.js) use the serve
   // domain when one is configured.
   app.get("/llms.txt", c =>
-    c.text(renderLlmsTxt(new URL(c.req.url).origin, serveUrl), 200, {
+    c.text(renderLlmsTxt(baseOf(c.req.url), serveUrl), 200, {
       "content-type": "text/markdown; charset=utf-8"
     })
   );
   app.get("/skills/livevariant/SKILL.md", c =>
-    c.text(renderSkillMd(new URL(c.req.url).origin), 200, {
+    c.text(renderSkillMd(baseOf(c.req.url)), 200, {
       "content-type": "text/markdown; charset=utf-8"
     })
   );
 
   app.get("/openapi.json", c =>
-    c.json(buildOpenApiDocument({ serverUrl: new URL(c.req.url).origin }))
+    c.json(buildOpenApiDocument({ serverUrl: baseOf(c.req.url) }))
   );
   app.get("/docs", c => c.html(swaggerPage("/openapi.json")));
 
@@ -259,7 +280,7 @@ export function createApi(options: ApiOptions): Hono {
   // RFC 9727: the API catalog, pointing at the OpenAPI document, the
   // interactive docs and the health endpoint.
   app.get("/.well-known/api-catalog", c => {
-    const base = new URL(c.req.url).origin;
+    const base = baseOf(c.req.url);
     return c.body(
       JSON.stringify({
         linkset: [
@@ -284,7 +305,7 @@ export function createApi(options: ApiOptions): Hono {
   // gates the endpoint with LV_API_TOKEN must not advertise open access,
   // or agents following the card would send tokenless requests into 401s.
   const mcpServerCard = (c: { req: { url: string } }) => {
-    const base = new URL(c.req.url).origin;
+    const base = baseOf(c.req.url);
     return {
       serverInfo: { name: "livevariant", version: SERVER_VERSION },
       description:
@@ -316,7 +337,7 @@ export function createApi(options: ApiOptions): Hono {
   // the exact document /skills/livevariant/SKILL.md serves for this
   // origin, so it can never drift from the content.
   app.get("/.well-known/agent-skills/index.json", async c => {
-    const base = new URL(c.req.url).origin;
+    const base = baseOf(c.req.url);
     const digest = await sha256Hex(renderSkillMd(base));
     return c.json({
       $schema: "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
@@ -345,7 +366,7 @@ export function createApi(options: ApiOptions): Hono {
 
   // auth.md (workos.com/auth-md): the honest registration story.
   app.get("/auth.md", c =>
-    c.text(renderAuthMd(new URL(c.req.url).origin), 200, {
+    c.text(renderAuthMd(baseOf(c.req.url)), 200, {
       "content-type": "text/markdown; charset=utf-8"
     })
   );
@@ -354,14 +375,14 @@ export function createApi(options: ApiOptions): Hono {
   // by the worker rather than shipped as a static file so the Sitemap
   // directive names the origin the request arrived on.
   app.get("/robots.txt", c =>
-    c.text(renderRobotsTxt(new URL(c.req.url).origin), 200, {
+    c.text(renderRobotsTxt(baseOf(c.req.url)), 200, {
       "content-type": "text/plain; charset=utf-8"
     })
   );
 
   // The dashboard's public pages; app routes behind sign-in stay out.
   app.get("/sitemap.xml", c => {
-    const base = new URL(c.req.url).origin;
+    const base = baseOf(c.req.url);
     const pages = ["/", "/builder", "/terms", "/privacy"];
     const xml =
       `<?xml version="1.0" encoding="UTF-8"?>\n` +
@@ -385,7 +406,7 @@ export function createApi(options: ApiOptions): Hono {
     '</llms.txt>; rel="describedby"';
   app.get("/", async c => {
     if ((c.req.header("accept") ?? "").includes("text/markdown")) {
-      return c.text(renderLlmsTxt(new URL(c.req.url).origin, serveUrl), 200, {
+      return c.text(renderLlmsTxt(baseOf(c.req.url), serveUrl), 200, {
         "content-type": "text/markdown; charset=utf-8",
         link: AGENT_LINKS
       });

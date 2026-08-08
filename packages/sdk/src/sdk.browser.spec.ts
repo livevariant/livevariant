@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   bucketKey,
   computeTestId,
-  testConfigSchema,
+  parseTestConfig,
   type TestConfigInput
 } from "@livevariant/core";
 import { createTest, type CreateTestOptions } from "./index.js";
@@ -153,7 +153,7 @@ describe("assignment", () => {
     // The hashed key covers persona alone: country is composed on top of
     // it by the server, for SDK and redirect traffic alike.
     expect(call.ctxKey).toBe(
-      await bucketKey(await computeTestId(testConfigSchema.parse(autoConfig)), {
+      await bucketKey(await computeTestId(parseTestConfig(autoConfig)), {
         persona: "power"
       })
     );
@@ -326,7 +326,7 @@ describe("assignment", () => {
     );
     expect(test.testId).toBe(
       await computeTestId(
-        testConfigSchema.parse({ ...inline, scope: location.hostname })
+        parseTestConfig({ ...inline, scope: location.hostname })
       )
     );
     // An explicit scope wins, and a stats key means no injection at all:
@@ -337,17 +337,13 @@ describe("assignment", () => {
       options(server, { externalId: "s2" })
     );
     expect(explicit.testId).toBe(
-      await computeTestId(
-        testConfigSchema.parse({ ...inline, scope: "campaign-7" })
-      )
+      await computeTestId(parseTestConfig({ ...inline, scope: "campaign-7" }))
     );
     const keyed = await createTest(
       CONFIG,
       options(server, { externalId: "s3" })
     );
-    expect(keyed.testId).toBe(
-      await computeTestId(testConfigSchema.parse(CONFIG))
-    );
+    expect(keyed.testId).toBe(await computeTestId(parseTestConfig(CONFIG)));
     test.dispose();
     explicit.dispose();
     keyed.dispose();

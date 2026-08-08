@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoContextDisabled, buildTestUrls } from "./urls.js";
+import { assetIdFromUrl, autoContextDisabled, buildTestUrls } from "./urls.js";
 
 describe("buildTestUrls", () => {
   const urls = buildTestUrls("https://livevariant.link/", "CFG", "s3cret");
@@ -38,5 +38,28 @@ describe("autoContextDisabled", () => {
     for (const flag of [undefined, "", "1", "true", "on", "yes"]) {
       expect(autoContextDisabled(flag)).toBe(false);
     }
+  });
+});
+
+describe("assetIdFromUrl", () => {
+  const id = "a".repeat(64);
+
+  it("reads the hash off a canonical asset URL", () => {
+    expect(assetIdFromUrl(`https://x.test/a/${id}`)).toBe(id);
+  });
+
+  it("requires the deployment's own base path, and nothing else", () => {
+    // This answer decides whether a redirect target counts as OURS and
+    // may skip the trust policy, so a loose match would hand that bypass
+    // to any /…/a/<64 hex> path on the same host.
+    expect(assetIdFromUrl(`https://x.test/lv/a/${id}`, "/lv")).toBe(id);
+    expect(assetIdFromUrl(`https://x.test/lv/a/${id}`)).toBeNull();
+    expect(assetIdFromUrl(`https://x.test/a/${id}`, "/lv")).toBeNull();
+    expect(assetIdFromUrl(`https://x.test/uploads/a/${id}`, "/lv")).toBeNull();
+  });
+
+  it("is null for anything that is not one", () => {
+    expect(assetIdFromUrl("https://x.test/a/nothex")).toBeNull();
+    expect(assetIdFromUrl("not a url")).toBeNull();
   });
 });

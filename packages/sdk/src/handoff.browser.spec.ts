@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { computeTestId, testConfigSchema } from "@livevariant/core";
+import { computeTestId, parseTestConfig } from "@livevariant/core";
 import { createTest } from "./index.js";
 import { SDK_VERSION } from "./version.js";
 import { autoTrack } from "./auto-track.js";
@@ -12,7 +12,7 @@ import { resetDataLayerInterception } from "./ga.js";
  * autoTrack mode that rewards stored handoffs from GA events.
  */
 
-const CONFIG = testConfigSchema.parse({
+const CONFIG = parseTestConfig({
   name: "handoff test",
   variants: [
     { name: "control", text: "A" },

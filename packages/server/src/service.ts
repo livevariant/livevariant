@@ -6,6 +6,7 @@ import {
   composeBucketKey,
   decodeCell,
   deriveAutoCtx,
+  deriveResolvedCtx,
   dimForShape,
   effectivePriors,
   featureIndices,
@@ -53,6 +54,14 @@ import {
   type StateStore,
   type TestPolicy
 } from "./store/types.js";
+import type { ResolveCtxFn } from "./ctx-resolver.js";
+import type {
+  CombinationStats,
+  TestStats,
+  VariantStats
+} from "@livevariant/core";
+
+export type { CombinationStats, TestStats, VariantStats };
 
 /**
  * The serving logic both modes share. Redirect mode derives ServingParams
@@ -132,7 +141,8 @@ export async function resolveIdentity(
   externalIdHashed: string | null,
   rawCtx: Record<string, string> | null,
   srcHash: string | null = null,
-  request: RequestContext = {}
+  request: RequestContext = {},
+  resolveCtx?: ResolveCtxFn
 ): Promise<RequestIdentity> {
   const ctx = normalizeCtx(decoded.config, rawCtx);
   // Signals come in two kinds and only one of them can be wrong here.
@@ -149,11 +159,24 @@ export async function resolveIdentity(
   const network =
     request.assetFetch || request.noAuto ? {} : requestSignals(request);
   const signals = { ...network, ...urlSignals(request.query) };
-  const autoCtx = deriveAutoCtx(decoded.config.ctx?.dims, signals, ctx);
+  const dims = decoded.config.ctx?.dims;
+  const autoCtx = deriveAutoCtx(dims, signals, ctx);
+  // Dimensions the config asks the deployment to look up. This is the one
+  // place raw context is still readable, and the answer is all that
+  // survives into the hashes below.
+  const needsResolving = dims?.some(d => d.resolve) ?? false;
+  if (needsResolving && resolveCtx) {
+    const resolved = await resolveCtx({
+      dims: dims ?? [],
+      raw: rawCtx ?? {},
+      signals
+    });
+    Object.assign(autoCtx, deriveResolvedCtx(dims, resolved, ctx));
+  }
   // Auto dimensions are composed on top of the caller's key even when the
   // caller supplied them, so supplied and derived values of the same
   // dimension share a bucket instead of splitting the test in half.
-  const callerCtx = splitAutoDims(decoded.config.ctx?.dims, ctx);
+  const callerCtx = splitAutoDims(dims, ctx);
   const callerKey = callerCtx
     ? await bucketKey(decoded.testId, callerCtx)
     : null;
@@ -515,64 +538,6 @@ export class TestService implements TestBackend {
       }
     }
   }
-}
-
-export interface VariantStats {
-  name: string;
-  pulls: number;
-  conversions: number;
-  conversionRate: number | null;
-}
-
-export interface CombinationStats {
-  cell: number;
-  /** Variant name per slot, canonical slot order. */
-  choice: string[];
-  pulls: number;
-  conversions: number;
-  rewardTotal: number;
-  conversionRate: number | null;
-}
-
-export interface TestStats {
-  testId: string;
-  totalAssignments: number;
-  /** Exact outcomes per served combination (single-slot: per variant). */
-  combinations: CombinationStats[];
-  /**
-   * Per-slot marginal rollups: how each variant did across every
-   * combination it appeared in. The multi-slot answer to "how is hero B
-   * doing overall"; for a single-slot test it mirrors `combinations`.
-   */
-  slots: Record<string, VariantStats[]>;
-  /**
-   * Per-context-bucket outcomes, arrays indexed by cell. `label` is the
-   * recovered readable context ("country=nl") when every dimension in
-   * the bucket has a declared `values` list; absent for free-form
-   * dimensions, whose keys stay the opaque hashes they are stored as.
-   */
-  buckets: Record<
-    string,
-    { pulls: number[]; conversions: number[]; label?: string }
-  >;
-  /** What the creator's quarantine removed, so the numbers are auditable. */
-  excluded: {
-    total: number;
-    bySource: number;
-    byWindow: number;
-  };
-  /** Assignment count per opaque source bucket, before exclusions. */
-  perSource: Record<string, number>;
-  /**
-   * Pulls and conversions per derived signal value, e.g.
-   * { country: { nl: {...}, de: {...} }, device: { mobile: {...} } }.
-   * Recorded for every signal, not only those a test uses as context, so
-   * a plain test still gets a legible breakdown.
-   */
-  bySignal: Record<
-    string,
-    Record<string, { pulls: number; conversions: number }>
-  >;
 }
 
 /** Aggregates stats straight from the event log (the source of truth). */

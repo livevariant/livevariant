@@ -76,12 +76,23 @@ export function autoContextDisabled(value: string | undefined): boolean {
  * These helpers are shared by the server (which signs) and the SDK (which
  * recognizes asset URLs in a config and splices signatures in).
  */
-const ASSET_URL_PATH = /^\/a\/([0-9a-f]{64})$/;
+const ASSET_URL_PATH = /^(.*)\/a\/([0-9a-f]{64})$/;
 
-/** The content hash when a URL is a hosted-asset address, else null. */
-export function assetIdFromUrl(target: string): string | null {
+/**
+ * The content hash when a URL is a hosted-asset address, else null.
+ *
+ * `basePath` is the prefix the deployment is mounted under, and it is
+ * checked rather than ignored: this answer decides whether a redirect
+ * target counts as OURS and may skip the trust policy, so a loose match
+ * would hand that bypass to any `/…/a/<64 hex>` path on the same host.
+ */
+export function assetIdFromUrl(target: string, basePath = ""): string | null {
   try {
-    return ASSET_URL_PATH.exec(new URL(target).pathname)?.[1] ?? null;
+    const match = ASSET_URL_PATH.exec(new URL(target).pathname);
+    if (!match) {
+      return null;
+    }
+    return match[1] === basePath.replace(/\/+$/, "") ? match[2] : null;
   } catch {
     return null;
   }

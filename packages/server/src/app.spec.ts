@@ -880,6 +880,26 @@ describe("auto-context from the platform", () => {
     ctx: { dims: [{ key: "country", from: "country" as const }] }
   };
 
+  it("reads the header form when there is no platform object", async () => {
+    // Cloudflare is not the only host. On a platform that reports geo as
+    // headers the same declared dimension has to fill the same way, or a
+    // contextual test silently degrades to no context there.
+    const { encoded } = await makeTest(AUTO);
+    for (const [i, country] of ["NL", "NL", "DE"].entries()) {
+      const res = await app.request(
+        cfRequest(`/s/${encoded}?id=hdr${i}`, null, {
+          "x-vercel-ip-country": country
+        })
+      );
+      expect(res.status).toBe(302);
+    }
+    const s = await stats(encoded);
+    expect(s.bySignal.country).toEqual({
+      nl: { pulls: 2, conversions: 0 },
+      de: { pulls: 1, conversions: 0 }
+    });
+  });
+
   it("fills a declared dimension from geo the caller never sent", async () => {
     // This is the whole point: an email redirect has no JavaScript and
     // the sender usually does not know where the reader is.
@@ -2089,5 +2109,208 @@ describe("misses: the app for people, the truth for machines", () => {
       headers: { "sec-fetch-dest": "document", accept: "text/html" }
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("mounting under a base path", () => {
+  it("serves, clicks and reports under the prefix, and only there", async () => {
+    // A deployment that does not own the root of its origin: behind a
+    // reverse proxy, or embedded in an application that owns "/".
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      basePath: "/lv"
+    });
+    const { encoded } = await makeTest();
+
+    const served = await app.request(`/lv/s/${encoded}?id=alice`);
+    expect(served.status).toBe(302);
+    expect(served.headers.get("location")).toMatch(/example\.com/);
+
+    // The unprefixed path belongs to whoever else is on this origin.
+    expect((await app.request(`/s/${encoded}?id=alice`)).status).toBe(404);
+
+    const clicked = await app.request(`/lv/c/${encoded}?id=alice`);
+    expect(clicked.status).toBe(302);
+
+    const stats = await app.request(`/lv/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    expect(stats.status).toBe(200);
+    const body = (await stats.json()) as { combinations: unknown[] };
+    expect(body.combinations.length).toBeGreaterThan(0);
+  });
+
+  it("keeps the prefix out of the way when it is not set", async () => {
+    const app = createApp({ store: new MemoryStore(), rng: mulberry32(7) });
+    const { encoded } = await makeTest();
+    expect((await app.request(`/s/${encoded}?id=a`)).status).toBe(302);
+  });
+});
+
+describe("embedding without the tool API", () => {
+  it("drops the surfaces the host owns, and keeps the serving ones", async () => {
+    // An application embedding this app owns /, /docs, /llms.txt and the
+    // rest of its own origin, and exposes the tools through its own
+    // surfaces. Mounting ours over the top would fight it.
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      toolApi: false
+    });
+    const { encoded } = await makeTest();
+
+    for (const path of [
+      "/",
+      "/docs",
+      "/openapi.json",
+      "/llms.txt",
+      "/robots.txt",
+      "/sitemap.xml",
+      "/config",
+      "/api/v1/build-test"
+    ]) {
+      expect((await app.request(path)).status, path).toBe(404);
+    }
+
+    expect((await app.request(`/s/${encoded}?id=a`)).status).toBe(302);
+    expect((await app.request("/health")).status).toBe(200);
+  });
+
+  it("mounts them by default", async () => {
+    const app = createApp({ store: new MemoryStore(), rng: mulberry32(7) });
+    expect((await app.request("/config")).status).toBe(200);
+    expect((await app.request("/llms.txt")).status).toBe(200);
+  });
+});
+
+describe("context resolved by the deployment", () => {
+  /** A dimension that is a lookup, not a signal: postcode to segment. */
+  const RESOLVED = {
+    ctx: {
+      dims: [
+        {
+          key: "segment",
+          values: ["north", "south"],
+          resolve: "area-lookup" as const
+        }
+      ]
+    }
+  };
+
+  function appWith(
+    resolve: (input: {
+      raw: Readonly<Record<string, string>>;
+    }) => Promise<Record<string, string | undefined>>,
+    timeoutMs?: number
+  ): Hono {
+    return createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      ctxResolvers: { "area-lookup": { resolve } },
+      ...(timeoutMs === undefined ? {} : { ctxResolveTimeoutMs: timeoutMs })
+    });
+  }
+
+  async function statsOf(app: Hono, encoded: string) {
+    const res = await app.request(`/stats/${encoded}`, {
+      headers: { authorization: `Bearer ${SECRET}` }
+    });
+    return (await res.json()) as {
+      totalAssignments: number;
+      buckets: Record<string, unknown>;
+    };
+  }
+
+  it("buckets on the answer, and never stores the question", async () => {
+    // The whole point: a postcode arrives, a segment is what gets hashed.
+    const seen: string[] = [];
+    const app = appWith(async ({ raw }) => {
+      seen.push(raw.postcode);
+      return { segment: raw.postcode?.startsWith("1") ? "north" : "south" };
+    });
+    const { encoded } = await makeTest(RESOLVED);
+
+    for (const [i, postcode] of ["1011", "1012", "9999"].entries()) {
+      const res = await app.request(
+        `/s/${encoded}?id=v${i}&c_postcode=${postcode}`,
+        { headers: { accept: BROWSER_ACCEPT } }
+      );
+      expect(res.status).toBe(302);
+    }
+
+    expect(seen).toEqual(["1011", "1012", "9999"]);
+    const s = await statsOf(app, encoded);
+    expect(s.totalAssignments).toBe(3);
+    // Two segments, two buckets: the two northern postcodes share one.
+    expect(Object.keys(s.buckets)).toHaveLength(2);
+    // And the postcode itself is nowhere in what was stored.
+    expect(JSON.stringify(s)).not.toContain("1011");
+  });
+
+  it("serves anyway when the lookup fails", async () => {
+    // A serve is often an email image fetch. It must not 500 because a
+    // third party is down; the dimension is simply absent.
+    const app = appWith(async () => {
+      throw new Error("lookup is down");
+    });
+    const { encoded } = await makeTest(RESOLVED);
+    const res = await app.request(`/s/${encoded}?id=a&c_postcode=1011`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(302);
+    const s = await statsOf(app, encoded);
+    expect(s.totalAssignments).toBe(1);
+    expect(Object.keys(s.buckets)).toHaveLength(0);
+  });
+
+  it("serves anyway when the lookup hangs", async () => {
+    const app = appWith(
+      () => new Promise<Record<string, string>>(() => undefined),
+      20
+    );
+    const { encoded } = await makeTest(RESOLVED);
+    const res = await app.request(`/s/${encoded}?id=a&c_postcode=1011`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(302);
+    expect(Object.keys((await statsOf(app, encoded)).buckets)).toHaveLength(0);
+  });
+
+  it("refuses a bucket the config never declared", async () => {
+    // A resolver is not more trusted than a query parameter: without the
+    // allowlist, a compromised or buggy lookup could fragment a test into
+    // unbounded buckets.
+    const app = appWith(async () => ({ segment: "elsewhere" }));
+    const { encoded } = await makeTest(RESOLVED);
+    await app.request(`/s/${encoded}?id=a&c_postcode=1011`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(Object.keys((await statsOf(app, encoded)).buckets)).toHaveLength(0);
+  });
+
+  it("lets a caller-supplied value win, into the same bucket", async () => {
+    // Supplied and resolved values of one dimension must share a bucket,
+    // or one effective context learns at half speed in two halves.
+    const app = appWith(async () => ({ segment: "north" }));
+    const { encoded } = await makeTest(RESOLVED);
+    for (const query of ["id=said&c_segment=north", "id=looked&c_postcode=1"]) {
+      const res = await app.request(`/s/${encoded}?${query}`, {
+        headers: { accept: BROWSER_ACCEPT }
+      });
+      expect(res.status).toBe(302);
+    }
+    const s = await statsOf(app, encoded);
+    expect(s.totalAssignments).toBe(2);
+    expect(Object.keys(s.buckets)).toHaveLength(1);
+  });
+
+  it("does nothing when the deployment has no such resolver", async () => {
+    const app = createApp({ store: new MemoryStore(), rng: mulberry32(7) });
+    const { encoded } = await makeTest(RESOLVED);
+    const res = await app.request(`/s/${encoded}?id=a&c_postcode=1011`, {
+      headers: { accept: BROWSER_ACCEPT }
+    });
+    expect(res.status).toBe(302);
   });
 });

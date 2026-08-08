@@ -1,7 +1,7 @@
 import {
   base64UrlToUtf8,
   computeTestId,
-  testConfigSchema,
+  parseTestConfig,
   type TestConfig
 } from "@livevariant/core";
 import { getHandoff } from "./handoff.js";
@@ -123,7 +123,7 @@ async function testIdOf(pathname: string): Promise<string | null> {
     return null;
   }
   try {
-    const parsed = testConfigSchema.parse(
+    const parsed = parseTestConfig(
       JSON.parse(base64UrlToUtf8(encoded))
     ) as TestConfig;
     return await computeTestId(parsed);

@@ -56,6 +56,16 @@ fields)`. Tampering derives a different test with empty state.
   on config-free paths: `/choose` and `/reward` bodies, `_lvr` handoff
   param. Defaults to the creator's region (`regionHint` from
   `request.cf`; `/config` exposes it to the builder).
+- **Resolved context.** A ctx dim can say `resolve: "<name>"` instead of
+  `from:`, for buckets that are a LOOKUP rather than a signal (a postcode
+  becomes a segment). The deployment supplies the named resolver
+  (`AppOptions.ctxResolvers`, port in `server/src/ctx-resolver.ts`); it
+  runs inside `resolveIdentity` between normalizing and hashing, reads the
+  caller's RAW ctx (so the input need not be a declared dim), and only its
+  answer reaches `ctxKey`/`featIdx`. Fails open on rejection, timeout
+  (`ctxResolveTimeoutMs`, default 150ms) or a value outside `values`.
+  Redirect paths only: `/choose` carries a page-computed hash by design.
+  Records store serve-time `featIdx`, so recompute never re-resolves.
 - **Scope.** Keyless inline SDK configs get `scope: location.hostname`
   injected so two sites running the same trivial test never share
   state. Explicit `scope` overrides; keyed or pre-encoded configs are
@@ -68,6 +78,7 @@ fields)`. Tampering derives a different test with empty state.
 | `@livevariant/core`     | Config codec, identity, the joint model, cells, priors, state |
 | `@livevariant/server`   | Hono app behind pluggable `StateStore` + `TestBackend`        |
 | `@livevariant/workers`  | Cloudflare: one SQLite Durable Object per test                |
+| `@livevariant/postgres` | Postgres `StateStore` + drizzle schema, for Node hosts        |
 | `@livevariant/sdk`      | Browser SDK: sticky combinations, GA auto-rewards, handoff    |
 | `@livevariant/tools`    | ONE registry of agent operations: MCP, REST, OpenAPI, SKILL   |
 | `@livevariant/mcp`      | MCP server (stdio) over that registry                         |
@@ -157,6 +168,20 @@ version, copy-in/copy-out) makes decoded models hot; the model blob is
 JSON on purpose (benchmarked against base64-Float64: JSON is smaller
 and faster in V8; see `snapshot.ts`).
 
+`@livevariant/postgres` is the other adapter, for Node hosts. Everything
+the contract calls atomic is ONE statement there (no-op `DO UPDATE` so
+`RETURNING` fires on the conflict path, `xmax = 0` to tell an insert
+from a conflict, a `WHERE` on a `DO UPDATE` for the blob CAS); counters
+are one row per index, so a serve upserts one row instead of rewriting a
+1024-element array. Its `./schema` entry point exports the drizzle
+tables so an embedding app can `export * from "@livevariant/postgres/schema"`
+and let its own migration chain own them; `ddl.ts` is the same tables as
+plain SQL for everyone else, and a spec compares the two. The suite runs
+against PGlite by default AND against a real server when
+`LV_TEST_POSTGRES_URL` is set (CI sets it). Both matter: PGlite is one
+connection, so the concurrency cases serialize there and a
+read-modify-write adapter would pass them.
+
 ## Development
 
 Node 24 (`nvm use`), npm, nx monorepo.
@@ -184,6 +209,27 @@ npm run release            # lockstep versioning: ALL five npm packages, one ver
   `env.production` (not inherited); `migrations` is inheritable.
 - nx cache can mask env-dependent results: `--skip-nx-cache` when
   varying anything outside the repo.
+
+## Bundle weight
+
+`/sdk.js` goes on customer sites, so its size is a product decision.
+`packages/core` therefore uses **`zod/mini`** (`import * as z from
+"zod/mini"`, functional API: `z.optional(x)`, `z._default(x, v)`,
+`.check(z.minLength(1))`, `z.parse(schema, v)`). The classic
+`import { z } from "zod"` is a NAMESPACE object that defeats
+tree-shaking completely: one `z.string()` cost 65 KB gzipped, and the tag
+was 71 KB gz before the switch and 13 KB after. Call sites use the
+exported `parseTestConfig` / `safeParseTestConfig` rather than reaching
+for the schema's own methods, so the flavour lives in one file.
+
+`packages/tools` deliberately stays on classic zod (it needs
+`.describe()` and JSON Schema emission, and never reaches a browser) and
+re-exports `z` so an embedding host can extend a tool's input without a
+second zod copy. Classic and mini interoperate: `api-schemas.ts` composes
+core's mini `ctxDimSchema` inside a classic `z.array`.
+
+`packages/workers/src/tag-size.spec.ts` holds the ceiling. Raise it
+deliberately and say why; do not nudge it to make a build green.
 
 ## Conventions
 

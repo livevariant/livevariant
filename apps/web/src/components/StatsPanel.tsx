@@ -15,21 +15,18 @@ import {
   CardHeader,
   CardTitle
 } from "@/components/ui/card";
-import {
-  normalizeStats,
-  subscribeStats,
-  type StreamState,
-  type TestStats
-} from "@/lib/stats";
+import { subscribeStats, type StreamState } from "@/lib/stats";
 import {
   analyzeCombinations,
   analyzeSlots,
   decisionLine,
+  normalizeStats,
   signalBreakdowns,
   sourceRows,
   summarizeBuckets,
-  type SlotAnalysis
-} from "@/lib/stats-derive";
+  type SlotAnalysis,
+  type TestStats
+} from "@livevariant/core";
 
 /** Variant identity colors, cycling past three (DESIGN.md role system). */
 const VARIANT_COLORS = [

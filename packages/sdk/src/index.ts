@@ -14,7 +14,7 @@ import {
   slotEntries,
   slotSizes,
   splitAutoDims,
-  testConfigSchema,
+  parseTestConfig,
   utf8ToBase64Url,
   validCell,
   variantName,
@@ -265,6 +265,20 @@ export async function createTest(
         "LiveVariant tag so the page carries a global config"
     );
   }
+  /**
+   * The prefix the deployment is mounted under, if any: a serverUrl of
+   * "https://host/lv" means its hosted assets live at /lv/a/<hash>, and
+   * recognizing them is what triggers asking /choose for signatures. Read
+   * off the serverUrl rather than configured separately, because the two
+   * can never legitimately disagree.
+   */
+  const basePath = (() => {
+    try {
+      return new URL(serverUrl).pathname.replace(/\/+$/, "");
+    } catch {
+      return "";
+    }
+  })();
   const publishableKey =
     options.publishableKey ?? pageGlobal?.config?.publishableKey;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
@@ -289,7 +303,7 @@ export async function createTest(
     input.statsKeyHash === undefined
       ? { ...input, scope: win.location.hostname }
       : input;
-  const resolved: TestConfig = testConfigSchema.parse(scoped) as TestConfig;
+  const resolved: TestConfig = parseTestConfig(scoped) as TestConfig;
   const testId = await computeTestId(resolved);
 
   const entries = slotEntries(resolved);
@@ -345,7 +359,7 @@ export async function createTest(
   entries.forEach(([, variants], slot) => {
     variants.forEach((variant, i) => {
       const hashes = [variant.url, variant.image]
-        .map(u => (u ? assetIdFromUrl(u) : null))
+        .map(u => (u ? assetIdFromUrl(u, basePath) : null))
         .filter((h): h is string => h !== null);
       if (hashes.length > 0) {
         slotAssets[`${slot}:${i}`] = hashes;
@@ -368,7 +382,7 @@ export async function createTest(
     if (!url) {
       return url;
     }
-    const hash = assetIdFromUrl(url);
+    const hash = assetIdFromUrl(url, basePath);
     const sig = hash ? assetSignatures[hash] : undefined;
     return sig ? withQuery(url, sig) : url;
   }

@@ -86,12 +86,46 @@ export function deriveAutoCtx(
 }
 
 /**
- * The caller's context minus any dimension the config marks `from`. Those
- * are composed separately (see `composeBucketKey`), and they have to be
- * composed the same way for every visitor: if a supplied `country=nl`
- * stayed in the caller's key while a derived `country=nl` was composed on
- * top of it, one effective context would split into two buckets and the
- * test would learn each half at half speed.
+ * Values for dimensions the config asks a RESOLVER to fill: the same
+ * contract as `deriveAutoCtx`, over answers the deployment looked up
+ * instead of signals it read off the request. A caller-supplied value
+ * still wins, and a declared `values` allowlist still binds, so a
+ * resolver cannot invent buckets the config never sanctioned.
+ *
+ * Resolved dimensions compose exactly like `from` ones, which is the
+ * point: a bucket must not depend on whether its value arrived by lookup
+ * or by hand.
+ */
+export function deriveResolvedCtx(
+  dims: readonly CtxDim[] | undefined,
+  resolved: Record<string, string | undefined>,
+  callerCtx: Record<string, string> | null
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const dim of dims ?? []) {
+    if (!dim.resolve) {
+      continue;
+    }
+    const value = callerCtx?.[dim.key] ?? resolved[dim.key];
+    if (value === undefined) {
+      continue;
+    }
+    if (dim.values && !dim.values.includes(value)) {
+      continue;
+    }
+    out[dim.key] = value;
+  }
+  return out;
+}
+
+/**
+ * The caller's context minus any dimension the config fills itself
+ * (`from` or `resolve`). Those are composed separately (see
+ * `composeBucketKey`), and they have to be composed the same way for
+ * every visitor: if a supplied `country=nl` stayed in the caller's key
+ * while a derived `country=nl` was composed on top of it, one effective
+ * context would split into two buckets and the test would learn each half
+ * at half speed.
  */
 export function splitAutoDims(
   dims: readonly CtxDim[] | undefined,
@@ -100,7 +134,9 @@ export function splitAutoDims(
   if (!ctx) {
     return null;
   }
-  const auto = new Set((dims ?? []).filter(d => d.from).map(d => d.key));
+  const auto = new Set(
+    (dims ?? []).filter(d => d.from || d.resolve).map(d => d.key)
+  );
   if (auto.size === 0) {
     return ctx;
   }
@@ -214,7 +250,8 @@ export async function enumerateBucketLabels(
       if (digits[i] === 0 || value === undefined) {
         continue;
       }
-      (dims[i].from ? autoCtx : callerCtx)[dims[i].key] = value;
+      (dims[i].from || dims[i].resolve ? autoCtx : callerCtx)[dims[i].key] =
+        value;
       parts.push(`${dims[i].key}=${value}`);
     }
     const callerKey =

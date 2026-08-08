@@ -111,12 +111,12 @@ describe("configToParams", () => {
 
   it("returns null for configs the parameter form cannot express", async () => {
     const { configToParams } = await import("./params.js");
-    const { testConfigSchema } = await import("./schema.js");
-    const inline = testConfigSchema.parse({
+    const { parseTestConfig } = await import("./schema.js");
+    const inline = parseTestConfig({
       variants: ["Ship faster", "Ship safer"]
     });
     expect(configToParams(inline)).toBeNull();
-    const partialNames = testConfigSchema.parse({
+    const partialNames = parseTestConfig({
       variants: [{ url: A, name: "hero" }, { url: B }]
     });
     expect(configToParams(partialNames)).toBeNull();
@@ -192,8 +192,8 @@ describe("configToTemplateQuery", () => {
 
   it("has no spelling when the config has none", async () => {
     const { configToTemplateQuery } = await import("./params.js");
-    const { testConfigSchema } = await import("./schema.js");
-    const inline = testConfigSchema.parse({
+    const { parseTestConfig } = await import("./schema.js");
+    const inline = parseTestConfig({
       variants: ["warm copy", "cool copy"]
     });
     expect(configToTemplateQuery(inline)).toBeNull();
