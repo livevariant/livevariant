@@ -1,30 +1,39 @@
 #!/usr/bin/env node
 /**
  * Releases every publishable package in lockstep: one version for the
- * whole group, all five published on every release, changed or not. That
- * is deliberate. The packages pin each other exactly, so a partial
- * publish would leave npm with combinations that never existed in git,
- * and "which versions work together" becomes a question nobody should
- * ever have to ask.
+ * whole group, every one of them published on every release, changed or
+ * not. That is deliberate. The packages pin each other exactly, so a
+ * partial publish would leave npm with combinations that never existed
+ * in git, and "which versions work together" becomes a question nobody
+ * should ever have to ask.
  *
  *   npm run release            interactive version prompt
  *   npm run release patch      or minor / major / an exact x.y.z
  *   npm run release:dry        walk the whole flow, write nothing
  *
  * Steps, and why the order matters:
- *   1. nx release version: bumps all five package.jsons and every
- *      inter-package dependency (fixed group), building first via
+ *   1. nx release version: bumps every package.json in the group and
+ *      every inter-package dependency (fixed group), building first via
  *      preVersionCommand.
+ *
+ *      A package missing from `release.projects` in nx.json is missing
+ *      from all of this: it keeps its old version, never publishes, and
+ *      nothing fails. Adding a package means adding it there too.
  *   2. regenerate the agent assets: the plugin manifests carry the
  *      version, and regenerating after the bump is what keeps CI's
  *      drift check green on the release commit.
  *   3. one commit, one v{version} tag.
- *   4. nx release publish, all five packages.
+ *   4. nx release publish, every package in the group.
  *
  * Publishing needs `npm login` (or NPM_TOKEN in CI) with rights on the
  * @livevariant org; everything before the publish step works without it.
  */
 import { execSync } from "node:child_process";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+// nx.json carries comments, so it needs nx's own tolerant parser rather
+// than JSON.parse.
+import { parseJson } from "@nx/devkit";
 import { releasePublish, releaseVersion } from "nx/release";
 
 const args = process.argv.slice(2);
@@ -38,6 +47,42 @@ const otp = args.find(a => a.startsWith("--otp="))?.slice("--otp=".length);
 
 const run = cmd => execSync(cmd, { stdio: "inherit" });
 const out = cmd => execSync(cmd, { encoding: "utf8" }).trim();
+
+/**
+ * Every publishable package must be in the release group, and nothing
+ * checks that but this.
+ *
+ * A package left out of `release.projects` does not fail anything: it
+ * keeps its old version, never publishes, and the release reports
+ * success. @livevariant/postgres shipped that way, sitting at 0.0.3 on
+ * disk and absent from npm entirely while every other package moved to
+ * 0.0.4, and the only symptom was an application that could not install
+ * it. Since the packages pin each other exactly, one missing member also
+ * means the versions on npm describe a combination that never existed
+ * in git, which is the exact failure the lockstep group exists to
+ * prevent.
+ */
+function assertReleaseGroupComplete() {
+  const nx = parseJson(readFileSync("nx.json", "utf8"));
+  const declared = new Set(nx.release?.projects ?? []);
+  const missing = readdirSync("packages", { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(dir => join("packages", dir.name, "package.json"))
+    .filter(existsSync)
+    .map(file => JSON.parse(readFileSync(file, "utf8")))
+    .filter(pkg => pkg.private !== true && !declared.has(pkg.name))
+    .map(pkg => pkg.name);
+  if (missing.length > 0) {
+    console.error(
+      `release: ${missing.join(", ")} publishable but not in ` +
+        "release.projects (nx.json); it would silently keep its old " +
+        "version and never reach npm"
+    );
+    process.exit(1);
+  }
+}
+
+assertReleaseGroupComplete();
 
 if (out("git status --porcelain") !== "") {
   console.error("release: working tree is not clean; commit or stash first");
