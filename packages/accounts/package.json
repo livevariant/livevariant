@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/accounts",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Hosted-only accounts module: Better Auth over Drizzle on Cloudflare D1, org-owned stats keys, domain verification. Never published and never imported by the self-host entry, which is what keeps auth out of a one-click deploy's bundle",
   "license": "AGPL-3.0",
   "repository": {
@@ -15,8 +15,8 @@
     "includedScripts": []
   },
   "dependencies": {
-    "@livevariant/core": "0.0.3",
-    "@livevariant/server": "0.0.3",
+    "@livevariant/core": "0.0.4",
+    "@livevariant/server": "0.0.4",
     "better-auth": "^1.6.26",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.33",
