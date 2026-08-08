@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/server",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "LiveVariant serving backend: Hono app with redirect/click/pixel endpoints, JS-mode choose/reward API, secret-gated stats and recompute, behind a pluggable StateStore (in-memory here; Cloudflare Durable Objects in @livevariant/workers)",
   "license": "AGPL-3.0",
   "repository": {
@@ -40,9 +40,9 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.0.12",
-    "@livevariant/core": "0.0.4",
-    "@livevariant/mcp": "0.0.4",
-    "@livevariant/tools": "0.0.4",
+    "@livevariant/core": "0.0.5",
+    "@livevariant/mcp": "0.0.5",
+    "@livevariant/tools": "0.0.5",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "hono": "^4.12.33",
     "zod": "^4.4.3"
