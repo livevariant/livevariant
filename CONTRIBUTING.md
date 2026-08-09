@@ -20,6 +20,12 @@ You only need to do this once; it covers all your future contributions. If you a
 
 You need [Node.js 24](https://nodejs.org) (the exact version is in [.nvmrc](.nvmrc), so `nvm use` works) and npm.
 
+Never repair the lockfile by rerunning `npm install` over the existing one. npm prunes the platform variants your machine does not use whenever it installs with a `node_modules` present ([npm/cli#7961](https://github.com/npm/cli/issues/7961)), so an incremental rewrite on a Mac quietly drops the Linux entries and hands CI a tree it cannot build, with no error and nothing to see locally. Rebuild it from scratch instead:
+
+```bash
+rm -rf node_modules package-lock.json && npm install
+```
+
 ```bash
 npm ci
 

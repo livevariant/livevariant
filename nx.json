@@ -75,7 +75,22 @@
       "@livevariant/react"
     ],
     "version": {
-      "preVersionCommand": "npx nx run-many -t build"
+      "preVersionCommand": "npx nx run-many -t build",
+      "versionActionsOptions": {
+        // nx's lock-file step shells out to `npm install`, and npm has a
+        // standing bug (npm/cli#7961, #4828) where an install with a
+        // node_modules present prunes the platform variants that machine
+        // does not use. On a Mac that quietly deletes every linux entry,
+        // and the release commit then fails `npm ci` on CI while looking
+        // perfect locally. It cost this repo two red releases.
+        //
+        // A version bump does not need a resolver: the only thing that
+        // legitimately changes in the lockfile is the version of each
+        // workspace package and the specifiers its siblings use for it.
+        // scripts/release.mjs writes exactly that, deterministically, and
+        // verifies nothing was dropped.
+        "skipLockFileUpdate": true
+      }
     }
   }
 }

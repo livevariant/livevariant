@@ -1,4 +1,4 @@
-# LiveVariant — project guide
+# LiveVariant: project guide
 
 Open-source (AGPL) adaptive A/B testing. The entire test configuration
 travels base64url-encoded in the URL: no accounts, no registration. One
@@ -185,6 +185,23 @@ read-modify-write adapter would pass them.
 ## Development
 
 Node 24 (`nvm use`), npm, nx monorepo.
+
+**Never repair package-lock.json by rerunning `npm install` over it.** npm
+prunes the os/cpu variants the current machine does not use whenever it
+installs with a node_modules present (npm/cli#7961, #4828), so on a Mac an
+incremental rewrite silently deletes every linux binary and hands CI a tree it
+cannot build. It has cost this repo two red releases. Rebuild instead:
+
+```bash
+rm -rf node_modules package-lock.json && npm install
+```
+
+Releases do not touch the lockfile with an install at all: nx's lock-file step
+is off (`skipLockFileUpdate` in nx.json) and `scripts/release.mjs` writes the
+new versions into the lockfile itself, since a version bump changes numbers it
+already knows and needs no resolver. The same script refuses to release a
+lockfile that is already missing optional-dependency entries, which is what a
+pruned one looks like.
 
 ```bash
 npm ci
