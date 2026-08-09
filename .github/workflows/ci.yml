@@ -64,19 +64,6 @@ jobs:
           gitleaks version
           gitleaks git . --no-banner --redact -v
 
-      # The runner's npm is whatever its Node patch release bundles, and
-      # npm versions disagree about what belongs in a lockfile: npm 11.6.2
-      # writes one without the nested @emnapi/*@2.0.0-alpha.3 entries that
-      # @rolldown/binding-wasm32-wasi pins, and the 11.16.0 that came with
-      # Node 24.18.0 rejects that lock outright ("Missing: @emnapi/core@
-      # 2.0.0-alpha.3 from lock file"). Pinning the reader to the same npm
-      # that writes the lock (scripts/release.mjs enforces the same field)
-      # is what stops a Node patch bump from turning main red.
-      - name: Pin npm to the version the lockfile is written with
-        run: |
-          npm i -g "npm@$(node -p "require('./package.json').packageManager.split('@')[1]")"
-          npm --version
-
       - run: npm ci
 
       # Chromium is a fresh ~130MB download per run; cache it keyed on

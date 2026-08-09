@@ -7,7 +7,6 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "npm@11.16.0",
   "scripts": {
     "build": "nx run-many -t build",
     "test": "nx run-many -t test",

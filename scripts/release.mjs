@@ -29,7 +29,7 @@
  * @livevariant org; everything before the publish step works without it.
  */
 import { execSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 // nx.json carries comments, so it needs nx's own tolerant parser rather
 // than JSON.parse.
@@ -83,39 +83,56 @@ function assertReleaseGroupComplete() {
 }
 
 /**
- * A release rewrites package-lock.json, so it has to run on the npm the
- * lockfile is pinned to, and only this checks that.
+ * Refuses to release a lockfile that has already lost its platform
+ * variants, because publishing one is how a green laptop hands CI a tree
+ * it cannot build.
  *
- * npm versions disagree about what belongs in a lockfile, and each one
- * rewrites the other's answer. npm 11.6.2 wrote the v0.0.5 lock without
- * entries for the nested @emnapi/*@2.0.0-alpha.3 that
- * @rolldown/binding-wasm32-wasi pins, and the npm 11.16.0 that Node
- * 24.18.0 bundles refused to install it: "Missing:
- * @emnapi/core@2.0.0-alpha.3 from lock file". They also disagree about
- * devOptional versus dev, so releasing on the wrong one buries the real
- * change under hundreds of lines of flag churn. The same pin drives the
- * npm install step in ci.yml, which is what makes writer and reader the
- * same program.
+ * npm has a standing bug (npm/cli#7961, #4828): an install with a
+ * node_modules present prunes the os/cpu variants that machine does not
+ * use. A Mac therefore drops every linux binary, silently, with no error
+ * and no warning. It has bitten this repo twice, once through nx's
+ * lock-file step during a release and once through a manual `npm install`
+ * meant to repair the first one, which took all eleven non-darwin
+ * @tailwindcss/oxide binaries with it and left Linux unable to load
+ * tailwind at all.
+ *
+ * The invariant is simple: a package that declares optional dependencies
+ * has an entry for every one of them. That is what a complete lockfile
+ * looks like, and a pruned one fails it immediately.
  */
-function assertPinnedNpm() {
-  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
-  const pinned = pkg.packageManager?.match(/^npm@(.+)$/)?.[1];
-  if (!pinned) {
-    console.error(
-      'release: package.json has no "packageManager": "npm@x.y.z"; the ' +
-        "lockfile this release writes would be at the mercy of whatever " +
-        "npm happens to be active"
-    );
-    process.exit(1);
+function assertLockIsCrossPlatform() {
+  const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+  const installed = new Set(
+    Object.keys(lock.packages)
+      .filter(key => key.includes("node_modules/"))
+      .map(key =>
+        key.slice(key.lastIndexOf("node_modules/") + "node_modules/".length)
+      )
+  );
+  const missing = [];
+  for (const [key, entry] of Object.entries(lock.packages)) {
+    for (const name of Object.keys(entry.optionalDependencies ?? {})) {
+      if (!installed.has(name)) {
+        missing.push(
+          `${name} (optional dependency of ${key || "the workspace root"})`
+        );
+      }
+    }
   }
-  const active = out("npm --version");
-  if (active !== pinned) {
-    console.error(
-      `release: npm ${active} is active but package.json pins npm ` +
-        `${pinned}. Run \`npm i -g npm@${pinned}\` and release again.`
-    );
-    process.exit(1);
+  if (missing.length === 0) {
+    return;
   }
+  console.error(
+    `release: package-lock.json is missing ${missing.length} optional ` +
+      "dependency entries, which is what a lockfile pruned on one platform " +
+      "looks like:\n  " +
+      missing.slice(0, 10).join("\n  ") +
+      (missing.length > 10 ? `\n  ...and ${missing.length - 10} more` : "") +
+      "\n\nRebuild it from scratch, never by rerunning npm install over it:\n" +
+      "  rm -rf node_modules package-lock.json && npm install\n" +
+      "Commit that on its own, then release."
+  );
+  process.exit(1);
 }
 
 const lockedPackages = () =>
@@ -153,8 +170,71 @@ function assertNothingPruned(before) {
   process.exit(1);
 }
 
+/**
+ * Writes the version bump into package-lock.json by hand, because a
+ * version bump does not need a resolver and running one is what breaks
+ * the lockfile.
+ *
+ * npm's install is the wrong tool here twice over. It re-derives a whole
+ * dependency tree to change some numbers it was already told, and while
+ * doing so it prunes the platform variants this machine does not use
+ * (see assertLockIsCrossPlatform). nx's own lock-file step is that same
+ * install, which is why it is turned off in nx.json.
+ *
+ * What actually changes is small and knowable: each workspace package's
+ * own `version`, and the specifier its siblings use for it, since the
+ * group pins itself exactly. Third-party specifiers are never touched,
+ * so no entry can appear or vanish, which is exactly the property that
+ * makes this safe where an install is not.
+ */
+function syncLockToManifests() {
+  const lock = JSON.parse(readFileSync("package-lock.json", "utf8"));
+  const workspaceNames = new Set();
+  const dirs = [];
+  for (const dir of Object.keys(lock.packages)) {
+    if (dir === "" || dir.includes("node_modules/")) {
+      continue;
+    }
+    const manifestPath = join(dir, "package.json");
+    if (!existsSync(manifestPath)) {
+      continue;
+    }
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    dirs.push([dir, manifest]);
+    if (manifest.name) {
+      workspaceNames.add(manifest.name);
+    }
+  }
+  const DEP_FIELDS = [
+    "dependencies",
+    "devDependencies",
+    "peerDependencies",
+    "optionalDependencies"
+  ];
+  for (const [dir, manifest] of dirs) {
+    const entry = lock.packages[dir];
+    entry.version = manifest.version;
+    for (const field of DEP_FIELDS) {
+      const declared = manifest[field];
+      const locked = entry[field];
+      if (!declared || !locked) {
+        continue;
+      }
+      for (const [name, spec] of Object.entries(declared)) {
+        // Only our own packages. A third-party specifier that changed
+        // would need a resolved entry to go with it, which is a real
+        // install, not a release.
+        if (workspaceNames.has(name) && locked[name] !== undefined) {
+          locked[name] = spec;
+        }
+      }
+    }
+  }
+  writeFileSync("package-lock.json", `${JSON.stringify(lock, null, 2)}\n`);
+}
+
 assertReleaseGroupComplete();
-assertPinnedNpm();
+assertLockIsCrossPlatform();
 
 if (out("git status --porcelain") !== "") {
   console.error("release: working tree is not clean; commit or stash first");
@@ -192,13 +272,14 @@ if (dryRun) {
   process.exit(0);
 }
 
-// nx's lock-file update runs `npm install --package-lock-only`, which
-// only reasons about the lockfile. This full install writes the same
-// lockfile AND makes node_modules match it, so the publish step below
-// packs the versions the release commit claims rather than whatever the
-// tree held before the bump.
-run("npm install");
+// nx wrote the new versions into every package.json; this puts the same
+// numbers in the lockfile without running an install. The check before it
+// is the belt to that braces: nx's own lock-file step is disabled in
+// nx.json, and if a future nx ignores that flag and installs anyway, the
+// pruning shows up here as a hard failure instead of as a red CI on the
+// release commit.
 assertNothingPruned(lockedPackagesBefore);
+syncLockToManifests();
 run("git add package-lock.json");
 
 // The generated manifests embed the version, so they are part of the
