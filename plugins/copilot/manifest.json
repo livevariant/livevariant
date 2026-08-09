@@ -1,6 +1,6 @@
 {
   "name": "LiveVariant",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Run A/B tests that pick their own winner. Build tests from a set of variants, get URLs for email or web, and read results with real win probabilities instead of eyeballed conversion rates.",
   "agentSkills": [
     "skills/livevariant"
