@@ -22,7 +22,6 @@ import {
   decisionLine,
   normalizeStats,
   signalBreakdowns,
-  sourceRows,
   summarizeBuckets,
   type SlotAnalysis,
   type TestStats
@@ -274,8 +273,7 @@ export function StatsPanel({
       joint,
       line: decisionLine(stats, joint),
       buckets: summarizeBuckets(stats),
-      signals: signalBreakdowns(stats),
-      sources: sourceRows(stats)
+      signals: signalBreakdowns(stats)
     };
   }, [stats]);
 
@@ -531,57 +529,27 @@ export function StatsPanel({
                 </div>
               )}
 
-              {/* Traffic sources feed the exclude workflow; the audit
-                  line keeps quarantined history visible, not vanished. */}
-              {(derived.sources.length > 0 || stats.excluded.total > 0) && (
-                <div className="space-y-2">
-                  <div className="font-mono text-sm text-muted-foreground">
-                    traffic sources
-                  </div>
-                  {derived.sources.length > 0 && (
-                    <table className="w-full text-sm">
-                      <tbody className="font-mono tabular-nums">
-                        {derived.sources.slice(0, 8).map(source => (
-                          <tr
-                            key={source.hash}
-                            className="border-b last:border-0"
-                          >
-                            <td className="py-1.5 text-muted-foreground">
-                              {source.hash.slice(0, 12)}…
-                            </td>
-                            <td className="w-[40%] py-1.5 pr-3">
-                              <ShareBar share={source.share} />
-                            </td>
-                            <td className="py-1.5 text-right">
-                              <Tick>{nf.format(source.count)}</Tick>
-                            </td>
-                            <td className="py-1.5 pl-3 text-right">
-                              <Tick>{pct(source.share, 0)}</Tick>
-                            </td>
-                          </tr>
-                        ))}
-                        {derived.sources.length > 8 && (
-                          <tr>
-                            <td
-                              colSpan={4}
-                              className="py-1.5 text-xs text-muted-foreground"
-                            >
-                              and {derived.sources.length - 8} smaller sources
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  )}
-                  {stats.excluded.total > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      {nf.format(stats.excluded.total)} assignments excluded (
-                      {nf.format(stats.excluded.bySource)} by source,{" "}
-                      {nf.format(stats.excluded.byWindow)} by time window), and
-                      not counted above.
-                    </p>
-                  )}
-                </div>
+              {/*
+               * Traffic sources are deliberately NOT displayed (founder
+               * decision 2026-08-11). The rows are daily-rotating hashes of
+               * network prefixes, opaque by design, and the section answered
+               * exactly one operator question: is a single source flooding
+               * the test? Twice now an unlabelled hash here was read as a
+               * bug, which means the display cost more understanding than it
+               * bought. The data still exists: `sourceRows` stays in core,
+               * the stats payload still carries `perSource`, and the exclude
+               * workflow reads it from there when a flood actually has to be
+               * quarantined. Only the audit line survives, because "N
+               * assignments excluded and not counted" is a fact about the
+               * NUMBERS ABOVE, not about sources.
+               */}
+              {stats.excluded.total > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {nf.format(stats.excluded.total)} assignments excluded (
+                  {nf.format(stats.excluded.bySource)} by source,{" "}
+                  {nf.format(stats.excluded.byWindow)} by time window), and not
+                  counted above.
+                </p>
               )}
             </>
           )}

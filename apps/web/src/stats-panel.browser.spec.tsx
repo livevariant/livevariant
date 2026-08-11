@@ -218,9 +218,11 @@ describe("the live panel", () => {
     // Buckets: the labeled one readable, the opaque one shortened.
     expect(container.textContent).toContain("country=nl");
     expect(container.textContent).toContain("bbbbbbbb…");
-    // Signals and sources.
+    // Signals show; traffic sources deliberately do not (opaque rotating
+    // hashes, twice misread as a bug), while the exclusion audit line stays.
     expect(container.textContent).toContain("audience signals");
-    expect(container.textContent).toContain("cccccccccccc…");
+    expect(container.textContent).not.toContain("traffic sources");
+    expect(container.textContent).not.toContain("cccccccccccc");
     expect(container.textContent).toContain("5 assignments excluded");
 
     // A second event over the same connection updates the numbers.
