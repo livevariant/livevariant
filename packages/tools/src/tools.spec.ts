@@ -357,6 +357,42 @@ describe("generate_priors", () => {
     ]);
   });
 
+  it("tells apart two conditions that flatten to the same string", async () => {
+    // Dimension keys and free-form values may contain `=` and `&`, so a
+    // separator-joined identity would make `{"a": "b=c"}` and `{"a=b": "c"}`
+    // the same condition and let one replace the other's block.
+    const built = await buildTest.handler(
+      {
+        variants: [{ url: A }, { url: B }],
+        context: [
+          { key: "a", values: ["b=c", "x"] },
+          { key: "a=b", values: ["c", "y"] }
+        ]
+      },
+      ctx
+    );
+    const first = await generatePriors.handler(
+      {
+        test: built.config,
+        when: { a: "b=c" },
+        beliefs: [{ variant: 0, rate: 0.05 }],
+        confidence: "low"
+      },
+      ctx
+    );
+    const second = await generatePriors.handler(
+      {
+        test: first.config,
+        when: { "a=b": "c" },
+        beliefs: [{ variant: 1, rate: 0.06 }],
+        confidence: "low"
+      },
+      ctx
+    );
+    const decoded = await decodeConfig(second.config);
+    expect(decoded.config.ctxPriors).toHaveLength(2);
+  });
+
   it("refuses a segment the test does not have", async () => {
     const built = await segmentedTest();
     await expect(

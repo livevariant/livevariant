@@ -137,4 +137,78 @@ describe("effectivePriors", () => {
     );
     expect(after).toBe(before);
   });
+
+  it("refuses a belief about a combination of dimensions", () => {
+    // The model is additive across context dimensions: serving builds one
+    // (context x variant) interaction per dimension and never a conjunction,
+    // so "blue AND gold" has no coordinate. Applying it to both would move
+    // every blue visitor and every gold one, and count a blue-gold visitor
+    // twice. Refused rather than approximated.
+    expect(() =>
+      parseTestConfig({
+        variants: ["A", "B"],
+        ctx: {
+          dims: [
+            { key: "color", values: ["blauw", "rood"] },
+            { key: "tier", values: ["gold", "silver"] }
+          ]
+        },
+        ctxPriors: [
+          {
+            when: { color: "blauw", tier: "gold" },
+            priors: {
+              main: [
+                { mean: 0.1, strength: 5 },
+                { mean: 0.3, strength: 5 }
+              ]
+            }
+          }
+        ],
+        statsKeyHash: "0".repeat(64)
+      })
+    ).toThrow(/ONE dimension/);
+  });
+
+  it("takes the same belief as one block per dimension", () => {
+    // The way to express it: each dimension gets its own block, and the
+    // model adds the two effects for a visitor who matches both.
+    const config = parseTestConfig({
+      variants: ["A", "B"],
+      ctx: {
+        dims: [
+          { key: "color", values: ["blauw", "rood"] },
+          { key: "tier", values: ["gold", "silver"] }
+        ]
+      },
+      ctxPriors: [
+        {
+          when: { color: "blauw" },
+          priors: {
+            main: [
+              { mean: 0.1, strength: 5 },
+              { mean: 0.3, strength: 5 }
+            ]
+          }
+        },
+        {
+          when: { tier: "gold" },
+          priors: {
+            main: [
+              { mean: 0.1, strength: 5 },
+              { mean: 0.25, strength: 5 }
+            ]
+          }
+        }
+      ],
+      statsKeyHash: "0".repeat(64)
+    });
+    const priors = effectivePriors(config, DIM);
+    expect(priors).toHaveLength(4);
+    // Each block sits on its own dimension's feature, never on both.
+    for (const prior of priors) {
+      expect(prior.ctxFeatIdx).toHaveLength(1);
+    }
+    const features = new Set(priors.map(p => p.ctxFeatIdx![0]));
+    expect(features.size).toBe(2);
+  });
 });

@@ -920,12 +920,18 @@ export const generatePriors = defineTool({
   }
 });
 
-/** Two conditions are the same condition whatever order they were written in. */
+/**
+ * Two conditions are the same condition whatever order they were written in.
+ *
+ * Serialized as JSON rather than joined with separators: dimension keys and
+ * free-form values may contain `=` and `&`, so `{"a": "b=c"}` and
+ * `{"a=b": "c"}` would flatten to one string and make a replace hit the
+ * wrong segment's block.
+ */
 function canonicalWhen(when: Record<string, string>): string {
-  return Object.entries(when)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key}=${value}`)
-    .join("&");
+  return JSON.stringify(
+    Object.entries(when).sort(([a], [b]) => a.localeCompare(b))
+  );
 }
 
 // ---------------------------------------------------------------------------

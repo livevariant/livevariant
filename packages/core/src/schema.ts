@@ -155,7 +155,11 @@ const configObject = z
     ctxPriors: z.optional(
       z.array(
         z.object({
-          /** Dimension key to value, as declared under `ctx.dims`. */
+          /**
+           * The one dimension this belief holds for, as key to value, as
+           * declared under `ctx.dims`. Exactly one entry: the model has no
+           * feature for a combination of dimensions (see the check below).
+           */
           when: z.record(z.string(), z.string()),
           priors: z.record(z.string(), z.array(variantPriorSchema))
         })
@@ -283,6 +287,25 @@ const configObject = z
           message:
             "a conditioned prior needs a condition; an unconditioned " +
             "belief belongs in `priors`"
+        });
+      } else if (conditions.length > 1) {
+        // The model is ADDITIVE across context dimensions: serving builds
+        // one (context feature x variant) interaction per dimension and
+        // never a conjunction of two, so there is no coordinate that means
+        // "blue AND gold". Accepting the pair would put the whole belief on
+        // each dimension separately, which moves every blue visitor and
+        // every gold one and counts a blue-gold visitor twice. Refused
+        // rather than approximated: an unrepresentable belief is worse
+        // stored than absent.
+        ctx.issues.push({
+          code: "custom",
+          path: ["ctxPriors", i, "when"],
+          input: block.when,
+          message:
+            "a conditioned prior holds for ONE dimension " +
+            `(got ${conditions.map(([key]) => key).join(", ")}); the model ` +
+            "has no feature for a combination of dimensions, so give each " +
+            "its own block"
         });
       }
       for (const [key, value] of conditions) {

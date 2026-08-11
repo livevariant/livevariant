@@ -59,6 +59,11 @@ export function effectivePriors(
     // a single visitor from that segment being present. Feature 0 is the
     // bias and belongs to every request, so conditioning on it would make
     // the prior unconditional by another name.
+    //
+    // The schema allows exactly one condition, which is what keeps this a
+    // single index: the model is additive across context dimensions, so
+    // two conditions would put the whole belief on each of them and move
+    // every visitor matching either one.
     const ctxFeatIdx = featureIndices(block.when, dim).filter(f => f !== 0);
     if (ctxFeatIdx.length === 0) {
       continue;
