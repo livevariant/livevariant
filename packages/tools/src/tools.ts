@@ -712,11 +712,22 @@ export const generatePriors = defineTool({
     "wash your guess out, so you can judge whether you have been too " +
     "confident. Being wrong here costs a little early traffic, not the test.\n\n" +
     "Priors are outside the identity hash, so the test keeps its id, its URLs " +
-    "and any history it already has.",
+    "and any history it already has.\n\n" +
+    'Pass `when` to make the belief hold for ONE segment only ("image B is ' +
+    'the one for the blue segment"). Without it the belief is about every ' +
+    "visitor, which is a different and much stronger claim.",
   readOnly: true,
   reachesNetwork: false,
   input: z.object({
     test: testRef,
+    when: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe(
+        "Context this belief is limited to, as dimension key to value " +
+          '(e.g. {"color": "blauw"}). The keys must be dimensions the ' +
+          "test declares. Omit it for a belief about every visitor."
+      ),
     beliefs: z
       .array(
         z.object({
@@ -768,6 +779,28 @@ export const generatePriors = defineTool({
   async handler(input, context) {
     const { config, testId } = await resolveTest(input.test);
     const entries = slotEntries(config);
+    if (input.when) {
+      // Checked here as well as in the schema so the answer names the
+      // dimensions this test actually has, instead of a validation dump.
+      const dims = new Map(
+        (config.ctx?.dims ?? []).map(dim => [dim.key, dim.values])
+      );
+      for (const [key, value] of Object.entries(input.when)) {
+        const allowed = dims.get(key);
+        if (!dims.has(key)) {
+          throw new ToolInputError(
+            `this test has no context dimension "${key}" ` +
+              `(it has: ${[...dims.keys()].join(", ") || "none"})`
+          );
+        }
+        if (allowed && !allowed.includes(value)) {
+          throw new ToolInputError(
+            `"${value}" is not a value of "${key}" ` +
+              `(it allows: ${allowed.join(", ")})`
+          );
+        }
+      }
+    }
     const strength =
       typeof input.confidence === "number"
         ? input.confidence
@@ -841,7 +874,23 @@ export const generatePriors = defineTool({
       );
     }
 
-    const next = parseTestConfig({ ...config, priors });
+    // A conditioned belief is added to the existing blocks rather than
+    // replacing them: each block is one segment's opinion, and a second
+    // call about a second segment must not erase the first.
+    const when = input.when;
+    const next = parseTestConfig(
+      when
+        ? {
+            ...config,
+            ctxPriors: [
+              ...(config.ctxPriors ?? []).filter(
+                block => canonicalWhen(block.when) !== canonicalWhen(when)
+              ),
+              { when, priors }
+            ]
+          }
+        : { ...config, priors }
+    );
     const encoded = await encodeConfig(next);
     if (encoded.testId !== testId) {
       // Cannot happen: priors are identity-excluded. Loud if it ever does,
@@ -870,6 +919,20 @@ export const generatePriors = defineTool({
     };
   }
 });
+
+/**
+ * Two conditions are the same condition whatever order they were written in.
+ *
+ * Serialized as JSON rather than joined with separators: dimension keys and
+ * free-form values may contain `=` and `&`, so `{"a": "b=c"}` and
+ * `{"a=b": "c"}` would flatten to one string and make a replace hit the
+ * wrong segment's block.
+ */
+function canonicalWhen(when: Record<string, string>): string {
+  return JSON.stringify(
+    Object.entries(when).sort(([a], [b]) => a.localeCompare(b))
+  );
+}
 
 // ---------------------------------------------------------------------------
 
