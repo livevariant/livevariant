@@ -317,3 +317,21 @@ describe("partial pooling earns its constant", () => {
     expect(real?.leaderRate ?? 0).toBeLessThan(0.12);
   });
 });
+
+describe("a tie is a claim about two arms, and both must have earned it", () => {
+  it("does not call an almost-untested arm 'safe to ship'", () => {
+    // One arm well sampled, the other nearly untouched: their posteriors
+    // overlap because the thin one is WIDE, not because they were measured
+    // equal. The whole-test evidence check passes on the first arm alone, so
+    // without a per-arm gate this read "no difference detected between a and
+    // b" at five pulls of b. Caught by review on the first version of the
+    // tie branch.
+    const stats = statsFor([
+      { choice: ["a"], pulls: 150, conversions: 7 },
+      { choice: ["b"], pulls: 5, conversions: 0 }
+    ]);
+    const line = decisionLine(stats, analyzeOutcomes(toArms(stats)));
+    expect(line).not.toContain("No difference detected");
+    expect(line).not.toContain("safe to ship");
+  });
+});

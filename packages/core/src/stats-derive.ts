@@ -162,6 +162,16 @@ export function decisionLine(
  *
  * Ranked on P(best) rather than on the posterior mean, because that is the
  * quantity the gap is defined over and the one the dashboard already shows.
+ *
+ * BOTH named combinations must clear MIN_PULLS_TO_CALL on their own. A tie is
+ * a claim about two arms, and overlapping posteriors can mean two different
+ * things: measured and equal, or one arm barely sampled and therefore wide
+ * enough to overlap anything. "Either is safe to ship" is only true in the
+ * first case, and the whole-test evidence check upstream cannot tell them
+ * apart, because it passes as soon as ANY combination has been seen enough.
+ * An arm still thin stays out of the tie and the line falls through to the
+ * ordinary leader wording, whose "could still flip" is the honest sentence
+ * for it.
  */
 function tiedAtTop(
   stats: TestStats,
@@ -177,6 +187,11 @@ function tiedAtTop(
     ranked[0].probability - ranked[1].probability >=
     MIN_PROBABILITY_GAP_TO_NAME_LEADER
   ) {
+    return null;
+  }
+  const enoughEvidence = (index: number) =>
+    (stats.combinations[index]?.pulls ?? 0) >= MIN_PULLS_TO_CALL;
+  if (!enoughEvidence(ranked[0].index) || !enoughEvidence(ranked[1].index)) {
     return null;
   }
   const nameOf = (index: number) =>
