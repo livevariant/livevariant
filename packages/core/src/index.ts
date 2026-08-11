@@ -153,6 +153,8 @@ export {
 } from "./exclusions.js";
 export {
   BUCKET_POOLING_STRENGTH,
+  MIN_BUCKET_PULLS_TO_CALL,
+  MIN_PROBABILITY_GAP_TO_NAME_LEADER,
   MIN_PULLS_TO_CALL,
   THIN_EXPOSURE_SHARE,
   analyzeOutcomes,
