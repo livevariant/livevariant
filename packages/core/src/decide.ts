@@ -62,6 +62,15 @@ export interface DecisionOptions {
    * rate. 1% is the usual convention and is deliberately not a p-value.
    */
   threshold?: number;
+  /**
+   * A prior per arm, as pseudo-observations at a given mean, replacing the
+   * flat Beta(1,1). This is how partial pooling enters: a bucket's analysis
+   * passes the GLOBAL rate per arm as each arm's prior, so a bucket with
+   * little data is pulled toward the overall result and only real local
+   * evidence moves it away. Same shape as the bandit's own warm-start
+   * priors, on purpose.
+   */
+  priors?: ReadonlyArray<{ mean: number; strength: number }>;
 }
 
 /**
@@ -81,9 +90,27 @@ export function analyzeOutcomes(
   const threshold = options.threshold ?? 0.01;
 
   const wins = new Array<number>(arms.length).fill(0);
-  const rates = arms.map(
-    arm => (1 + arm.conversions) / (2 + Math.max(arm.pulls, arm.conversions))
+  // Each arm's posterior is Beta(a0 + conversions, b0 + failures), where
+  // (a0, b0) is the flat (1, 1) unless the caller supplied a prior. Alphas
+  // and betas are computed once here so the posterior means and the sampler
+  // below cannot disagree about what the prior was.
+  const alpha = arms.map(
+    (arm, i) =>
+      1 +
+      (options.priors?.[i]
+        ? options.priors[i].mean * options.priors[i].strength
+        : 0) +
+      arm.conversions
   );
+  const beta = arms.map(
+    (arm, i) =>
+      1 +
+      (options.priors?.[i]
+        ? (1 - options.priors[i].mean) * options.priors[i].strength
+        : 0) +
+      Math.max(0, arm.pulls - arm.conversions)
+  );
+  const rates = arms.map((_, i) => alpha[i] / (alpha[i] + beta[i]));
   if (arms.length === 0) {
     return {
       probabilities: [],
@@ -110,12 +137,7 @@ export function analyzeOutcomes(
   for (let d = 0; d < draws; d++) {
     let best = 0;
     for (let i = 0; i < arms.length; i++) {
-      const arm = arms[i];
-      sample[i] = sampleBeta(
-        1 + arm.conversions,
-        1 + Math.max(0, arm.pulls - arm.conversions),
-        rng
-      );
+      sample[i] = sampleBeta(alpha[i], beta[i], rng);
       if (sample[i] > sample[best]) {
         best = i;
       }
@@ -212,6 +234,36 @@ export const MIN_BUCKET_PULLS_TO_CALL = 200;
  * doi:10.1073/pnas.2014602118) over the event log.
  */
 export const THIN_EXPOSURE_SHARE = 0.25;
+
+/**
+ * How hard a bucket's estimate is pulled toward the whole test's, in
+ * pseudo-observations per arm.
+ *
+ * Per-bucket analysis used to be a fresh flat-prior Beta over that bucket's
+ * raw counts, independently per bucket, which is many chances to see a
+ * difference that is not there: measured at 8 segments x 2 variants with
+ * every rate identical, 52.7% of runs showed some bucket at P(best) >= 95%.
+ * The exposure gate cut the exposure; this fixes the analysis. Each bucket's
+ * prior is now the GLOBAL rate of the same arm at this strength, which is
+ * partial pooling (Gelman, Hill & Yajima 2012,
+ * doi:10.1080/19345747.2011.618213): a bucket with little data reports the
+ * overall result, and only local evidence a flat prior would also have
+ * believed, sustained over enough pulls to outweigh this, moves it away.
+ *
+ * The value is measured, and measuring it corrected the metric itself. What
+ * pooling can remove is the SEGMENTATION illusion: a bucket confidently
+ * naming a different winner than the whole test, which is the product's "a
+ * different winner per audience" claim appearing by chance. At this strength
+ * that drops from 16-18% of null 8x2 runs to about 1% (0 on the spec's
+ * seeds), while a genuine reversal (12% vs 5%, 300 pulls a side, against the
+ * global lean) still surfaces at P(best) 0.998. What pooling can NOT remove
+ * is a bucket echoing the global result's own premature confidence: as
+ * strength grows every bucket converges to the global posterior, so those
+ * echoes converge to the global null rate, and the fix for THAT lives in the
+ * tie wording and canStop's per-look framing, not here. Chasing echoes with
+ * a larger constant only flattens real interactions.
+ */
+export const BUCKET_POOLING_STRENGTH = 200;
 
 /**
  * Rolls per-cell outcomes up to one slot's variants: pulls and

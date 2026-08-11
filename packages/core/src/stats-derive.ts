@@ -10,6 +10,7 @@
  */
 import {
   analyzeOutcomes,
+  BUCKET_POOLING_STRENGTH,
   MIN_BUCKET_PULLS_TO_CALL,
   MIN_PROBABILITY_GAP_TO_NAME_LEADER,
   MIN_PULLS_TO_CALL,
@@ -197,7 +198,16 @@ export interface BucketSummary {
    * MIN_BUCKET_PULLS_TO_CALL.
    */
   leader: string | null;
+  /**
+   * The leader's PARTIALLY POOLED rate: the posterior mean under a prior of
+   * the whole test's rate for the same combination, at
+   * BUCKET_POOLING_STRENGTH pseudo-observations. Deliberately not the raw
+   * ratio of this bucket's counts. The raw counts are right beside it; the
+   * estimate is what the bucket's thin evidence justifies BELIEVING, which
+   * for a small bucket is mostly the global result.
+   */
   leaderRate: number | null;
+  /** P(leader is best IN THIS BUCKET), under the same pooled posterior. */
   probabilityBest: number | null;
 }
 
@@ -246,16 +256,27 @@ export function summarizeBuckets(
     if (pulls < MIN_BUCKET_PULLS_TO_CALL) {
       return { ...base, leader: null, leaderRate: null, probabilityBest: null };
     }
-    const analysis = analyzeOutcomes(arms, { draws: 4000 });
-    const leaderArm = arms[analysis.leader];
+    // Partial pooling: each arm's prior is the whole test's rate for that
+    // same combination. Independent flat-prior analyses per bucket were the
+    // false-discovery machine the audit measured (52.7% of null runs at 8x2
+    // showed a confident segment winner); under this prior a bucket only
+    // contradicts the global result when its own data sustains it.
+    const analysis = analyzeOutcomes(arms, {
+      draws: 4000,
+      priors: arms.map((_, cell) => {
+        const combo = stats.combinations[cell];
+        const globalRate = combo
+          ? (1 + combo.conversions) / (2 + combo.pulls)
+          : 0.5;
+        return { mean: globalRate, strength: BUCKET_POOLING_STRENGTH };
+      })
+    });
     const combo = stats.combinations[analysis.leader];
     return {
       ...base,
       leader: combo ? combo.choice.join(" + ") : "–",
-      leaderRate:
-        leaderArm && leaderArm.pulls > 0
-          ? leaderArm.conversions / leaderArm.pulls
-          : null,
+      // The pooled posterior mean, not the raw ratio: see BucketSummary.
+      leaderRate: analysis.rates[analysis.leader] ?? null,
       probabilityBest: analysis.probabilities[analysis.leader] ?? 0
     };
   });

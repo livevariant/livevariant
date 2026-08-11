@@ -152,6 +152,7 @@ export {
   type ExclusionResult
 } from "./exclusions.js";
 export {
+  BUCKET_POOLING_STRENGTH,
   MIN_PULLS_TO_CALL,
   THIN_EXPOSURE_SHARE,
   analyzeOutcomes,

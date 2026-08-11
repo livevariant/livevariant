@@ -83,13 +83,19 @@ function payload(overrides: Partial<TestStats> = {}): TestStats {
     buckets: {
       // Sized past MIN_BUCKET_PULLS_TO_CALL on purpose: below it a bucket is
       // reported without a leader, so a smaller fixture would be testing the
-      // gate rather than the labeling this case is about.
+      // gate rather than the labeling this case is about. The opaque bucket
+      // additionally has to OUT-ARGUE partial pooling: its analysis carries
+      // the whole test's rates as a 200-pseudo-observation prior, so a
+      // bucket that contradicts the global lean (control wins here, variant
+      // wins everywhere else) needs sustained local evidence before the
+      // summary believes it. 400 starved-arm pulls at zero conversions is
+      // that; the 100 this fixture used to hold is deliberately not.
       ["a".repeat(64)]: {
-        pulls: [100, 300],
-        conversions: [10, 120],
+        pulls: [400, 1200],
+        conversions: [40, 480],
         label: "country=nl"
       },
-      ["b".repeat(64)]: { pulls: [200, 100], conversions: [40, 0] }
+      ["b".repeat(64)]: { pulls: [800, 400], conversions: [160, 0] }
     },
     bySignal: {
       country: {
@@ -145,7 +151,7 @@ describe("derived analytics", () => {
 
   it("finds each bucket's own winner, labeled or not", () => {
     const { top, hidden } = summarizeBuckets(payload());
-    // Sorted by pulls: the nl bucket (400) ahead of the opaque one (300).
+    // Sorted by pulls: the nl bucket (1600) ahead of the opaque one (1200).
     expect(top[0].name).toBe("country=nl");
     expect(top[0].leader).toBe("variant");
     // The opaque bucket leans the OTHER way: control converts there.

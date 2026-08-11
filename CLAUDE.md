@@ -179,10 +179,13 @@ rediscover the hard way.
   supposed to starve the loser. The defect is presenting adaptively collected
   counts with the visual grammar of a fixed-design experiment. Do NOT "fix" it
   by widening the interval: that repairs coverage and leaves the point
-  estimate wrong. The real correction is the adaptively-weighted AIPW
+  estimate wrong. The surfaces mark thin-exposure variants
+  (THIN_EXPOSURE_SHARE), and every stored serve now records its propensity
+  (AssignmentRecord.propensity, PROPENSITY_DRAWS extra draws off the serve's
+  own Cholesky factor), which is the input the adaptively-weighted AIPW
   estimator of Hadad, Hirshberg, Zhan, Wager & Athey (2021, PNAS 118(15),
-  doi:10.1073/pnas.2014602118), which needs the assignment propensity logged
-  per record. Still open.
+  doi:10.1073/pnas.2014602118) needs per record. The estimator itself is the
+  remaining open piece.
 - **`canStop` is a per-look quantity.** It bounds posterior expected loss at
   ONE evaluation; a dashboard polls until it fires, which is optional
   stopping. Measured over 5% vs 6%, realized regret was 2.59% of the best rate
@@ -192,14 +195,19 @@ rediscover the hard way.
   doi:10.3389/frai.2021.715690) covers the bandit case. The wording no longer
   promises a bound. The threshold's VALUE is unchanged and changing it is a
   separate decision.
-- **Per-bucket analysis has no multiplicity control.** With every segment and
-  variant on an identical rate, a false segment winner at P(best) >= 95%
-  appeared in 30.7% of runs at 4x2, 52.7% at 8x2, 20.0% at 12x3.
-  `MIN_BUCKET_PULLS_TO_CALL` reduces the exposure; it does not make the
-  analysis multiplicity-aware. The real fix is partial pooling: report the
-  joint model's posterior per segment, shrunk toward the global effect,
-  instead of a fresh independent analysis of that bucket's raw counts (Gelman,
-  Hill & Yajima 2012, doi:10.1080/19345747.2011.618213). Still open.
+- **Per-bucket analysis is partially pooled** (Gelman, Hill & Yajima 2012,
+  doi:10.1080/19345747.2011.618213). It used to be a fresh flat-prior analysis
+  per bucket, which showed a false segment winner at P(best) >= 95% in 52.7%
+  of null 8x2 runs. Each bucket's prior is now the whole test's rate per arm
+  at BUCKET_POOLING_STRENGTH pseudo-observations, on top of the
+  `MIN_BUCKET_PULLS_TO_CALL` exposure gate. Know what pooling can and cannot
+  fix before touching the constant: it kills the SEGMENTATION illusion (a
+  confident bucket contradicting the global leader: 16-18% of null runs
+  unpooled, ~1% pooled, measured in stats-derive.spec.ts), but a bucket
+  echoing the global result's own premature confidence converges to the
+  global null rate however strong the prior, and that is the tie wording's
+  job. A bucket's `leaderRate` is the shrunk posterior mean, not the raw
+  ratio; the raw counts sit beside it.
 - **Hash collisions are common and mostly harmless.** 25-56% of features share
   a slot at shipped dimensions. What matters is that no tested shape produced
   same-slot main-effect aliasing and the 3x3 local-optimum simulation reaches
