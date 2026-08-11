@@ -104,6 +104,17 @@ export function decisionLine(
   const leader = stats.combinations[analysis.leader];
   const name = leader ? leader.choice.join(" + ") : "none";
 
+  // Evidence FIRST, and the order is the whole point. Two arms with three
+  // pulls each have overlapping posteriors for the obvious reason, and the tie
+  // test cannot tell "measured, and equal" from "nobody has looked yet". Put
+  // the tie branch above this and a brand-new test reads "either is safe to
+  // ship", which is the same false confidence this task set out to remove,
+  // moved one line down.
+  const thin = !stats.combinations.some(c => c.pulls >= MIN_PULLS_TO_CALL);
+  if (thin) {
+    return `${name} leads on thin data; too early to mean much.`;
+  }
+
   // Two arms this close are not separable, and saying one "leads" invents a
   // finding. See MIN_PROBABILITY_GAP_TO_NAME_LEADER: with genuinely equal
   // arms the stopping rule still fires, and it names the arm that happened to
@@ -125,9 +136,6 @@ export function decisionLine(
       `${name} leads and the remaining risk looks small. ` +
       "The test keeps adapting either way."
     );
-  }
-  if (!stats.combinations.some(c => c.pulls >= MIN_PULLS_TO_CALL)) {
-    return `${name} leads on thin data; too early to mean much.`;
   }
   return `${name} leads, but the gap could still flip.`;
 }

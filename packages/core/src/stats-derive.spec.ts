@@ -49,6 +49,19 @@ describe("decisionLine", () => {
     expect(line).not.toContain("leads");
   });
 
+  it("says too early before it says tie, on a test nobody has seen yet", () => {
+    // Three pulls each: the posteriors overlap because there is no evidence,
+    // not because the arms were measured and found equal. Reporting a tie here
+    // would tell someone either option is safe to ship on three visitors.
+    const stats = statsFor([
+      { choice: ["a"], pulls: 3, conversions: 1 },
+      { choice: ["b"], pulls: 3, conversions: 1 }
+    ]);
+    const line = decisionLine(stats, analyzeOutcomes(toArms(stats)));
+    expect(line).toContain("too early");
+    expect(line).not.toContain("safe to ship");
+  });
+
   it("still names a leader when one arm is genuinely ahead", () => {
     const stats = statsFor([
       { choice: ["a"], pulls: 4000, conversions: 200 },
