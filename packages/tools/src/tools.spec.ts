@@ -26,6 +26,16 @@ async function twoVariantTest() {
   return buildTest.handler({ variants: [{ url: A }, { url: B }] }, ctx);
 }
 
+async function segmentedTest() {
+  return buildTest.handler(
+    {
+      variants: [{ url: A }, { url: B }],
+      context: [{ key: "color", values: ["blauw", "rood"] }]
+    },
+    ctx
+  );
+}
+
 describe("the registry itself", () => {
   it("has unique names and a REST path for each", () => {
     const names = TOOLS.map(t => t.name);
@@ -298,6 +308,79 @@ describe("generate_priors", () => {
     expect(out.manageUrl).toBe(`https://livevariant.link/manage/${out.config}`);
     const decoded = await decodeConfig(out.config);
     expect(decoded.config.priors?.main).toHaveLength(2);
+  });
+
+  it("keeps a belief about one segment off everybody else's variant", async () => {
+    // The distinction the feature exists for: "B is the one for blue" is
+    // not "B is the one", and writing it as the latter would steer every
+    // other segment on evidence that was never about them.
+    const built = await segmentedTest();
+    const out = await generatePriors.handler(
+      {
+        test: built.config,
+        when: { color: "blauw" },
+        beliefs: [{ variant: "v2", rate: 0.08 }],
+        confidence: "medium"
+      },
+      ctx
+    );
+    expect(out.testId).toBe(built.testId);
+    const decoded = await decodeConfig(out.config);
+    expect(decoded.config.priors).toBeUndefined();
+    expect(decoded.config.ctxPriors).toHaveLength(1);
+    expect(decoded.config.ctxPriors?.[0].when).toEqual({ color: "blauw" });
+
+    // A second segment adds a block; the same segment replaces its own.
+    const second = await generatePriors.handler(
+      {
+        test: out.config,
+        when: { color: "rood" },
+        beliefs: [{ variant: "v1", rate: 0.09 }],
+        confidence: "medium"
+      },
+      ctx
+    );
+    const redone = await generatePriors.handler(
+      {
+        test: second.config,
+        when: { color: "blauw" },
+        beliefs: [{ variant: "v1", rate: 0.02 }],
+        confidence: "medium"
+      },
+      ctx
+    );
+    const final = await decodeConfig(redone.config);
+    expect(final.config.ctxPriors).toHaveLength(2);
+    expect(final.config.ctxPriors?.map(b => b.when.color).sort()).toEqual([
+      "blauw",
+      "rood"
+    ]);
+  });
+
+  it("refuses a segment the test does not have", async () => {
+    const built = await segmentedTest();
+    await expect(
+      generatePriors.handler(
+        {
+          test: built.config,
+          when: { color: "paars" },
+          beliefs: [{ variant: 0, rate: 0.05 }],
+          confidence: "low"
+        },
+        ctx
+      )
+    ).rejects.toThrow(/not a value of "color"/);
+    await expect(
+      generatePriors.handler(
+        {
+          test: built.config,
+          when: { device: "mobile" },
+          beliefs: [{ variant: 0, rate: 0.05 }],
+          confidence: "low"
+        },
+        ctx
+      )
+    ).rejects.toThrow(/no context dimension "device"/);
   });
 
   it("turns a rate and a confidence into a capped prior that washes out", async () => {

@@ -349,7 +349,7 @@ export async function createTest(
   );
   const ctxKey = callerCtx ? await bucketKey(testId, callerCtx) : null;
   const featIdx = featureIndices(callerCtx, dim);
-  const priors = effectivePriors(resolved);
+  const priors = effectivePriors(resolved, dim);
 
   // Hosted assets need the server: their canonical URLs 403 on their own,
   // and only /choose can mint working signatures for the winning

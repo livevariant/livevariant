@@ -52,6 +52,13 @@ export interface VariantPrior {
   variant: number;
   mean: number;
   strength: number;
+  /**
+   * When set, the belief holds only for visitors in this context: it is
+   * written to the (context x variant) interaction features instead of the
+   * variant's main effect. Already-hashed indices, because that is the only
+   * form of context this model ever sees.
+   */
+  ctxFeatIdx?: number[];
 }
 
 // ------------------------------------------------------------- features
@@ -67,6 +74,21 @@ export function variantFeature(
   variant: number
 ): number {
   return hashed(dim, `s${slot}=${variant}`);
+}
+
+/**
+ * Feature index of "this variant, for visitors carrying this context
+ * feature". Used both when recording a pull and when writing a
+ * segment-conditioned prior, so a warm start lands on exactly the feature
+ * the traffic will later move.
+ */
+export function ctxVariantFeature(
+  dim: number,
+  ctxFeat: number,
+  slot: number,
+  variant: number
+): number {
+  return hashed(dim, `x${ctxFeat}|s${slot}=${variant}`);
 }
 
 /**
@@ -92,7 +114,7 @@ export function cellFeatures(
       features.add(hashed(dim, `s${i}=${choice[i]}|s${j}=${choice[j]}`));
     }
     for (const f of ctx) {
-      features.add(hashed(dim, `x${f}|s${i}=${choice[i]}`));
+      features.add(ctxVariantFeature(dim, f, i, choice[i]));
     }
   }
   return [...features].sort((a, b) => a - b);
@@ -131,13 +153,25 @@ export function newModel(dim: number, priors: VariantPrior[] = []): JointModel {
     if (prior.strength <= 0) {
       continue;
     }
-    // "strength" pseudo-observations at rate "mean" on the variant's main
-    // effect: A += strength * e_f e_f^T, b += strength * mean * e_f.
-    // Starting from the identity ridge this keeps A diagonal, so the
+    // "strength" pseudo-observations at rate "mean" on each feature the
+    // belief is about: A += strength * e_f e_f^T, b += strength * mean *
+    // e_f. Starting from the identity ridge this keeps A diagonal, so the
     // inverse update is exact and cheap.
-    const f = variantFeature(dim, prior.slot, prior.variant);
-    aInv[f][f] = 1 / (1 / aInv[f][f] + prior.strength);
-    b[f] += prior.strength * prior.mean;
+    //
+    // An unconditioned prior is a belief about everybody, so it lands on
+    // the variant's main effect. A conditioned one is a belief about one
+    // segment, so it lands on the (context x variant) interactions, which
+    // is exactly where that segment's own traffic will later move.
+    const features =
+      prior.ctxFeatIdx && prior.ctxFeatIdx.length > 0
+        ? prior.ctxFeatIdx.map(ctxFeat =>
+            ctxVariantFeature(dim, ctxFeat, prior.slot, prior.variant)
+          )
+        : [variantFeature(dim, prior.slot, prior.variant)];
+    for (const f of features) {
+      aInv[f][f] = 1 / (1 / aInv[f][f] + prior.strength);
+      b[f] += prior.strength * prior.mean;
+    }
   }
   return { aInv, b };
 }

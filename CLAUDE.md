@@ -20,7 +20,7 @@ flag code that does not match DESIGN.md.
   encoded in the URL; `testId = sha256(canonical config minus excluded
 fields)`. Tampering derives a different test with empty state.
   Identity-EXCLUDED (change without resetting the test): `priors`,
-  `priorStrengthCap`, `decorateRedirects`, `variantParam`,
+  `ctxPriors`, `priorStrengthCap`, `decorateRedirects`, `variantParam`,
   `forwardParams`. Everything else (slots, ctx, `region`, `scope`,
   `statsKeyHash`, `rewardEvents`, redirects) is identity-INCLUDED.
 - **One model, zero choices.** No algorithm field exists. Every test
@@ -42,7 +42,13 @@ fields)`. Tampering derives a different test with empty state.
   skipped, never fatal.
 - **Priors.** Per-slot-variant `{mean, strength}`, capped by
   `priorStrengthCap` (server ceiling 50), applied as pseudo-observations
-  on the variant's main-effect coordinate. Identity-excluded;
+  on the variant's main-effect coordinate. `ctxPriors` blocks carry the
+  same per-slot shape under a `when` (dimension key to value) and land on
+  the (context x variant) INTERACTION instead, which is the only way to
+  say "image B is the one for the blue segment" rather than "for
+  everybody"; the context feature index is a pure function of
+  `key=value` and the dimension, so a segment's prior is placeable with
+  no visitor from that segment present. Both identity-excluded;
   `POST /recompute` applies changes to full history.
 - **Stats secret.** `statsKeyHash` in the config is the sha256 of a
   creator-held secret; `/stats`, `/recompute`, `/exclude` take it as a

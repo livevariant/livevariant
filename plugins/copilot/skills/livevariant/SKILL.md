@@ -87,6 +87,7 @@ one variant: a bundled win never tells you which half worked.
 | `forwardParams` | no | Default true: unrecognized query params (utm_*, gclid...) are forwarded onto the destination. `false` turns that off; safe to change mid-campaign. |
 | `decorateRedirects` | no | Default true: redirects carry the identity handoff (_lvt/_lvid/_lvvar) to the destination so its tag can keep attribution and consistency. |
 | `priors` | **no** | Warm-start beliefs via `generate_priors`. Deliberately OUTSIDE the identity hash: add or tune priors mid-test without losing history. |
+| `ctxPriors` | **no** | The same warm start, limited to one segment: `generate_priors` with `when`. Says "B is the one for blue" instead of "B is the one", so the other segments keep learning from their own traffic. Also outside the identity hash. |
 | `statsKeyHash` | yes | The sha256 of the stats secret. Safe in public links; the secret itself never appears in any URL except the manage link's #fragment. |
 
 ## Creating a test with nothing but a URL
@@ -159,7 +160,8 @@ empty history. So iteration happens on the PLAN, never on a live test.
    then build. Running unattended, skip the pause but still put the plan
    in your output.
 4. `build_test` to get the URLs and the stats secret. Store the secret.
-5. `generate_priors`, optionally, to warm-start from what you expect.
+5. `generate_priors`, optionally, to warm-start from what you expect. Add
+   `when` when the belief is about one segment rather than everybody.
 6. `get_stats` to read results.
 
 `inspect_test` answers "what does this link do?" for any LiveVariant URL, and

@@ -141,6 +141,26 @@ const configObject = z
      * its history (a recompute rebuilds the model).
      */
     priors: z.optional(z.record(z.string(), z.array(variantPriorSchema))),
+    /**
+     * Priors that hold only inside one context bucket: "for the blue
+     * segment, image B is the one". `priors` above cannot say that, because
+     * it writes to a variant's MAIN effect, which is the belief about that
+     * variant for everybody; a belief about one segment lives on the
+     * (context x variant) interaction, and this is what writes to it.
+     *
+     * Each block carries the same positional per-slot shape as `priors`, so
+     * one block reads as a whole opinion about one segment. Identity-
+     * excluded exactly like `priors`.
+     */
+    ctxPriors: z.optional(
+      z.array(
+        z.object({
+          /** Dimension key to value, as declared under `ctx.dims`. */
+          when: z.record(z.string(), z.string()),
+          priors: z.record(z.string(), z.array(variantPriorSchema))
+        })
+      )
+    ),
     /** Max pseudo-observations any prior may contribute per variant. */
     priorStrengthCap: z._default(z.number().check(z.positive()), 50),
     /**
@@ -249,29 +269,82 @@ const configObject = z
         });
       }
     }
-    for (const [slotKey, priors] of Object.entries(config.priors ?? {})) {
-      const variants = config.slots[slotKey];
-      if (!variants) {
+    checkPriorSlots(ctx, config, config.priors, ["priors"]);
+    const dims = new Map((config.ctx?.dims ?? []).map(d => [d.key, d.values]));
+    for (let i = 0; i < (config.ctxPriors ?? []).length; i++) {
+      const block = config.ctxPriors![i];
+      checkPriorSlots(ctx, config, block.priors, ["ctxPriors", i, "priors"]);
+      const conditions = Object.entries(block.when);
+      if (conditions.length === 0) {
         ctx.issues.push({
           code: "custom",
-          path: ["priors", slotKey],
-          input: priors,
+          path: ["ctxPriors", i, "when"],
+          input: block.when,
           message:
-            `priors name a slot that does not exist ` +
-            `(have: ${Object.keys(config.slots).join(", ")})`
+            "a conditioned prior needs a condition; an unconditioned " +
+            "belief belongs in `priors`"
         });
-      } else if (priors.length !== variants.length) {
-        ctx.issues.push({
-          code: "custom",
-          path: ["priors", slotKey],
-          input: priors,
-          message:
-            `slot "${slotKey}" has ${variants.length} variants ` +
-            `but ${priors.length} priors`
-        });
+      }
+      for (const [key, value] of conditions) {
+        if (!dims.has(key)) {
+          ctx.issues.push({
+            code: "custom",
+            path: ["ctxPriors", i, "when", key],
+            input: block.when,
+            message:
+              `"${key}" is not a declared context dimension ` +
+              `(have: ${[...dims.keys()].join(", ") || "none"})`
+          });
+          continue;
+        }
+        const allowed = dims.get(key);
+        // A prior on a value the dimension can never take would sit on a
+        // feature no request ever activates: dead weight that reads as a
+        // configured belief.
+        if (allowed && !allowed.includes(value)) {
+          ctx.issues.push({
+            code: "custom",
+            path: ["ctxPriors", i, "when", key],
+            input: block.when,
+            message:
+              `"${value}" is not one of the declared values for "${key}" ` +
+              `(have: ${allowed.join(", ")})`
+          });
+        }
       }
     }
   });
+
+/** The rule both prior shapes share: name a real slot, one entry per variant. */
+function checkPriorSlots(
+  ctx: { issues: Record<string, unknown>[] },
+  config: { slots: Record<string, unknown[]> },
+  priors: Record<string, unknown[]> | undefined,
+  path: (string | number)[]
+): void {
+  for (const [slotKey, entries] of Object.entries(priors ?? {})) {
+    const variants = config.slots[slotKey];
+    if (!variants) {
+      ctx.issues.push({
+        code: "custom",
+        path: [...path, slotKey],
+        input: priors,
+        message:
+          `priors name a slot that does not exist ` +
+          `(have: ${Object.keys(config.slots).join(", ")})`
+      });
+    } else if (entries.length !== variants.length) {
+      ctx.issues.push({
+        code: "custom",
+        path: [...path, slotKey],
+        input: priors,
+        message:
+          `slot "${slotKey}" has ${variants.length} variants ` +
+          `but ${entries.length} priors`
+      });
+    }
+  }
+}
 
 export const testConfigSchema = z.pipe(
   z.transform(value => {

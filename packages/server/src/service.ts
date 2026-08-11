@@ -91,11 +91,12 @@ export interface ServingParams {
 export function paramsFromConfig(decoded: DecodedConfig): ServingParams {
   const { config, testId } = decoded;
   const sizes = configSlotSizes(config);
+  const dim = dimForShape(sizes, config.ctx?.dims.length ?? 0);
   return {
     testId,
     slotSizes: sizes,
-    dim: dimForShape(sizes, config.ctx?.dims.length ?? 0),
-    priors: effectivePriors(config),
+    dim,
+    priors: effectivePriors(config, dim),
     region: config.region
   };
 }
