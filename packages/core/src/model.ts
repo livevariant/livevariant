@@ -21,8 +21,22 @@ import { sampleGaussian, type Rng } from "./rng.js";
  *     "a different winner per audience segment"
  *
  * Everything is hashed into a fixed dimension sized from the config
- * (dimForShape), so collisions merge features instead of erroring, which
- * linear models tolerate.
+ * (dimForShape), so two features can land in one slot instead of the model
+ * erroring. Collisions are not rare, and this comment used to imply they
+ * were: measured at shipped dimensions, 26.7% of features share a slot for
+ * [3,3] at dim 32, 41.7% once a country dimension is added, 55.6% for
+ * [2,2,2], 45.5% for the 8-segment shape a bluestars newsletter runs.
+ *
+ * What makes that tolerable is not the rate but WHICH collisions happen. No
+ * shape tested produced same-slot main-effect aliasing, the one that would
+ * actually hurt: two variants of a single slot becoming indistinguishable to
+ * the model. And the 3x3 local-optimum simulation in model.spec.ts reaches the
+ * global optimum at dim 32, 64 and 128 alike, so the mechanism this model
+ * exists for survives the collisions it has. Feature hashing is Weinberger et
+ * al. (2009), Feature Hashing for Large Scale Multitask Learning (ICML),
+ * doi:10.1145/1553374.1553516; note that its guarantees are asymptotic in a
+ * sparse, high-dimensional regime, and dimForShape's ~2x features-to-slots
+ * ratio sits well below it. We are relying on the measurement, not the theorem.
  *
  * Serving draws one plausible weight vector from the posterior
  * (theta = mean + noise * L * z, L the Cholesky factor of the covariance)
@@ -121,11 +135,14 @@ export function cellFeatures(
 }
 
 /**
- * Model dimension, decided from the shape so nobody ever picks it. Sized
- * to roughly twice the number of distinct features the test can express
- * (keeping hash collisions rare), then rounded to a power of two and
- * clamped. Context contributes an estimate, since its value space is
- * open-ended and hashed regardless.
+ * Model dimension, decided from the shape so nobody ever picks it. Sized to
+ * roughly twice the number of distinct features the test can express, then
+ * rounded to a power of two and clamped.
+ *
+ * Twice is not enough to make collisions rare, and it is not meant to be: see
+ * the note on cellFeatures above for the measured rates (25-56%) and for why
+ * they cost nothing here. It is enough to keep main effects apart, which is
+ * the property that matters.
  */
 export function dimForShape(slotSizes: number[], ctxDimCount = 0): number {
   const mains = slotSizes.reduce((sum, n) => sum + n, 0);
