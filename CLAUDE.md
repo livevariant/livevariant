@@ -162,6 +162,59 @@ Handoff params on redirects: `_lvt` (testId), `_lvid` (idHash), `_lvvar`
   use country/device; email examples must use `utm_*` or merge-tag
   values.
 
+## Inference: what the numbers do and do not mean
+
+A statistical audit (`docs/experiments/AB_TESTING_REVIEW.md`, every number in
+it produced by porting this repo's own numerics to Python and simulating them)
+found the SERVING correct and four things wrong with the REPORTING. Read this
+before touching `decide.ts` or `stats-derive.ts`; the reasoning is easy to
+rediscover the hard way.
+
+- **Adaptive allocation biases the reported rates.** A starved arm's sample
+  mean is low by ~11% of its true value (5% vs 10%, 300 replications), and
+  Wilson coverage drifts to ~0.94 against a nominal 0.95. This is expected,
+  not a bug: Nie, Tian, Taylor & Zou (2018, AISTATS) prove the negative bias
+  for optimism-driven algorithms including Thompson sampling; Shin, Ramdas &
+  Rinaldo (2019, NeurIPS) characterize the sign per arm. The bandit is
+  supposed to starve the loser. The defect is presenting adaptively collected
+  counts with the visual grammar of a fixed-design experiment. Do NOT "fix" it
+  by widening the interval: that repairs coverage and leaves the point
+  estimate wrong. The real correction is the adaptively-weighted AIPW
+  estimator of Hadad, Hirshberg, Zhan, Wager & Athey (2021, PNAS 118(15),
+  doi:10.1073/pnas.2014602118), which needs the assignment propensity logged
+  per record. Still open.
+- **`canStop` is a per-look quantity.** It bounds posterior expected loss at
+  ONE evaluation; a dashboard polls until it fires, which is optional
+  stopping. Measured over 5% vs 6%, realized regret was 2.59% of the best rate
+  against the 1% the threshold reads like. Johari, Koomen, Pekelis & Walsh
+  (2022, Operations Research 70(3), doi:10.1287/opre.2021.2135) is what a rule
+  that survives continuous monitoring requires; Loecher (2021,
+  doi:10.3389/frai.2021.715690) covers the bandit case. The wording no longer
+  promises a bound. The threshold's VALUE is unchanged and changing it is a
+  separate decision.
+- **Per-bucket analysis has no multiplicity control.** With every segment and
+  variant on an identical rate, a false segment winner at P(best) >= 95%
+  appeared in 30.7% of runs at 4x2, 52.7% at 8x2, 20.0% at 12x3.
+  `MIN_BUCKET_PULLS_TO_CALL` reduces the exposure; it does not make the
+  analysis multiplicity-aware. The real fix is partial pooling: report the
+  joint model's posterior per segment, shrunk toward the global effect,
+  instead of a fresh independent analysis of that bucket's raw counts (Gelman,
+  Hill & Yajima 2012, doi:10.1080/19345747.2011.618213). Still open.
+- **Hash collisions are common and mostly harmless.** 25-56% of features share
+  a slot at shipped dimensions. What matters is that no tested shape produced
+  same-slot main-effect aliasing and the 3x3 local-optimum simulation reaches
+  the global optimum at dim 32, 64 and 128 alike. Weinberger et al. (2009,
+  doi:10.1145/1553374.1553516) is the reference, with the caveat that
+  `dimForShape`'s ~2x ratio is below the regime its guarantees cover.
+
+**`dim` is load-bearing and unversioned.** It is recomputed from the config on
+every serve and every read, while `featIdx` is hashed modulo it and STORED per
+record. So changing how `dim` is computed does not change a test id and does
+not reset a test: it silently re-points every historical feature, and
+`recomputeState` cannot repair it because it replays the stored indices and the
+raw context is not retained. `legacyDimForShape` exists for exactly this
+reason. Never change the sizing a live test was created under.
+
 ## Storage
 
 `StateStore` (`packages/server/src/store/types.ts`) = event log

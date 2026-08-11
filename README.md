@@ -226,6 +226,19 @@ published literature (Thompson 1933; Chapelle & Li 2011; Li et al.
 2010; Hill et al., KDD 2017; Shivaswamy & Joachims 2012), implemented
 small enough to audit.
 
+That trade is not free, and it is worth stating plainly. Adaptive
+allocation buys lower regret and pays for it in measurement precision.
+Starving a losing variant is the point, but it also means that
+variant's reported rate is biased low, by about 11% of its own value in
+our simulations, because an arm that has an unlucky start gets sampled
+less and few observations arrive to correct it. And any rule you poll
+continuously loses the guarantee it would have at a single look. So
+LiveVariant optimizes earnings-while-learning rather than the precision
+of the number you read afterwards. For a campaign whose goal is
+conversions that is the right way round; if you need a defensible
+measurement of the gap rather than the most conversions, a fixed
+50/50 split and a single pre-planned look is the better instrument.
+
 ## Deploy your own
 
 This product is designed to be self-deployed. Our server can be used
