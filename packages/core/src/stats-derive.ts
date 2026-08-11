@@ -10,6 +10,8 @@
  */
 import {
   analyzeOutcomes,
+  MIN_BUCKET_PULLS_TO_CALL,
+  MIN_PROBABILITY_GAP_TO_NAME_LEADER,
   MIN_PULLS_TO_CALL,
   type ArmOutcome,
   type DecisionAnalysis
@@ -101,9 +103,26 @@ export function decisionLine(
   }
   const leader = stats.combinations[analysis.leader];
   const name = leader ? leader.choice.join(" + ") : "none";
-  if (analysis.canStop) {
+
+  // Two arms this close are not separable, and saying one "leads" invents a
+  // finding. See MIN_PROBABILITY_GAP_TO_NAME_LEADER: with genuinely equal
+  // arms the stopping rule still fires, and it names the arm that happened to
+  // run lucky roughly half the time.
+  const tied = tiedAtTop(stats, analysis);
+  if (tied) {
     return (
-      `${name} leads; stopping now risks under 1% of its rate. ` +
+      `No difference detected between ${tied[0]} and ${tied[1]} — ` +
+      "either is safe to ship. The test keeps adapting either way."
+    );
+  }
+
+  if (analysis.canStop) {
+    // Deliberately no longer promises "under 1% of its rate". The threshold
+    // bounds expected loss at ONE look, and a dashboard polls until it fires;
+    // measured that way the small-lift case realized 2.59%. See canStop's doc
+    // comment in decide.ts.
+    return (
+      `${name} leads and the remaining risk looks small. ` +
       "The test keeps adapting either way."
     );
   }
@@ -113,6 +132,33 @@ export function decisionLine(
   return `${name} leads, but the gap could still flip.`;
 }
 
+/**
+ * The top two combinations when no one of them is distinguishable, by name.
+ *
+ * Ranked on P(best) rather than on the posterior mean, because that is the
+ * quantity the gap is defined over and the one the dashboard already shows.
+ */
+function tiedAtTop(
+  stats: TestStats,
+  analysis: DecisionAnalysis
+): [string, string] | null {
+  const ranked = analysis.probabilities
+    .map((probability, index) => ({ probability, index }))
+    .sort((a, b) => b.probability - a.probability);
+  if (ranked.length < 2) {
+    return null;
+  }
+  if (
+    ranked[0].probability - ranked[1].probability >=
+    MIN_PROBABILITY_GAP_TO_NAME_LEADER
+  ) {
+    return null;
+  }
+  const nameOf = (index: number) =>
+    stats.combinations[index]?.choice.join(" + ") ?? "none";
+  return [nameOf(ranked[0].index), nameOf(ranked[1].index)];
+}
+
 export interface BucketSummary {
   key: string;
   /** Recovered readable context, or a shortened opaque key. */
@@ -120,10 +166,15 @@ export interface BucketSummary {
   labeled: boolean;
   pulls: number;
   conversions: number;
-  /** The bucket's own leading combination, with its local verdict. */
-  leader: string;
+  /**
+   * The bucket's own leading combination, or null when the bucket has not
+   * been seen enough times to name one. Counts are still reported: a thin
+   * segment is worth showing, a thin segment's "winner" is not. See
+   * MIN_BUCKET_PULLS_TO_CALL.
+   */
+  leader: string | null;
   leaderRate: number | null;
-  probabilityBest: number;
+  probabilityBest: number | null;
 }
 
 export interface BucketSummaries {
@@ -157,15 +208,25 @@ export function summarizeBuckets(
       pulls: cellPulls,
       conversions: bucket.conversions[cell] ?? 0
     }));
-    const analysis = analyzeOutcomes(arms, { draws: 4000 });
-    const leaderArm = arms[analysis.leader];
-    const combo = stats.combinations[analysis.leader];
-    return {
+    const conversions = arms.reduce((sum, arm) => sum + arm.conversions, 0);
+    const base = {
       key,
       name: bucket.label ?? `${key.slice(0, 8)}…`,
       labeled: bucket.label !== undefined,
       pulls,
-      conversions: arms.reduce((sum, arm) => sum + arm.conversions, 0),
+      conversions
+    };
+    // Thin buckets report what happened and stop there. Running the analysis
+    // anyway and hiding it would still be one more chance to see a winner
+    // that is not there; the whole point is that the claim is not made.
+    if (pulls < MIN_BUCKET_PULLS_TO_CALL) {
+      return { ...base, leader: null, leaderRate: null, probabilityBest: null };
+    }
+    const analysis = analyzeOutcomes(arms, { draws: 4000 });
+    const leaderArm = arms[analysis.leader];
+    const combo = stats.combinations[analysis.leader];
+    return {
+      ...base,
       leader: combo ? combo.choice.join(" + ") : "–",
       leaderRate:
         leaderArm && leaderArm.pulls > 0

@@ -30,7 +30,24 @@ export interface DecisionAnalysis {
   expectedLoss: number;
   /** expectedLoss as a fraction of the leader's own rate. */
   relativeLoss: number;
-  /** True when the remaining risk is below the caller's threshold. */
+  /**
+   * True when the remaining risk is below the caller's threshold AT THIS
+   * LOOK. That qualifier is load-bearing and used to be missing.
+   *
+   * The rule bounds posterior expected loss for a single evaluation. A
+   * dashboard polls it continuously and acts the first time it turns true,
+   * which is a different quantity: measured over 5% vs 6%, realized regret
+   * came out at 2.59% of the best rate against the 1% the threshold reads
+   * like it promises. This is optional stopping, and it is the same effect
+   * Loecher (2021), doi:10.3389/frai.2021.715690, documents for bandits. A
+   * rule that keeps its guarantee under repeated evaluation has to be built
+   * for it: Johari, Koomen, Pekelis & Walsh (2022), Always Valid Inference:
+   * Continuous Monitoring of A/B Tests, Operations Research 70(3),
+   * doi:10.1287/opre.2021.2135.
+   *
+   * So read canStop as "the risk is small right now", not as a bound that
+   * survives watching. The wording in decisionLine says the same.
+   */
   canStop: boolean;
   /** Posterior mean rate per arm, which is what the leader is judged on. */
   rates: number[];
@@ -126,6 +143,49 @@ export function analyzeOutcomes(
 
 /** Below this, "the risk is small" only means "there is no data yet". */
 export const MIN_PULLS_TO_CALL = 100;
+
+/**
+ * How far the best arm's P(best) must clear the runner-up's before anyone is
+ * called a leader.
+ *
+ * Without this, two genuinely equal arms produce a confident-sounding verdict:
+ * simulated at 5% vs 5% under continuous monitoring, canStop fired in 109 of
+ * 150 runs and named the "wrong" arm in 54 of them. Realized regret in those
+ * runs is exactly zero, which is expected loss doing its job (with equal arms
+ * either choice is fine), but "X leads" asserts a finding that does not exist,
+ * and the people reading it are marketers.
+ *
+ * A gap this small means the posteriors overlap too much to separate, so the
+ * honest sentence is that there is no difference to find.
+ */
+export const MIN_PROBABILITY_GAP_TO_NAME_LEADER = 0.1;
+
+/**
+ * Pulls a single context bucket needs before it is allowed to name a winner.
+ *
+ * summarizeBuckets runs an independent analysis per bucket, so every bucket is
+ * another chance to see a difference that is not there, and nothing controls
+ * the family-wise rate. Measured with every segment and every variant given an
+ * IDENTICAL 5% rate, so no real winner exists anywhere:
+ *
+ *   4 segments x 2 variants   30.7% of runs show a bucket at P(best) >= 95%
+ *   8 segments x 2 variants   52.7%
+ *   12 segments x 3 variants  20.0%
+ *
+ * The 8x2 line is a bluestars newsletter with the BSR8 pack: more than half of
+ * null runs would display a confident per-segment winner. Since "a different
+ * winner per audience" is the product's headline claim, a false one is the
+ * feature appearing to work when it is not.
+ *
+ * This gate is the cheap half of the fix, and it is the same idea as
+ * MIN_PULLS_TO_CALL one level down: below it a bucket still reports its counts,
+ * it just does not get to claim a leader. It reduces the exposure; it does not
+ * make the per-bucket analysis multiplicity-aware. The real fix is to report
+ * the joint model's posterior per segment, shrunk toward the global effect,
+ * instead of a fresh independent analysis of that bucket's raw counts. See the
+ * partial-pooling follow-up issue.
+ */
+export const MIN_BUCKET_PULLS_TO_CALL = 200;
 
 /**
  * Rolls per-cell outcomes up to one slot's variants: pulls and

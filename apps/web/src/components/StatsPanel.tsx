@@ -425,7 +425,18 @@ export function StatsPanel({
                             <Tick>{nf.format(bucket.conversions)}</Tick>
                           </td>
                           <td className="py-2 pl-4 font-sans">
-                            {bucket.leader}
+                            {/*
+                             * A bucket under the exposure gate has no leader
+                             * to show, and a blank cell would read as a bug.
+                             * Its counts are still worth seeing; its "winner"
+                             * is not, because with enough thin segments one of
+                             * them always looks like a winner.
+                             */}
+                            {bucket.leader ?? (
+                              <span className="text-muted-foreground">
+                                too few to call
+                              </span>
+                            )}
                           </td>
                           <td className="py-2 text-right">
                             <Tick>{pct(bucket.leaderRate)}</Tick>

@@ -81,17 +81,20 @@ function payload(overrides: Partial<TestStats> = {}): TestStats {
       ]
     },
     buckets: {
+      // Sized past MIN_BUCKET_PULLS_TO_CALL on purpose: below it a bucket is
+      // reported without a leader, so a smaller fixture would be testing the
+      // gate rather than the labeling this case is about.
       ["a".repeat(64)]: {
-        pulls: [10, 30],
-        conversions: [1, 12],
+        pulls: [100, 300],
+        conversions: [10, 120],
         label: "country=nl"
       },
-      ["b".repeat(64)]: { pulls: [20, 10], conversions: [4, 0] }
+      ["b".repeat(64)]: { pulls: [200, 100], conversions: [40, 0] }
     },
     bySignal: {
       country: {
-        nl: { pulls: 40, conversions: 13 },
-        de: { pulls: 30, conversions: 4 }
+        nl: { pulls: 400, conversions: 130 },
+        de: { pulls: 300, conversions: 40 }
       }
     },
     perSource: { ["c".repeat(64)]: 90, ["d".repeat(64)]: 30 },
@@ -142,13 +145,31 @@ describe("derived analytics", () => {
 
   it("finds each bucket's own winner, labeled or not", () => {
     const { top, hidden } = summarizeBuckets(payload());
-    // Sorted by pulls: the nl bucket (40) ahead of the opaque one (30).
+    // Sorted by pulls: the nl bucket (400) ahead of the opaque one (300).
     expect(top[0].name).toBe("country=nl");
     expect(top[0].leader).toBe("variant");
     // The opaque bucket leans the OTHER way: control converts there.
     expect(top[1].labeled).toBe(false);
     expect(top[1].leader).toBe("control");
     expect(hidden).toBe(0);
+  });
+
+  it("reports a thin bucket's counts but refuses to call a winner in it", () => {
+    // The measured reason: with every segment and variant on an identical
+    // rate, 52.7% of 8x2 runs still showed a bucket at P(best) >= 95%.
+    const thin = payload();
+    thin.buckets = {
+      ["c".repeat(64)]: {
+        pulls: [20, 20],
+        conversions: [0, 6],
+        label: "country=be"
+      }
+    };
+    const { top } = summarizeBuckets(thin);
+    expect(top[0].pulls).toBe(40);
+    expect(top[0].conversions).toBe(6);
+    expect(top[0].leader).toBeNull();
+    expect(top[0].probabilityBest).toBeNull();
   });
 
   it("spends the posterior work only on the buckets it will show", () => {
