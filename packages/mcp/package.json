@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/mcp",
-  "version": "0.1.0-0",
+  "version": "0.1.0",
   "description": "MCP server for LiveVariant: build, inspect and read bandit-driven A/B tests from Claude, ChatGPT, Copilot or any MCP client",
   "license": "AGPL-3.0",
   "repository": {
@@ -33,7 +33,7 @@
     "livevariant-mcp": "./dist/main.js"
   },
   "dependencies": {
-    "@livevariant/tools": "0.1.0-0",
+    "@livevariant/tools": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "files": [
