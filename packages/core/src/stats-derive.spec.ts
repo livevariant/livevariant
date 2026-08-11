@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { analyzeOutcomes } from "./decide.js";
-import { decisionLine, summarizeBuckets } from "./stats-derive.js";
+import {
+  analyzeSlots,
+  decisionLine,
+  summarizeBuckets
+} from "./stats-derive.js";
 import type { TestStats } from "./stats.js";
 
 /**
@@ -121,4 +125,56 @@ function toArms(stats: TestStats) {
     pulls: c.pulls,
     conversions: c.conversions
   }));
+}
+
+describe("thin exposure", () => {
+  it("marks a starved variant, because its reported rate reads low", () => {
+    // Measured at 5% vs 10%: the losing arm's rate came out 10.8% below its
+    // own true value while the winner's was unbiased. The bandit is right to
+    // starve it; the dashboard is wrong to present the result as a
+    // measurement.
+    const [slot] = analyzeSlots(
+      statsWithSlot([
+        { name: "a", pulls: 1400, conversions: 140 },
+        { name: "b", pulls: 60, conversions: 2 }
+      ])
+    );
+    expect(slot.variants[0].thinExposure).toBe(false);
+    expect(slot.variants[1].thinExposure).toBe(true);
+  });
+
+  it("does not mark a variant that is merely behind", () => {
+    const [slot] = analyzeSlots(
+      statsWithSlot([
+        { name: "a", pulls: 800, conversions: 80 },
+        { name: "b", pulls: 700, conversions: 40 }
+      ])
+    );
+    expect(slot.variants.every(v => !v.thinExposure)).toBe(true);
+  });
+
+  it("calls an empty slot empty rather than thin", () => {
+    const [slot] = analyzeSlots(
+      statsWithSlot([
+        { name: "a", pulls: 0, conversions: 0 },
+        { name: "b", pulls: 0, conversions: 0 }
+      ])
+    );
+    expect(slot.variants.every(v => !v.thinExposure)).toBe(true);
+  });
+});
+
+function statsWithSlot(
+  variants: Array<{ name: string; pulls: number; conversions: number }>
+): TestStats {
+  return {
+    ...statsFor(variants.map(v => ({ choice: [v.name], ...v }))),
+    slots: {
+      hero: variants.map(v => ({
+        ...v,
+        rewardTotal: v.conversions,
+        conversionRate: v.pulls > 0 ? v.conversions / v.pulls : null
+      }))
+    }
+  } as unknown as TestStats;
 }

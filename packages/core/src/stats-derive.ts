@@ -13,6 +13,7 @@ import {
   MIN_BUCKET_PULLS_TO_CALL,
   MIN_PROBABILITY_GAP_TO_NAME_LEADER,
   MIN_PULLS_TO_CALL,
+  THIN_EXPOSURE_SHARE,
   type ArmOutcome,
   type DecisionAnalysis
 } from "./decide.js";
@@ -47,6 +48,13 @@ export interface SlotAnalysis {
     rate: number | null;
     interval: [number, number];
     probabilityBest: number;
+    /**
+     * True when this variant has been starved hard enough that its reported
+     * rate reads low and its interval is not what it looks like. See
+     * THIN_EXPOSURE_SHARE. A surface that renders `rate` or `interval` should
+     * say so rather than presenting them as a measurement.
+     */
+    thinExposure: boolean;
   }>;
   leader: number;
   canStop: boolean;
@@ -70,7 +78,15 @@ export function analyzeSlots(stats: TestStats): SlotAnalysis[] {
         share: slotPulls > 0 ? v.pulls / slotPulls : 0,
         rate: v.conversionRate,
         interval: wilson95(v.conversions, v.pulls),
-        probabilityBest: analysis.probabilities[i] ?? 0
+        probabilityBest: analysis.probabilities[i] ?? 0,
+        // Relative to EVEN allocation, not to a fixed fraction: with two
+        // variants a quarter-of-even share is 12.5%, with four it is 6.25%,
+        // and in both cases it means the same thing about how starved the arm
+        // is. A slot nobody has served yet is not thin, it is empty.
+        thinExposure:
+          slotPulls > 0 &&
+          variants.length > 1 &&
+          v.pulls / slotPulls < THIN_EXPOSURE_SHARE / variants.length
       })),
       leader: analysis.leader,
       canStop: analysis.canStop,

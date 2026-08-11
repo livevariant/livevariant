@@ -151,6 +151,7 @@ export {
 } from "./exclusions.js";
 export {
   MIN_PULLS_TO_CALL,
+  THIN_EXPOSURE_SHARE,
   analyzeOutcomes,
   marginalOutcomes,
   type ArmOutcome,

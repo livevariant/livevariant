@@ -188,6 +188,32 @@ export const MIN_PROBABILITY_GAP_TO_NAME_LEADER = 0.1;
 export const MIN_BUCKET_PULLS_TO_CALL = 200;
 
 /**
+ * Below this share of a slot's traffic, a variant's reported rate is biased
+ * low enough to say so.
+ *
+ * Thompson sampling starves the loser, which is the whole point, and that
+ * makes the sample mean a biased estimator of the true rate: an arm with an
+ * unlucky start is sampled less and few observations arrive to correct it.
+ * Measured over 300 replications x 1500 visitors at 5% vs 10%, the losing
+ * arm's reported rate came out **10.8% below its own true value** (-0.00541
+ * on 0.05) while the winner's was unbiased, and Wilson coverage drifted to
+ * 0.940-0.947 against a nominal 0.95. Under the null both arms read low.
+ *
+ * So a customer comparing "4.5% vs 10%" is reading a gap that is really 5%
+ * vs 10%. Nie, Tian, Taylor & Zou (2018, AISTATS) prove the negative bias for
+ * optimism-driven algorithms including Thompson sampling; Shin, Ramdas &
+ * Rinaldo (2019, NeurIPS) give the sign per arm.
+ *
+ * A quarter of even allocation is the threshold: at two variants that is a
+ * 12.5% share, by which point the arm is being visibly starved rather than
+ * merely behind. This does not correct anything. It marks the number so it is
+ * not read as a fixed-design estimate, which is the cheap half of the fix;
+ * the other half is an adaptively-weighted estimator (Hadad et al. 2021,
+ * doi:10.1073/pnas.2014602118) over the event log.
+ */
+export const THIN_EXPOSURE_SHARE = 0.25;
+
+/**
  * Rolls per-cell outcomes up to one slot's variants: pulls and
  * conversions of every cell that used the variant. What "how is hero B
  * doing overall" means for a multi-slot test.
