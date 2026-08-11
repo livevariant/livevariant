@@ -25,6 +25,7 @@ import {
   validCell,
   variantName,
   enumerateBucketLabels,
+  labelBucketsFromSignals,
   type AssignmentRecord,
   type CloudflareGeo,
   type CtxDim,
@@ -603,8 +604,18 @@ export async function buildStats(
     // Readable names for the opaque bucket keys, recovered by hashing
     // every enumerable context and matching; never guessed.
     const bucketNames = await enumerateBucketLabels(params.testId, ctxDims);
+    // Then the same thing from the other end, for the dimensions the
+    // enumeration cannot reach: a signal-filled dimension rarely declares
+    // its `values`, so its buckets would stay hashed forever while the very
+    // same values print readable under audience signals. Both paths only
+    // attach a label the hash agrees with.
+    const fromSignals = await labelBucketsFromSignals(
+      params.testId,
+      ctxDims,
+      kept.applied
+    );
     for (const [key, bucket] of Object.entries(buckets)) {
-      const label = bucketNames.get(key);
+      const label = bucketNames.get(key) ?? fromSignals.get(key);
       if (label !== undefined) {
         bucket.label = label;
       }
