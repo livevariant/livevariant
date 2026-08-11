@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS livevariant_assignments (
   dim integer NOT NULL,
   feat_idx integer[] NOT NULL,
   ctx_key text,
+  propensity double precision,
   reward_total double precision NOT NULL DEFAULT 0,
   sdk text,
   first_seen bigint NOT NULL,
@@ -28,6 +29,14 @@ CREATE TABLE IF NOT EXISTS livevariant_assignments (
   signals jsonb,
   CONSTRAINT livevariant_assignments_pkey PRIMARY KEY (test_id, id_hash)
 );
+
+-- Columns added after a table already shipped. IF NOT EXISTS keeps this
+-- whole script the one idempotent setup path: a database created yesterday
+-- gets the column here, a fresh one already has it from the CREATE above,
+-- and neither errors. Without this line, a deployment that upgraded the
+-- package but not the schema fails on every INSERT, which is an outage,
+-- not a migration.
+ALTER TABLE livevariant_assignments ADD COLUMN IF NOT EXISTS propensity double precision;
 
 CREATE TABLE IF NOT EXISTS livevariant_counters (
   test_id text NOT NULL,

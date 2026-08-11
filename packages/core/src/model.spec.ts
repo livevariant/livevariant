@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { encodeCell } from "./cells.js";
 import {
+  cellFeatures,
   ctxCardinality,
   dimForShape,
   MAX_DIM,
@@ -347,5 +348,62 @@ describe("dimForShape and context cardinality", () => {
     expect(ctxCardinality({ key: "s", from: "country" })).toBe(200);
     // Free-form: no list, no signal, so the size is genuinely unknown.
     expect(ctxCardinality({ key: "s" })).toBe(8);
+  });
+});
+
+describe("propensity at serve time", () => {
+  /** A [2] model trained hard toward variant 1. */
+  function lopsided(): DerivedState {
+    const state = newDerivedState({ slotSizes: [2], dim: dimForShape([2]) });
+    for (let i = 0; i < 200; i++) {
+      const cell = i % 5 === 0 ? 0 : 1;
+      const feats = cellFeatures(state.dim, [2], cell, []);
+      observe(state.model, feats);
+      if (cell === 1) {
+        reward(state.model, feats);
+      }
+    }
+    return state;
+  }
+
+  it("does not move the choice: the serve is still the single first draw", () => {
+    // Same RNG stream in, same cell out, with and without the estimate. The
+    // extra draws happen after the argmax, so the one behaviour the audit
+    // said must not change cannot have.
+    const state = lopsided();
+    for (const seed of [1, 2, 3, 4, 5, 0xbeef]) {
+      const plain = choose(state, [], mulberry32(seed));
+      const priced = choose(state, [], mulberry32(seed), undefined, 64);
+      expect(priced.cell).toBe(plain.cell);
+      expect(plain.propensity).toBeNull();
+      expect(priced.propensity).toBeGreaterThan(0);
+      expect(priced.propensity).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("prices a rare serve as rare, which is what the estimator divides by", () => {
+    // The record's whole purpose: when the starved arm does get served, its
+    // propensity says how unlikely that was, so an inverse-weighted estimate
+    // can give that observation the weight the allocation denied it.
+    const state = lopsided();
+    const byCell: Record<number, number[]> = { 0: [], 1: [] };
+    for (let seed = 0; seed < 400; seed++) {
+      const { cell, propensity } = choose(
+        state,
+        [],
+        mulberry32(seed),
+        undefined,
+        64
+      );
+      byCell[cell].push(propensity ?? 0);
+    }
+    const mean = (xs: number[]) =>
+      xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
+    // The favourite is served most of the time and knows it.
+    expect(byCell[1].length).toBeGreaterThan(byCell[0].length * 3);
+    expect(mean(byCell[1])).toBeGreaterThan(0.7);
+    // The underdog's serves carry a small propensity, never zero.
+    expect(mean(byCell[0])).toBeLessThan(0.5);
+    expect(Math.min(...byCell[0])).toBeGreaterThan(0);
   });
 });

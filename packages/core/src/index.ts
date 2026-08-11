@@ -37,6 +37,8 @@ export {
   MODEL_NOISE,
   cellFeatures,
   chooseCell,
+  chooseCellWithPropensity,
+  PROPENSITY_DRAWS,
   cholesky,
   ctxCardinality,
   dimForShape,

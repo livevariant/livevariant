@@ -327,6 +327,55 @@ export function chooseCell(
   rng: Rng,
   noise: number = MODEL_NOISE
 ): number {
+  return chooseCellWithPropensity(model, slotSizes, ctxFeatIdx, rng, noise, 0)
+    .cell;
+}
+
+/**
+ * How many extra posterior draws estimate the served cell's propensity.
+ *
+ * The propensity is P(this cell wins a fresh Thompson draw) at the moment of
+ * serving, which is exactly the assignment probability an adaptively-weighted
+ * estimator (Hadad et al. 2021, doi:10.1073/pnas.2014602118) needs per
+ * record, and the one thing a replay cannot recover exactly: stored featIdx
+ * can lose context indices to collisions, so it is written down at the only
+ * moment it is cheap and exact.
+ *
+ * Cheap because the draws reuse the serve's own Cholesky factor: the factor
+ * is the O(dim^3) part, each extra draw is O(dim^2 + cells * features). At 64
+ * draws and the dim=256 cap that adds roughly a quarter of the factor's cost;
+ * at the dim 16-64 most tests run at, it is noise.
+ *
+ * 64 draws bounds the estimate's own error at about +-6 percentage points
+ * (binomial se, worst case p=0.5), which is enough for inverse-propensity
+ * weighting once clipped; the estimator literature clips small propensities
+ * anyway, so precision past that buys little.
+ */
+export const PROPENSITY_DRAWS = 64;
+
+/**
+ * One Thompson serve, plus an estimate of how likely that serve was.
+ *
+ * The choice itself is bit-for-bit the single-draw serve it always was: same
+ * factor, same draw, same argmax, in the same order, so a given RNG stream
+ * yields the same cell as before this existed. The extra draws happen AFTER
+ * the choice and only when asked for (`draws > 0`), which is also why
+ * `chooseCell` above stays the zero-draw wrapper: nothing that only wants a
+ * choice pays for an estimate, and no existing behaviour moves.
+ *
+ * The estimate is add-one smoothed, (wins + 1) / (draws + 1), counting the
+ * serving draw itself as the +1 win it literally was: the served cell DID win
+ * one draw. That keeps a propensity strictly positive, which the
+ * inverse-weighting it exists for divides by.
+ */
+export function chooseCellWithPropensity(
+  model: JointModel,
+  slotSizes: number[],
+  ctxFeatIdx: number[],
+  rng: Rng,
+  noise: number = MODEL_NOISE,
+  draws: number = PROPENSITY_DRAWS
+): { cell: number; propensity: number | null } {
   // The Cholesky is O(dim^3) per serve: ~16M flops at the dim=256 cap,
   // single-digit milliseconds, and most tests sit at 16-64 where it is
   // negligible. Caching the FACTOR was considered and rejected: every
@@ -337,30 +386,52 @@ export function chooseCell(
   const dim = model.b.length;
   const thetaHat = matVec(model.aInv, model.b);
   const chol = cholesky(model.aInv);
-  const z = Array.from({ length: dim }, () => sampleGaussian(rng));
-  const theta = new Array<number>(dim);
-  for (let i = 0; i < dim; i++) {
-    let noiseTerm = 0;
-    for (let j = 0; j <= i; j++) {
-      noiseTerm += chol[i][j] * z[j];
+  const cells = cellCount(slotSizes);
+
+  // Feature sets are loop-invariant across draws; computing them once turns
+  // each extra draw into pure arithmetic.
+  const features = Array.from({ length: cells }, (_, cell) =>
+    cellFeatures(dim, slotSizes, cell, ctxFeatIdx)
+  );
+
+  const drawBest = (): number => {
+    const z = Array.from({ length: dim }, () => sampleGaussian(rng));
+    const theta = new Array<number>(dim);
+    for (let i = 0; i < dim; i++) {
+      let noiseTerm = 0;
+      for (let j = 0; j <= i; j++) {
+        noiseTerm += chol[i][j] * z[j];
+      }
+      theta[i] = thetaHat[i] + noise * noiseTerm;
     }
-    theta[i] = thetaHat[i] + noise * noiseTerm;
+    let best = 0;
+    let bestScore = -Infinity;
+    for (let cell = 0; cell < cells; cell++) {
+      let score = 0;
+      for (const f of features[cell]) {
+        score += theta[f];
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = cell;
+      }
+    }
+    return best;
+  };
+
+  // The serve: one draw, exactly as ever.
+  const cell = drawBest();
+  if (draws <= 0) {
+    return { cell, propensity: null };
   }
 
-  const cells = cellCount(slotSizes);
-  let best = 0;
-  let bestScore = -Infinity;
-  for (let cell = 0; cell < cells; cell++) {
-    let score = 0;
-    for (const f of cellFeatures(dim, slotSizes, cell, ctxFeatIdx)) {
-      score += theta[f];
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      best = cell;
+  let wins = 0;
+  for (let d = 0; d < draws; d++) {
+    if (drawBest() === cell) {
+      wins += 1;
     }
   }
-  return best;
+  return { cell, propensity: (wins + 1) / (draws + 1) };
 }
 
 // ------------------------------------------------------- matrix utilities

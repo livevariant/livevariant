@@ -3,6 +3,7 @@ import {
   bucketKey,
   cellCount,
   choose,
+  PROPENSITY_DRAWS,
   composeBucketKey,
   decodeCell,
   deriveAutoCtx,
@@ -323,11 +324,15 @@ export class TestService implements TestBackend {
     }
 
     const state = await this.loadState(params);
-    const { cell, featIdx } = choose(
+    // Propensity is only worth computing when there is a record to carry it:
+    // anonymous traffic is never rewarded, so its serve probability has no
+    // estimator to feed.
+    const { cell, featIdx, propensity } = choose(
       state,
       identity.featIdx,
       this.rng,
-      params.noise
+      params.noise,
+      idHash ? PROPENSITY_DRAWS : 0
     );
 
     if (!idHash) {
@@ -345,6 +350,7 @@ export class TestService implements TestBackend {
       dim: params.dim,
       featIdx,
       ctxKey: identity.ctxKey,
+      propensity,
       rewardTotal: 0,
       firstSeen: Date.now(),
       srcHash: identity.srcHash ?? null,
