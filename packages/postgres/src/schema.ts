@@ -50,6 +50,13 @@ export const livevariantAssignments = pgTable(
     dim: integer("dim").notNull(),
     featIdx: integer("feat_idx").array().notNull(),
     ctxKey: text("ctx_key"),
+    /**
+     * P(this cell wins a fresh draw) at serve time, add-one smoothed. Null on
+     * records from before the column existed; nothing reads it yet. See
+     * AssignmentRecord.propensity in core for why it is stored rather than
+     * reconstructed.
+     */
+    propensity: doublePrecision("propensity"),
     rewardTotal: doublePrecision("reward_total").notNull().default(0),
     sdk: text("sdk"),
     /** ms epoch, and the replay order for recompute. */

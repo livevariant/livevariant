@@ -3,10 +3,30 @@ import type { VariantPrior } from "./model.js";
 import { slotEntries, type TestConfig } from "./schema.js";
 
 /**
- * LLM warm-start priors. The literature's one hard lesson (warm-start
- * bandits, Shivaswamy & Joachims 2012): priors must be weak enough for
- * real data to override, so every prior is capped to priorStrengthCap
- * pseudo-observations per variant before it touches the model.
+ * LLM warm-start priors.
+ *
+ * Warm-starting a bandit with history is sound and it pays: Shivaswamy &
+ * Joachims (2012), Multi-armed Bandit Problems with History (AISTATS), show
+ * that a logarithmic amount of historic data takes regret from logarithmic to
+ * constant, and that regret tends to zero as the history grows. That is the
+ * reason to have priors at all.
+ *
+ * It is NOT the reason for the cap, and this comment used to claim it was.
+ * That result holds under an explicit assumption the paper states plainly:
+ * "The historic rewards for each arm are assumed to be drawn independently
+ * from the same distributions as the non-historic rewards." A rate an LLM
+ * guessed is not a draw from the arm's reward distribution, so we are outside
+ * the theorem, and what governs us instead is prior MISSPECIFICATION: Loecher
+ * (2021), The Perils of Misspecified Priors and Optional Stopping in
+ * Multi-Armed Bandits, Frontiers in Artificial Intelligence 4:715690,
+ * doi:10.3389/frai.2021.715690. Hence priorStrengthCap: every prior is capped
+ * to that many pseudo-observations per variant so real data can override a
+ * guess that is simply wrong.
+ *
+ * The cap's cost is measured rather than assumed. An adversarial prior sitting
+ * at the cap (pointed at the wrong variant, mean 0.90, strength 50) delayed
+ * finding the true winner from ~370 visitors to ~472, and never once prevented
+ * recovery across 30 runs.
  *
  * Two kinds, and the difference is which feature they land on. A plain
  * prior is a belief about a variant for everybody, so it goes on the

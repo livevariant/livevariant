@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { encodeCell } from "./cells.js";
-import { dimForShape, observe, reward } from "./model.js";
+import {
+  cellFeatures,
+  ctxCardinality,
+  dimForShape,
+  MAX_DIM,
+  observe,
+  reward,
+  wantedDimForShape
+} from "./model.js";
 import { mulberry32, type Rng } from "./rng.js";
 import {
   choose,
@@ -310,5 +318,92 @@ describe("warm-start priors", () => {
       6000
     );
     expect(misled.lateBestShare).toBeGreaterThan(0.7);
+  });
+});
+
+describe("dimForShape and context cardinality", () => {
+  it("charges for how many values a dimension can take, not just that it exists", () => {
+    // The bug this replaces: a flat per-dimension cost meant `country` and a
+    // two-value flag bought the same model. Measured consequence with 200
+    // countries each having a different best variant: 36.3% correct against a
+    // 33.3% chance baseline, i.e. no learning at all.
+    const few = dimForShape([3], [{ key: "seg", values: ["a", "b"] }]);
+    const many = dimForShape([3], [{ key: "country", from: "country" }]);
+    expect(many).toBeGreaterThan(few);
+  });
+
+  it("reports what a context would really need, uncapped", () => {
+    // dimForShape clamps at MAX_DIM and so cannot say "this does not fit".
+    // wantedDimForShape can, which is what a config-time refusal would read.
+    expect(
+      wantedDimForShape([3], [{ key: "c", from: "country" }])
+    ).toBeGreaterThan(MAX_DIM);
+    expect(
+      wantedDimForShape([3], [{ key: "c", from: "continent" }])
+    ).toBeLessThanOrEqual(MAX_DIM);
+  });
+
+  it("knows a declared list exactly and falls back conservatively", () => {
+    expect(ctxCardinality({ key: "s", values: ["a", "b", "c"] })).toBe(3);
+    expect(ctxCardinality({ key: "s", from: "country" })).toBe(200);
+    // Free-form: no list, no signal, so the size is genuinely unknown.
+    expect(ctxCardinality({ key: "s" })).toBe(8);
+  });
+});
+
+describe("propensity at serve time", () => {
+  /** A [2] model trained hard toward variant 1. */
+  function lopsided(): DerivedState {
+    const state = newDerivedState({ slotSizes: [2], dim: dimForShape([2]) });
+    for (let i = 0; i < 200; i++) {
+      const cell = i % 5 === 0 ? 0 : 1;
+      const feats = cellFeatures(state.dim, [2], cell, []);
+      observe(state.model, feats);
+      if (cell === 1) {
+        reward(state.model, feats);
+      }
+    }
+    return state;
+  }
+
+  it("does not move the choice: the serve is still the single first draw", () => {
+    // Same RNG stream in, same cell out, with and without the estimate. The
+    // extra draws happen after the argmax, so the one behaviour the audit
+    // said must not change cannot have.
+    const state = lopsided();
+    for (const seed of [1, 2, 3, 4, 5, 0xbeef]) {
+      const plain = choose(state, [], mulberry32(seed));
+      const priced = choose(state, [], mulberry32(seed), undefined, 64);
+      expect(priced.cell).toBe(plain.cell);
+      expect(plain.propensity).toBeNull();
+      expect(priced.propensity).toBeGreaterThan(0);
+      expect(priced.propensity).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("prices a rare serve as rare, which is what the estimator divides by", () => {
+    // The record's whole purpose: when the starved arm does get served, its
+    // propensity says how unlikely that was, so an inverse-weighted estimate
+    // can give that observation the weight the allocation denied it.
+    const state = lopsided();
+    const byCell: Record<number, number[]> = { 0: [], 1: [] };
+    for (let seed = 0; seed < 400; seed++) {
+      const { cell, propensity } = choose(
+        state,
+        [],
+        mulberry32(seed),
+        undefined,
+        64
+      );
+      byCell[cell].push(propensity ?? 0);
+    }
+    const mean = (xs: number[]) =>
+      xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
+    // The favourite is served most of the time and knows it.
+    expect(byCell[1].length).toBeGreaterThan(byCell[0].length * 3);
+    expect(mean(byCell[1])).toBeGreaterThan(0.7);
+    // The underdog's serves carry a small propensity, never zero.
+    expect(mean(byCell[0])).toBeLessThan(0.5);
+    expect(Math.min(...byCell[0])).toBeGreaterThan(0);
   });
 });

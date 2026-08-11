@@ -3,6 +3,7 @@ import {
   bucketKey,
   cellCount,
   choose,
+  PROPENSITY_DRAWS,
   composeBucketKey,
   decodeCell,
   deriveAutoCtx,
@@ -75,7 +76,11 @@ export interface ServingParams {
   testId: string;
   /** Variant counts per slot, canonical (sorted-key) order. */
   slotSizes: number[];
-  /** Model dimension; dimForShape(slotSizes, ctxDims) on both ends. */
+  /**
+   * Model dimension; the SAME sizing on both ends, or the page and the server
+   * hash features into different spaces and neither can read the other's
+   * records.
+   */
   dim: number;
   priors?: VariantPrior[];
   noise?: number;
@@ -92,7 +97,14 @@ export interface ServingParams {
 export function paramsFromConfig(decoded: DecodedConfig): ServingParams {
   const { config, testId } = decoded;
   const sizes = configSlotSizes(config);
-  const dim = dimForShape(sizes, config.ctx?.dims.length ?? 0);
+  // Cardinality-aware sizing, and this REPLACED a flat per-dimension estimate
+  // rather than being added beside it. dim is recomputed from the config on
+  // every serve while featIdx is hashed modulo it and stored per record, so a
+  // test that was serving under the old sizing has a model that now misreads
+  // its own history. That was a deliberate call (livevariant#55): nothing was
+  // running on it, and carrying a sizing version forever to protect tests that
+  // do not exist is machinery nobody would ever set.
+  const dim = dimForShape(sizes, config.ctx?.dims ?? []);
   return {
     testId,
     slotSizes: sizes,
@@ -312,11 +324,15 @@ export class TestService implements TestBackend {
     }
 
     const state = await this.loadState(params);
-    const { cell, featIdx } = choose(
+    // Propensity is only worth computing when there is a record to carry it:
+    // anonymous traffic is never rewarded, so its serve probability has no
+    // estimator to feed.
+    const { cell, featIdx, propensity } = choose(
       state,
       identity.featIdx,
       this.rng,
-      params.noise
+      params.noise,
+      idHash ? PROPENSITY_DRAWS : 0
     );
 
     if (!idHash) {
@@ -334,6 +350,7 @@ export class TestService implements TestBackend {
       dim: params.dim,
       featIdx,
       ctxKey: identity.ctxKey,
+      propensity,
       rewardTotal: 0,
       firstSeen: Date.now(),
       srcHash: identity.srcHash ?? null,

@@ -33,15 +33,21 @@ export {
   validCell
 } from "./cells.js";
 export {
+  MAX_DIM,
   MODEL_NOISE,
   cellFeatures,
   chooseCell,
+  chooseCellWithPropensity,
+  PROPENSITY_DRAWS,
   cholesky,
+  ctxCardinality,
   dimForShape,
   newModel,
   observe,
   reward,
   variantFeature,
+  wantedDimForShape,
+  type CtxCardinality,
   type JointModel,
   type VariantPrior
 } from "./model.js";
@@ -146,7 +152,9 @@ export {
   type ExclusionResult
 } from "./exclusions.js";
 export {
+  BUCKET_POOLING_STRENGTH,
   MIN_PULLS_TO_CALL,
+  THIN_EXPOSURE_SHARE,
   analyzeOutcomes,
   marginalOutcomes,
   type ArmOutcome,

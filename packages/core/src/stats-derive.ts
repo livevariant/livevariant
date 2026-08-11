@@ -10,7 +10,11 @@
  */
 import {
   analyzeOutcomes,
+  BUCKET_POOLING_STRENGTH,
+  MIN_BUCKET_PULLS_TO_CALL,
+  MIN_PROBABILITY_GAP_TO_NAME_LEADER,
   MIN_PULLS_TO_CALL,
+  THIN_EXPOSURE_SHARE,
   type ArmOutcome,
   type DecisionAnalysis
 } from "./decide.js";
@@ -45,6 +49,13 @@ export interface SlotAnalysis {
     rate: number | null;
     interval: [number, number];
     probabilityBest: number;
+    /**
+     * True when this variant has been starved hard enough that its reported
+     * rate reads low and its interval is not what it looks like. See
+     * THIN_EXPOSURE_SHARE. A surface that renders `rate` or `interval` should
+     * say so rather than presenting them as a measurement.
+     */
+    thinExposure: boolean;
   }>;
   leader: number;
   canStop: boolean;
@@ -68,7 +79,15 @@ export function analyzeSlots(stats: TestStats): SlotAnalysis[] {
         share: slotPulls > 0 ? v.pulls / slotPulls : 0,
         rate: v.conversionRate,
         interval: wilson95(v.conversions, v.pulls),
-        probabilityBest: analysis.probabilities[i] ?? 0
+        probabilityBest: analysis.probabilities[i] ?? 0,
+        // Relative to EVEN allocation, not to a fixed fraction: with two
+        // variants a quarter-of-even share is 12.5%, with four it is 6.25%,
+        // and in both cases it means the same thing about how starved the arm
+        // is. A slot nobody has served yet is not thin, it is empty.
+        thinExposure:
+          slotPulls > 0 &&
+          variants.length > 1 &&
+          v.pulls / slotPulls < THIN_EXPOSURE_SHARE / variants.length
       })),
       leader: analysis.leader,
       canStop: analysis.canStop,
@@ -101,16 +120,83 @@ export function decisionLine(
   }
   const leader = stats.combinations[analysis.leader];
   const name = leader ? leader.choice.join(" + ") : "none";
-  if (analysis.canStop) {
+
+  // Evidence FIRST, and the order is the whole point. Two arms with three
+  // pulls each have overlapping posteriors for the obvious reason, and the tie
+  // test cannot tell "measured, and equal" from "nobody has looked yet". Put
+  // the tie branch above this and a brand-new test reads "either is safe to
+  // ship", which is the same false confidence this task set out to remove,
+  // moved one line down.
+  const thin = !stats.combinations.some(c => c.pulls >= MIN_PULLS_TO_CALL);
+  if (thin) {
+    return `${name} leads on thin data; too early to mean much.`;
+  }
+
+  // Two arms this close are not separable, and saying one "leads" invents a
+  // finding. See MIN_PROBABILITY_GAP_TO_NAME_LEADER: with genuinely equal
+  // arms the stopping rule still fires, and it names the arm that happened to
+  // run lucky roughly half the time.
+  const tied = tiedAtTop(stats, analysis);
+  if (tied) {
     return (
-      `${name} leads; stopping now risks under 1% of its rate. ` +
+      `No difference detected between ${tied[0]} and ${tied[1]} — ` +
+      "either is safe to ship. The test keeps adapting either way."
+    );
+  }
+
+  if (analysis.canStop) {
+    // Deliberately no longer promises "under 1% of its rate". The threshold
+    // bounds expected loss at ONE look, and a dashboard polls until it fires;
+    // measured that way the small-lift case realized 2.59%. See canStop's doc
+    // comment in decide.ts.
+    return (
+      `${name} leads and the remaining risk looks small. ` +
       "The test keeps adapting either way."
     );
   }
-  if (!stats.combinations.some(c => c.pulls >= MIN_PULLS_TO_CALL)) {
-    return `${name} leads on thin data; too early to mean much.`;
-  }
   return `${name} leads, but the gap could still flip.`;
+}
+
+/**
+ * The top two combinations when no one of them is distinguishable, by name.
+ *
+ * Ranked on P(best) rather than on the posterior mean, because that is the
+ * quantity the gap is defined over and the one the dashboard already shows.
+ *
+ * BOTH named combinations must clear MIN_PULLS_TO_CALL on their own. A tie is
+ * a claim about two arms, and overlapping posteriors can mean two different
+ * things: measured and equal, or one arm barely sampled and therefore wide
+ * enough to overlap anything. "Either is safe to ship" is only true in the
+ * first case, and the whole-test evidence check upstream cannot tell them
+ * apart, because it passes as soon as ANY combination has been seen enough.
+ * An arm still thin stays out of the tie and the line falls through to the
+ * ordinary leader wording, whose "could still flip" is the honest sentence
+ * for it.
+ */
+function tiedAtTop(
+  stats: TestStats,
+  analysis: DecisionAnalysis
+): [string, string] | null {
+  const ranked = analysis.probabilities
+    .map((probability, index) => ({ probability, index }))
+    .sort((a, b) => b.probability - a.probability);
+  if (ranked.length < 2) {
+    return null;
+  }
+  if (
+    ranked[0].probability - ranked[1].probability >=
+    MIN_PROBABILITY_GAP_TO_NAME_LEADER
+  ) {
+    return null;
+  }
+  const enoughEvidence = (index: number) =>
+    (stats.combinations[index]?.pulls ?? 0) >= MIN_PULLS_TO_CALL;
+  if (!enoughEvidence(ranked[0].index) || !enoughEvidence(ranked[1].index)) {
+    return null;
+  }
+  const nameOf = (index: number) =>
+    stats.combinations[index]?.choice.join(" + ") ?? "none";
+  return [nameOf(ranked[0].index), nameOf(ranked[1].index)];
 }
 
 export interface BucketSummary {
@@ -120,10 +206,24 @@ export interface BucketSummary {
   labeled: boolean;
   pulls: number;
   conversions: number;
-  /** The bucket's own leading combination, with its local verdict. */
-  leader: string;
+  /**
+   * The bucket's own leading combination, or null when the bucket has not
+   * been seen enough times to name one. Counts are still reported: a thin
+   * segment is worth showing, a thin segment's "winner" is not. See
+   * MIN_BUCKET_PULLS_TO_CALL.
+   */
+  leader: string | null;
+  /**
+   * The leader's PARTIALLY POOLED rate: the posterior mean under a prior of
+   * the whole test's rate for the same combination, at
+   * BUCKET_POOLING_STRENGTH pseudo-observations. Deliberately not the raw
+   * ratio of this bucket's counts. The raw counts are right beside it; the
+   * estimate is what the bucket's thin evidence justifies BELIEVING, which
+   * for a small bucket is mostly the global result.
+   */
   leaderRate: number | null;
-  probabilityBest: number;
+  /** P(leader is best IN THIS BUCKET), under the same pooled posterior. */
+  probabilityBest: number | null;
 }
 
 export interface BucketSummaries {
@@ -157,20 +257,41 @@ export function summarizeBuckets(
       pulls: cellPulls,
       conversions: bucket.conversions[cell] ?? 0
     }));
-    const analysis = analyzeOutcomes(arms, { draws: 4000 });
-    const leaderArm = arms[analysis.leader];
-    const combo = stats.combinations[analysis.leader];
-    return {
+    const conversions = arms.reduce((sum, arm) => sum + arm.conversions, 0);
+    const base = {
       key,
       name: bucket.label ?? `${key.slice(0, 8)}…`,
       labeled: bucket.label !== undefined,
       pulls,
-      conversions: arms.reduce((sum, arm) => sum + arm.conversions, 0),
+      conversions
+    };
+    // Thin buckets report what happened and stop there. Running the analysis
+    // anyway and hiding it would still be one more chance to see a winner
+    // that is not there; the whole point is that the claim is not made.
+    if (pulls < MIN_BUCKET_PULLS_TO_CALL) {
+      return { ...base, leader: null, leaderRate: null, probabilityBest: null };
+    }
+    // Partial pooling: each arm's prior is the whole test's rate for that
+    // same combination. Independent flat-prior analyses per bucket were the
+    // false-discovery machine the audit measured (52.7% of null runs at 8x2
+    // showed a confident segment winner); under this prior a bucket only
+    // contradicts the global result when its own data sustains it.
+    const analysis = analyzeOutcomes(arms, {
+      draws: 4000,
+      priors: arms.map((_, cell) => {
+        const combo = stats.combinations[cell];
+        const globalRate = combo
+          ? (1 + combo.conversions) / (2 + combo.pulls)
+          : 0.5;
+        return { mean: globalRate, strength: BUCKET_POOLING_STRENGTH };
+      })
+    });
+    const combo = stats.combinations[analysis.leader];
+    return {
+      ...base,
       leader: combo ? combo.choice.join(" + ") : "–",
-      leaderRate:
-        leaderArm && leaderArm.pulls > 0
-          ? leaderArm.conversions / leaderArm.pulls
-          : null,
+      // The pooled posterior mean, not the raw ratio: see BucketSummary.
+      leaderRate: analysis.rates[analysis.leader] ?? null,
       probabilityBest: analysis.probabilities[analysis.leader] ?? 0
     };
   });

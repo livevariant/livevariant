@@ -193,7 +193,22 @@ function SlotTable({ slot, multi }: { slot: SlotAnalysis; multi: boolean }) {
                 <Tick>{nf.format(variant.conversions)}</Tick>
               </td>
               <td className="py-2.5 text-right">
+                {/*
+                 * A starved arm's rate reads about a tenth low: Thompson
+                 * sampling stops sampling it, so an unlucky start never gets
+                 * corrected. The bandit is right to do that; the number is
+                 * not a measurement, and the asterisk says so rather than
+                 * letting it sit beside the winner's as an equal.
+                 */}
                 <Tick>{pct(variant.rate)}</Tick>
+                {variant.thinExposure && (
+                  <span
+                    className="ml-1 text-muted-foreground"
+                    title="Thin exposure: this variant is barely being served, so its rate reads low and the interval is not a fixed-design 95% CI."
+                  >
+                    *
+                  </span>
+                )}
               </td>
               <td className="py-2.5 pl-3">
                 <IntervalBar
@@ -210,6 +225,12 @@ function SlotTable({ slot, multi }: { slot: SlotAnalysis; multi: boolean }) {
           ))}
         </tbody>
       </table>
+      {slot.variants.some(v => v.thinExposure) && (
+        <p className="text-xs text-muted-foreground">
+          * barely served, so the rate reads low. Adaptive allocation trades
+          measurement precision for conversions on purpose.
+        </p>
+      )}
     </div>
   );
 }
@@ -425,7 +446,18 @@ export function StatsPanel({
                             <Tick>{nf.format(bucket.conversions)}</Tick>
                           </td>
                           <td className="py-2 pl-4 font-sans">
-                            {bucket.leader}
+                            {/*
+                             * A bucket under the exposure gate has no leader
+                             * to show, and a blank cell would read as a bug.
+                             * Its counts are still worth seeing; its "winner"
+                             * is not, because with enough thin segments one of
+                             * them always looks like a winner.
+                             */}
+                            {bucket.leader ?? (
+                              <span className="text-muted-foreground">
+                                too few to call
+                              </span>
+                            )}
                           </td>
                           <td className="py-2 text-right">
                             <Tick>{pct(bucket.leaderRate)}</Tick>
