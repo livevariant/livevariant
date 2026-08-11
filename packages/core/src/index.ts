@@ -94,6 +94,7 @@ export {
   deriveAutoCtx,
   deriveResolvedCtx,
   enumerateBucketLabels,
+  labelBucketsFromSignals,
   mergeFeatureIndices,
   externalIdHash,
   featureIndices,

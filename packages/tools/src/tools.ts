@@ -57,7 +57,12 @@ const contextDim = z.object({
     .optional()
     .describe(
       "Allowed values, when they are enumerable. Anything else is rejected " +
-        "at serving time, which is what stops a crafted URL inventing buckets."
+        "at serving time, which is what stops a crafted URL inventing " +
+        "buckets. It also makes the results readable: bucket keys are " +
+        "one-way hashes, and a declared list is what lets stats recover " +
+        '"country=nl" from one. Worth passing even for a `from` ' +
+        "dimension, and worth getting right the first time, since `ctx` is " +
+        "inside the test identity and adding values later starts a new test."
     ),
   from: signalEnum
     .optional()

@@ -2009,6 +2009,41 @@ describe("readable bucket labels", () => {
     expect(labels).toContain("country=nl");
     expect(labels.filter(l => l === undefined)).toHaveLength(1);
   });
+
+  it("names a signal-filled bucket that declared no values", async () => {
+    // The common shape, and the one that used to stay hashed forever:
+    // nobody writes out 250 country codes, so the enumeration has nothing
+    // to work from. The signal is on the record readable, so the label
+    // comes from there and is confirmed by rehashing it.
+    const { encoded } = await makeTest({
+      ctx: { dims: [{ key: "country", from: "country" }] }
+    });
+    await app.request(cfRequest(`/s/${encoded}?id=a`, { country: "NL" }));
+    await app.request(cfRequest(`/s/${encoded}?id=b`, { country: "DE" }));
+    const s = await stats(encoded);
+    const labels = (Object.values(s.buckets) as Array<{ label?: string }>)
+      .map(b => b.label)
+      .sort();
+    expect(labels).toEqual(["country=de", "country=nl"]);
+  });
+
+  it("stays opaque when the caller overrode the signal", async () => {
+    // `deriveAutoCtx` lets a supplied value win over the connection, so the
+    // bucket is "de" while the signal on the record still says "nl".
+    // Labelling from the signal would name a different visitor, and the
+    // hash check is what catches it.
+    const { encoded } = await makeTest({
+      ctx: { dims: [{ key: "country", from: "country" }] }
+    });
+    await app.request(
+      cfRequest(`/s/${encoded}?id=a&c_country=de`, { country: "NL" })
+    );
+    const s = await stats(encoded);
+    const labels = (Object.values(s.buckets) as Array<{ label?: string }>).map(
+      b => b.label
+    );
+    expect(labels).toEqual([undefined]);
+  });
 });
 
 describe("live stats stream", () => {
