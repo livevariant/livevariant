@@ -6,7 +6,7 @@ import {
   canonicalJson,
   computeTestId,
   decodeCell,
-  legacyDimForShape,
+  dimForShape,
   effectivePriors,
   externalIdHash,
   featureIndices,
@@ -308,10 +308,9 @@ export async function createTest(
 
   const entries = slotEntries(resolved);
   const sizes = slotSizes(resolved);
-  // Must match paramsFromConfig's default EXACTLY: featIdx is hashed modulo
-  // dim and stored, so two ends on different dims write records neither can
-  // read. Still the legacy sizing, and deliberately: see legacyDimForShape.
-  const dim = legacyDimForShape(sizes, resolved.ctx?.dims.length ?? 0);
+  // Must match paramsFromConfig EXACTLY: featIdx is hashed modulo dim and
+  // stored, so two ends on different dims write records neither can read.
+  const dim = dimForShape(sizes, resolved.ctx?.dims ?? []);
 
   // Redirect handoff first: if this visitor arrived through /s or /c,
   // the server-side assignment (and its idHash) is authoritative. A

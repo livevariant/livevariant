@@ -40,7 +40,6 @@ export {
   cholesky,
   ctxCardinality,
   dimForShape,
-  legacyDimForShape,
   newModel,
   observe,
   reward,

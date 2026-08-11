@@ -245,42 +245,6 @@ export function wantedDimForShape(
   return 2 * (1 + mains + pairs + ctx);
 }
 
-/**
- * The pre-cardinality sizing, kept because a test that is already RUNNING was
- * sized by it.
- *
- * dim is not stored in the config and not part of the test id; it is
- * recomputed from the config on every serve and every read. featIdx, however,
- * IS stored per assignment record, hashed modulo the dim in force when the
- * record was written. So changing dimForShape does not invalidate a test id,
- * it silently re-points every historical feature: state.ts's safeFeatIdx only
- * drops indices that fall outside the new dim, and when dim GROWS every old
- * index is still in range and simply means something else now.
- *
- * That is why this function still exists. `paramsFromConfig` takes an explicit
- * sizing version so a test registered before the fix keeps its original
- * geometry and its history stays readable.
- */
-export function legacyDimForShape(
-  slotSizes: number[],
-  ctxDimCount = 0
-): number {
-  const mains = slotSizes.reduce((sum, n) => sum + n, 0);
-  let pairs = 0;
-  for (let i = 0; i < slotSizes.length; i++) {
-    for (let j = i + 1; j < slotSizes.length; j++) {
-      pairs += slotSizes[i] * slotSizes[j];
-    }
-  }
-  const ctx = ctxDimCount * (8 + mains);
-  const wanted = 2 * (1 + mains + pairs + ctx);
-  let dim = 16;
-  while (dim < wanted && dim < MAX_DIM) {
-    dim *= 2;
-  }
-  return dim;
-}
-
 // ---------------------------------------------------------------- model
 
 export function newModel(dim: number, priors: VariantPrior[] = []): JointModel {

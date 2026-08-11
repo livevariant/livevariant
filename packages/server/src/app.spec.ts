@@ -5,7 +5,6 @@ import {
   configFromParams,
   decodeConfig,
   dimForShape,
-  legacyDimForShape,
   encodeConfig,
   featureIndices,
   externalIdHash,
@@ -1114,10 +1113,10 @@ describe("auto-context across serving channels", () => {
     { key: "country", from: "country" as const },
     { key: "persona" }
   ];
-  // legacy sizing, matching paramsFromConfig's default: this test asserts the
-  // page and the server land on the SAME dim, so it has to use whichever one
-  // the server actually ships.
-  const DIM = legacyDimForShape([2], DIMS.length);
+  // Whatever paramsFromConfig ships: this test asserts the page and the server
+  // land on the SAME dim, which is the invariant that keeps stored featIdx
+  // readable, so it has to be computed the one way the server computes it.
+  const DIM = dimForShape([2], DIMS);
 
   /** The choose body the SDK builds for a given caller context. */
   async function sdkBody(testId: string, idHash: string, persona: string) {

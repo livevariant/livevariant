@@ -3,7 +3,6 @@ import { encodeCell } from "./cells.js";
 import {
   ctxCardinality,
   dimForShape,
-  legacyDimForShape,
   MAX_DIM,
   observe,
   reward,
@@ -348,15 +347,5 @@ describe("dimForShape and context cardinality", () => {
     expect(ctxCardinality({ key: "s", from: "country" })).toBe(200);
     // Free-form: no list, no signal, so the size is genuinely unknown.
     expect(ctxCardinality({ key: "s" })).toBe(8);
-  });
-
-  it("keeps the legacy sizing bit-for-bit, because running tests were sized by it", () => {
-    // dim is recomputed from config on every read while featIdx is STORED per
-    // record. Change the sizing under a live test and every historical index
-    // silently means something else; recomputeState replays the stored
-    // indices and the raw context is gone, so it cannot be repaired.
-    expect(legacyDimForShape([2])).toBe(16);
-    expect(legacyDimForShape([3, 3])).toBe(32);
-    expect(legacyDimForShape([4], 1)).toBe(64);
   });
 });
