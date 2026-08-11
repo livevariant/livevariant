@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { encodeCell } from "./cells.js";
-import { dimForShape, observe, reward } from "./model.js";
+import {
+  ctxCardinality,
+  dimForShape,
+  legacyDimForShape,
+  MAX_DIM,
+  observe,
+  reward,
+  wantedDimForShape
+} from "./model.js";
 import { mulberry32, type Rng } from "./rng.js";
 import {
   choose,
@@ -310,5 +318,45 @@ describe("warm-start priors", () => {
       6000
     );
     expect(misled.lateBestShare).toBeGreaterThan(0.7);
+  });
+});
+
+describe("dimForShape and context cardinality", () => {
+  it("charges for how many values a dimension can take, not just that it exists", () => {
+    // The bug this replaces: a flat per-dimension cost meant `country` and a
+    // two-value flag bought the same model. Measured consequence with 200
+    // countries each having a different best variant: 36.3% correct against a
+    // 33.3% chance baseline, i.e. no learning at all.
+    const few = dimForShape([3], [{ key: "seg", values: ["a", "b"] }]);
+    const many = dimForShape([3], [{ key: "country", from: "country" }]);
+    expect(many).toBeGreaterThan(few);
+  });
+
+  it("reports what a context would really need, uncapped", () => {
+    // dimForShape clamps at MAX_DIM and so cannot say "this does not fit".
+    // wantedDimForShape can, which is what a config-time refusal would read.
+    expect(
+      wantedDimForShape([3], [{ key: "c", from: "country" }])
+    ).toBeGreaterThan(MAX_DIM);
+    expect(
+      wantedDimForShape([3], [{ key: "c", from: "continent" }])
+    ).toBeLessThanOrEqual(MAX_DIM);
+  });
+
+  it("knows a declared list exactly and falls back conservatively", () => {
+    expect(ctxCardinality({ key: "s", values: ["a", "b", "c"] })).toBe(3);
+    expect(ctxCardinality({ key: "s", from: "country" })).toBe(200);
+    // Free-form: no list, no signal, so the size is genuinely unknown.
+    expect(ctxCardinality({ key: "s" })).toBe(8);
+  });
+
+  it("keeps the legacy sizing bit-for-bit, because running tests were sized by it", () => {
+    // dim is recomputed from config on every read while featIdx is STORED per
+    // record. Change the sizing under a live test and every historical index
+    // silently means something else; recomputeState replays the stored
+    // indices and the raw context is gone, so it cannot be repaired.
+    expect(legacyDimForShape([2])).toBe(16);
+    expect(legacyDimForShape([3, 3])).toBe(32);
+    expect(legacyDimForShape([4], 1)).toBe(64);
   });
 });

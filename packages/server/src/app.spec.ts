@@ -5,6 +5,7 @@ import {
   configFromParams,
   decodeConfig,
   dimForShape,
+  legacyDimForShape,
   encodeConfig,
   featureIndices,
   externalIdHash,
@@ -1113,7 +1114,10 @@ describe("auto-context across serving channels", () => {
     { key: "country", from: "country" as const },
     { key: "persona" }
   ];
-  const DIM = dimForShape([2], DIMS.length);
+  // legacy sizing, matching paramsFromConfig's default: this test asserts the
+  // page and the server land on the SAME dim, so it has to use whichever one
+  // the server actually ships.
+  const DIM = legacyDimForShape([2], DIMS.length);
 
   /** The choose body the SDK builds for a given caller context. */
   async function sdkBody(testId: string, idHash: string, persona: string) {

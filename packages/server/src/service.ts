@@ -8,6 +8,7 @@ import {
   deriveAutoCtx,
   deriveResolvedCtx,
   dimForShape,
+  legacyDimForShape,
   effectivePriors,
   featureIndices,
   marginalOutcomes,
@@ -75,7 +76,11 @@ export interface ServingParams {
   testId: string;
   /** Variant counts per slot, canonical (sorted-key) order. */
   slotSizes: number[];
-  /** Model dimension; dimForShape(slotSizes, ctxDims) on both ends. */
+  /**
+   * Model dimension; the SAME sizing on both ends, or the page and the server
+   * hash features into different spaces and neither can read the other's
+   * records.
+   */
   dim: number;
   priors?: VariantPrior[];
   noise?: number;
@@ -89,10 +94,29 @@ export interface ServingParams {
   region?: TestRegion;
 }
 
-export function paramsFromConfig(decoded: DecodedConfig): ServingParams {
+/**
+ * How a test's model was sized.
+ *
+ * `"cardinality"` is current: context costs one block per declared VALUE.
+ * `"legacy"` is the flat per-dimension estimate every test registered before
+ * that fix was sized by, and it has to stay reachable, because dim is
+ * recomputed from the config on every serve while featIdx is stored per
+ * record. Re-sizing a running test does not reset it, which would at least be
+ * visible: it silently re-points every historical feature. See
+ * legacyDimForShape.
+ */
+export type DimSizing = "cardinality" | "legacy";
+
+export function paramsFromConfig(
+  decoded: DecodedConfig,
+  sizing: DimSizing = "legacy"
+): ServingParams {
   const { config, testId } = decoded;
   const sizes = configSlotSizes(config);
-  const dim = dimForShape(sizes, config.ctx?.dims.length ?? 0);
+  const dim =
+    sizing === "legacy"
+      ? legacyDimForShape(sizes, config.ctx?.dims.length ?? 0)
+      : dimForShape(sizes, config.ctx?.dims ?? []);
   return {
     testId,
     slotSizes: sizes,

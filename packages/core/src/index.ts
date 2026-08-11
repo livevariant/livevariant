@@ -33,15 +33,20 @@ export {
   validCell
 } from "./cells.js";
 export {
+  MAX_DIM,
   MODEL_NOISE,
   cellFeatures,
   chooseCell,
   cholesky,
+  ctxCardinality,
   dimForShape,
+  legacyDimForShape,
   newModel,
   observe,
   reward,
   variantFeature,
+  wantedDimForShape,
+  type CtxCardinality,
   type JointModel,
   type VariantPrior
 } from "./model.js";

@@ -1,6 +1,7 @@
 import { fnv1a32 } from "./canonical.js";
 import { cellCount, decodeCell } from "./cells.js";
 import { sampleGaussian, type Rng } from "./rng.js";
+import { SIGNAL_CARDINALITY, type AutoSignal } from "./signals.js";
 
 /**
  * THE model. LiveVariant runs exactly one algorithm for every test: joint
@@ -135,6 +136,15 @@ export function cellFeatures(
 }
 
 /**
+ * How many slots a free-form context dimension is charged for.
+ *
+ * Free-form means no `values` list and no signal to look the size up from, so
+ * the value space is genuinely unknown: a caller can pass anything. This is the
+ * old flat estimate, kept as the conservative default for exactly that case.
+ */
+const FREEFORM_CTX_CARDINALITY = 8;
+
+/**
  * Model dimension, decided from the shape so nobody ever picks it. Sized to
  * roughly twice the number of distinct features the test can express, then
  * rounded to a power of two and clamped.
@@ -143,8 +153,118 @@ export function cellFeatures(
  * the note on cellFeatures above for the measured rates (25-56%) and for why
  * they cost nothing here. It is enough to keep main effects apart, which is
  * the property that matters.
+ *
+ * Context is charged by CARDINALITY, not per dimension, and that is a fix
+ * rather than a refinement. This used to charge a flat `8 + mains` per
+ * dimension however many values it could take, so declaring `country` bought
+ * dim=32 for roughly 803 distinct features. Measured: with 200 countries each
+ * having a genuinely different best variant, the model picked correctly 36.3%
+ * of the time against a 33.3% chance baseline. It was not learning per-segment
+ * winners at all, and the 256 cap meant no setting could rescue it. A
+ * dimension that cannot be represented is now refused at config time
+ * (see schema.ts) rather than silently under-served.
  */
-export function dimForShape(slotSizes: number[], ctxDimCount = 0): number {
+export function dimForShape(
+  slotSizes: number[],
+  ctxDims: ReadonlyArray<CtxCardinality> = []
+): number {
+  const mains = slotSizes.reduce((sum, n) => sum + n, 0);
+  let pairs = 0;
+  for (let i = 0; i < slotSizes.length; i++) {
+    for (let j = i + 1; j < slotSizes.length; j++) {
+      pairs += slotSizes[i] * slotSizes[j];
+    }
+  }
+  // One (context value x variant) interaction per value per variant, plus the
+  // value's own main effect. That is what cellFeatures actually hashes, which
+  // is why counting dimensions instead of values under-sized the model.
+  const ctx = ctxDims.reduce(
+    (sum, dim) => sum + ctxCardinality(dim) * (1 + mains),
+    0
+  );
+  const wanted = 2 * (1 + mains + pairs + ctx);
+  let dim = 16;
+  while (dim < wanted && dim < MAX_DIM) {
+    dim *= 2;
+  }
+  return dim;
+}
+
+/** The largest model the hashing is allowed to grow to. */
+export const MAX_DIM = 256;
+
+/**
+ * What dimForShape needs to know about one context dimension. Structural on
+ * purpose: core must not import the zod schema, and the server, the sdk and a
+ * test fixture all have to be able to describe a dimension the same way.
+ */
+export interface CtxCardinality {
+  values?: readonly string[];
+  from?: string;
+}
+
+/**
+ * How many distinct values a dimension can take.
+ *
+ * A declared `values` list is exact. A signal-filled dimension uses the
+ * repo's own estimate in SIGNAL_CARDINALITY, which is the number the old
+ * code already had and did not consult. Anything else is free-form.
+ */
+export function ctxCardinality(dim: CtxCardinality): number {
+  if (dim.values && dim.values.length > 0) {
+    return dim.values.length;
+  }
+  if (dim.from) {
+    return (
+      SIGNAL_CARDINALITY[dim.from as AutoSignal] ?? FREEFORM_CTX_CARDINALITY
+    );
+  }
+  return FREEFORM_CTX_CARDINALITY;
+}
+
+/**
+ * The dimension a config WOULD need to represent its context honestly, with no
+ * cap applied. What schema.ts compares against MAX_DIM to decide whether a
+ * dimension is representable at all.
+ */
+export function wantedDimForShape(
+  slotSizes: number[],
+  ctxDims: ReadonlyArray<CtxCardinality> = []
+): number {
+  const mains = slotSizes.reduce((sum, n) => sum + n, 0);
+  let pairs = 0;
+  for (let i = 0; i < slotSizes.length; i++) {
+    for (let j = i + 1; j < slotSizes.length; j++) {
+      pairs += slotSizes[i] * slotSizes[j];
+    }
+  }
+  const ctx = ctxDims.reduce(
+    (sum, dim) => sum + ctxCardinality(dim) * (1 + mains),
+    0
+  );
+  return 2 * (1 + mains + pairs + ctx);
+}
+
+/**
+ * The pre-cardinality sizing, kept because a test that is already RUNNING was
+ * sized by it.
+ *
+ * dim is not stored in the config and not part of the test id; it is
+ * recomputed from the config on every serve and every read. featIdx, however,
+ * IS stored per assignment record, hashed modulo the dim in force when the
+ * record was written. So changing dimForShape does not invalidate a test id,
+ * it silently re-points every historical feature: state.ts's safeFeatIdx only
+ * drops indices that fall outside the new dim, and when dim GROWS every old
+ * index is still in range and simply means something else now.
+ *
+ * That is why this function still exists. `paramsFromConfig` takes an explicit
+ * sizing version so a test registered before the fix keeps its original
+ * geometry and its history stays readable.
+ */
+export function legacyDimForShape(
+  slotSizes: number[],
+  ctxDimCount = 0
+): number {
   const mains = slotSizes.reduce((sum, n) => sum + n, 0);
   let pairs = 0;
   for (let i = 0; i < slotSizes.length; i++) {
@@ -155,7 +275,7 @@ export function dimForShape(slotSizes: number[], ctxDimCount = 0): number {
   const ctx = ctxDimCount * (8 + mains);
   const wanted = 2 * (1 + mains + pairs + ctx);
   let dim = 16;
-  while (dim < wanted && dim < 256) {
+  while (dim < wanted && dim < MAX_DIM) {
     dim *= 2;
   }
   return dim;
