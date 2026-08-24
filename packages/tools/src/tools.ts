@@ -1341,13 +1341,12 @@ export const uploadImage = defineTool({
       );
     }
     const origin = originOf(context, input.serverUrl);
+    const uploadToken = input.uploadToken ?? context.assetUploadToken;
     const response = await context.fetch(`${origin}/assets`, {
       method: "POST",
       headers: {
         "content-type": input.contentType,
-        ...(input.uploadToken
-          ? { authorization: `Bearer ${input.uploadToken}` }
-          : {})
+        ...(uploadToken ? { authorization: `Bearer ${uploadToken}` } : {})
       },
       body: bytes as unknown as BodyInit
     });

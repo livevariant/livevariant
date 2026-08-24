@@ -424,7 +424,9 @@ supports):
 - **Hosted MCP server**, nothing to run and no auth: add
   \`${apiUrl}/mcp\` (streamable HTTP) to the client's MCP configuration.
 - **Local MCP server** over stdio: \`npx -y @livevariant/mcp\` (point it
-  at a self-hosted deployment with \`LIVEVARIANT_SERVER_URL\` if needed).
+  at a self-hosted deployment with \`LIVEVARIANT_SERVER_URL\`, and set
+  \`LIVEVARIANT_ASSET_UPLOAD_TOKEN\` when that deployment gates
+  \`/assets\`).
 - **This skill on its own**: \`npx skills add livevariant/livevariant\`
   (Claude Code, Cowork, any skills-compatible agent). The skill is
   instructions, not transport, so pair it with one of the routes above

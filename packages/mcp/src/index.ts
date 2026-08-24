@@ -34,6 +34,7 @@ export const DEFAULT_SERVER_URL = "https://livevariant.link";
 
 export interface McpServerOptions {
   serverUrl?: string;
+  assetUploadToken?: string;
   fetch?: typeof globalThis.fetch;
   /**
    * Account-scoped capability. Absent (a stdio server, a self-host
@@ -46,6 +47,7 @@ export interface McpServerOptions {
 export function toolContext(options: McpServerOptions = {}): ToolContext {
   return {
     serverUrl: options.serverUrl ?? DEFAULT_SERVER_URL,
+    assetUploadToken: options.assetUploadToken,
     fetch: options.fetch ?? globalThis.fetch,
     accounts: options.accounts
   };

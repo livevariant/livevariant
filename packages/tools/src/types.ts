@@ -37,6 +37,11 @@ export interface ToolContext {
   /** Injected so tests need no network and hosts can supply their own. */
   fetch: typeof globalThis.fetch;
   /**
+   * Runtime-only upload credential for MCP/embedded hosts pointing at a
+   * deployment whose /assets endpoint is gated. Not model-facing.
+   */
+  assetUploadToken?: string;
+  /**
    * Account-scoped capability, present only on deployments that HAVE
    * accounts. Its absence is meaningful: hosts do not register
    * account-scoped tools without it, so an agent never sees a tool the
