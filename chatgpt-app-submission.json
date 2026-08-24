@@ -5,7 +5,7 @@
     "display_name": "LiveVariant",
     "subtitle": "Run adaptive A/B tests",
     "description": "LiveVariant helps users create adaptive A/B tests for email and web, inspect test links, warm-start tests with priors, upload image variants, register tests to an account, and read results with win probabilities and domain/account status.",
-    "category": "PRODUCTIVITY"
+    "category": "BUSINESS"
   },
   "tools": {
     "build_test": {
@@ -127,35 +127,35 @@
       "expected_output_url": null
     },
     {
-      "description": "Upload an image asset and build a multi-slot registered test.",
-      "user_prompt": "Upload this PNG as one hero option, then build a LiveVariant email test with two hero options and two CTA options, registered to my publishable key.",
+      "description": "Build a deterministic email image test from public asset URLs.",
+      "user_prompt": "Build a LiveVariant email image test named `review-email-hero` with two variants: control image `https://livevariant.com/icon-512.png` and variant image `https://livevariant.com/icon-512-dark.png`. Send clicks to `https://livevariant.com/`, use the EU region, and give me the ready-to-paste email image, click, and pixel links.",
       "file_attachment_urls": null,
-      "tools_triggered": "upload_image, build_test",
-      "expected_output": "Returns protected asset URLs, a test config, serve/click/pixel/manage URLs, slot links, warnings if any, and registration status when accepted.",
+      "tools_triggered": "build_test",
+      "expected_output": "Returns a test config, stats secret, manage URL, serve/click/pixel URLs, email-safe no-auto links, destination verification status or warnings, and concise usage instructions.",
       "expected_output_url": null
     },
     {
-      "description": "Inspect a link and warm-start it with prior beliefs.",
-      "user_prompt": "Here is my LiveVariant manage link. Explain what it does, then add medium-confidence priors that the second variant converts at 6% and the control at 4%.",
+      "description": "Build a multi-slot website copy test.",
+      "user_prompt": "Build a LiveVariant website test named `review-site-copy` with two slots. The headline text variants are `Control: Adaptive A/B tests for email and web` and `Variant: Find the winning message while traffic flows`. The CTA text variants are `Control: Start a test` and `Variant: See win probabilities`. Use the EU region and explain that editing a variant later creates a new test.",
+      "file_attachment_urls": null,
+      "tools_triggered": "build_test",
+      "expected_output": "Returns a four-combination multi-slot test with slot names, encoded config, manage URL, SDK-oriented usage guidance, and any warnings.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Inspect a supplied config and warm-start it with priors.",
+      "user_prompt": "Inspect this LiveVariant config and then add medium-confidence priors: control rate 0.04 and variant rate 0.06. Config: `eyJkZWNvcmF0ZVJlZGlyZWN0cyI6dHJ1ZSwiZm9yd2FyZFBhcmFtcyI6dHJ1ZSwibmFtZSI6InJldmlldy1wcmlvcnMtZml4dHVyZSIsInByaW9yU3RyZW5ndGhDYXAiOjUwLCJyZWRpcmVjdFVybCI6Imh0dHBzOi8vbGl2ZXZhcmlhbnQuY29tLyIsInJlZ2lvbiI6ImV1Iiwic2xvdHMiOnsibWFpbiI6W3siaW1hZ2UiOiJodHRwczovL2xpdmV2YXJpYW50LmNvbS9pY29uLTUxMi5wbmciLCJuYW1lIjoiY29udHJvbCJ9LHsiaW1hZ2UiOiJodHRwczovL2xpdmV2YXJpYW50LmNvbS9pY29uLTUxMi1kYXJrLnBuZyIsIm5hbWUiOiJ2YXJpYW50In1dfSwic3RhdHNLZXlIYXNoIjoiMTZiN2RiYzE2NDcyZTNmNjlhOTU3NWEyMjk3OThjM2JiNjk4ODVlOGVlZGMwN2ZkMmI5N2EwMDE3MmExMGRkNCIsInYiOjJ9`",
       "file_attachment_urls": null,
       "tools_triggered": "inspect_test, generate_priors",
-      "expected_output": "Reports the test structure and findings, then returns an updated config with capped priors and notes about how quickly real traffic overrides them.",
+      "expected_output": "Reports the decoded test structure and findings, then returns an updated encoded config with capped priors and an explanation of how much real traffic overrides the prior.",
       "expected_output_url": null
     },
     {
-      "description": "Read results and account/domain status for a running test.",
-      "user_prompt": "Use this LiveVariant manage URL to tell me which variant is winning, whether I can stop, and whether its redirect domains are verified.",
+      "description": "Inspect a self-contained query-parameter test URL.",
+      "user_prompt": "Inspect this LiveVariant query-parameter email test URL and flag any setup issues: `https://livevariant.com/s?v=https%3A%2F%2Flivevariant.com%2Ficon-512.png&v=https%3A%2F%2Flivevariant.com%2Ficon-512-dark.png&vn=control&vn=variant&n=review-query-email&r=https%3A%2F%2Flivevariant.com%2F&id={{subscriber_id}}&auto=0`.",
       "file_attachment_urls": null,
-      "tools_triggered": "get_stats, get_test_status",
-      "expected_output": "Returns current counts, win probabilities, stop/continue advice, claimed status, and verified-domain information.",
-      "expected_output_url": null
-    },
-    {
-      "description": "Find saved tests and register an existing test.",
-      "user_prompt": "Show my saved LiveVariant tests matching newsletter, then register this existing test config to my organization with its stats secret and publishable key.",
-      "file_attachment_urls": null,
-      "tools_triggered": "list_tests, register_test",
-      "expected_output": "Returns matching account tests, then confirms the existing test was registered to the organization or explains why registration failed.",
+      "tools_triggered": "inspect_test",
+      "expected_output": "Decodes the query URL into a two-variant test, reports variant names, destination, region/context details when present, whether results are readable, and any lint findings.",
       "expected_output_url": null
     }
   ],

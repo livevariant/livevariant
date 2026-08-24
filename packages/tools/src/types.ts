@@ -115,6 +115,11 @@ export interface ToolDefinition<
   /** The full description an assistant reads before choosing this tool. */
   description: string;
   input: Input;
+  /**
+   * Optional narrower MCP-facing schema. REST/OpenAPI keep `input`; MCP can
+   * omit host-specific knobs that should not be model-facing in ChatGPT.
+   */
+  mcpInput?: z.ZodType;
   output: Output;
   /**
    * MCP tool annotations. `readOnly` covers everything that only computes

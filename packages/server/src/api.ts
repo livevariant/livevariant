@@ -314,9 +314,10 @@ export function createApi(options: ApiOptions): Hono {
         "win probabilities. " +
         (apiToken
           ? "This deployment requires a Bearer token on /mcp (its " +
-            "operator's LV_API_TOKEN); within that, authority travels " +
-            "in tool arguments."
-          : "No authentication; authority travels in tool arguments."),
+            "operator's LV_API_TOKEN); within that, tests are scoped by " +
+            "their config and stats secret."
+          : "Creating tests needs no account; result reads require the " +
+            "test's stats secret."),
       transport: { type: "streamable-http", url: `${base}/mcp` },
       authentication: apiToken
         ? {

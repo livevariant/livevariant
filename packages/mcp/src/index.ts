@@ -86,7 +86,7 @@ export function registerTools(
       {
         title: tool.title,
         description: tool.description,
-        inputSchema: tool.input,
+        inputSchema: tool.mcpInput ?? tool.input,
         outputSchema: tool.output,
         annotations: {
           title: tool.title,

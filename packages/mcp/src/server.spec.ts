@@ -70,6 +70,22 @@ describe("the MCP server", () => {
     }
   });
 
+  it("does not advertise self-host-only knobs in MCP input schemas", async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const byName = new Map(tools.map(t => [t.name, t]));
+
+    expect(byName.get("build_test")?.inputSchema.properties).not.toHaveProperty(
+      "serverUrl"
+    );
+    expect(
+      byName.get("upload_image")?.inputSchema.properties
+    ).not.toHaveProperty("serverUrl");
+    expect(
+      byName.get("upload_image")?.inputSchema.properties
+    ).not.toHaveProperty("uploadToken");
+  });
+
   it("marks the read-only tools read-only and the rest honestly", async () => {
     const client = await connect();
     const { tools } = await client.listTools();

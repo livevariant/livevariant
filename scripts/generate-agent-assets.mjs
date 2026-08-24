@@ -42,7 +42,7 @@ export const PLUGIN = {
   homepage: "https://livevariant.com",
   repository: "https://github.com/livevariant/livevariant",
   author: "LiveVariant",
-  category: "Productivity",
+  category: "Business & Operations",
   license: "AGPL-3.0",
   apiUrl: "https://livevariant.com",
   mcpUrl: "https://livevariant.com/mcp",
