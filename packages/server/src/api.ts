@@ -67,6 +67,12 @@ export interface ApiOptions {
    */
   apiToken?: string;
   /**
+   * Runtime-only credential for deployments that gate POST /assets with
+   * LV_ASSET_UPLOAD_TOKEN. MCP hides uploadToken from tool schemas, so the
+   * HTTP MCP transport has to inject this into ToolContext itself.
+   */
+  assetUploadToken?: string;
+  /**
    * The accounts read side. Its presence is what registers the
    * account-scoped tools (list_tests); a deployment without it never
    * shows an agent a tool it cannot serve.
@@ -144,6 +150,7 @@ export function createApi(options: ApiOptions): Hono {
       serverUrl: origin,
       serveUrl: serveUrl ?? origin,
       region: regionHint(geo) ?? undefined,
+      assetUploadToken: options.assetUploadToken,
       fetch: options.fetch,
       // Identity resolves lazily per call: a session cookie on the
       // same-origin dashboard identifies the caller; without one the

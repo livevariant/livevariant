@@ -9,6 +9,7 @@ import { TOOLS } from "@livevariant/tools";
 const OPEN_TOOLS = TOOLS.filter(t => t.scope !== "account");
 import { mulberry32 } from "@livevariant/core";
 import { createApp } from "./app.js";
+import { MemoryAssetStore } from "./assets/types.js";
 import { MemoryStore } from "./store/memory.js";
 import type { AccountsProvider } from "./accounts-port.js";
 
@@ -112,6 +113,39 @@ describe("MCP over HTTP", () => {
     );
     const { tools } = await client.listTools();
     expect(tools).toHaveLength(OPEN_TOOLS.length);
+  });
+
+  it("uses the configured asset upload token on HTTP MCP uploads", async () => {
+    const store = new MemoryAssetStore();
+    app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      assets: {
+        store,
+        signingSecret: "secret",
+        uploadToken: "upload-secret"
+      }
+    });
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const uploadImage = tools.find(t => t.name === "upload_image");
+    expect(uploadImage?.inputSchema.properties).not.toHaveProperty(
+      "uploadToken"
+    );
+
+    const result = await client.callTool({
+      name: "upload_image",
+      arguments: {
+        data: btoa("fake"),
+        contentType: "image/png"
+      }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      size: 4,
+      contentType: "image/png"
+    });
   });
 
   it("advertises account-scoped tools when the deployment has accounts", async () => {
