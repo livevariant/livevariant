@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Shared foundation of LiveVariant: URL-encoded test configs with hash identity, stats secrets, seeded RNG, Thompson-sampling bandits (plain, bucketed, linear) with LLM warm-start priors, and event-sourced state derivation",
   "license": "AGPL-3.0",
   "repository": {
