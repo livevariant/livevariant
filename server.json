@@ -1,0 +1,50 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.livevariant/livevariant",
+  "title": "LiveVariant",
+  "description": "Build, inspect and read adaptive A/B tests. Config travels in the URL; no account or API key needed.",
+  "websiteUrl": "https://livevariant.com",
+  "repository": {
+    "url": "https://github.com/livevariant/livevariant",
+    "source": "github",
+    "subfolder": "packages/mcp"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@livevariant/mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "LIVEVARIANT_SERVER_URL",
+          "description": "Base URL of a self-hosted LiveVariant deployment. Omit to use the hosted service at https://livevariant.com.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "LIVEVARIANT_API_TOKEN",
+          "description": "API token for a self-hosted deployment that sets LV_API_TOKEN. Not needed for the hosted service.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "LIVEVARIANT_ASSET_UPLOAD_TOKEN",
+          "description": "Asset upload token for a deployment with hosted images enabled. Optional.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://livevariant.com/mcp"
+    }
+  ]
+}
