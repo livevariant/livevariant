@@ -233,6 +233,21 @@ function syncLockToManifests() {
   writeFileSync("package-lock.json", `${JSON.stringify(lock, null, 2)}\n`);
 }
 
+/**
+ * The MCP registry manifest (server.json) advertises the published
+ * @livevariant/mcp version in two places: the manifest's own version and
+ * the npm package entry. Both must track the lockstep release version or
+ * the registry describes a package that does not exist.
+ */
+function syncServerJsonVersion(version) {
+  const manifest = parseJson(readFileSync("server.json", "utf8"));
+  manifest.version = version;
+  for (const pkg of manifest.packages ?? []) {
+    pkg.version = version;
+  }
+  writeFileSync("server.json", `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
 assertReleaseGroupComplete();
 assertLockIsCrossPlatform();
 
@@ -280,7 +295,8 @@ if (dryRun) {
 // release commit.
 assertNothingPruned(lockedPackagesBefore);
 syncLockToManifests();
-run("git add package-lock.json");
+syncServerJsonVersion(workspaceVersion);
+run("git add package-lock.json server.json");
 
 // The generated manifests embed the version, so they are part of the
 // release commit or the drift check fails on it.
