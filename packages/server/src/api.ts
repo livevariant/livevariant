@@ -68,8 +68,8 @@ export interface ApiOptions {
   apiToken?: string;
   /**
    * Runtime-only credential for deployments that gate POST /assets with
-   * LV_ASSET_UPLOAD_TOKEN. MCP hides uploadToken from tool schemas, so the
-   * HTTP MCP transport has to inject this into ToolContext itself.
+   * LV_ASSET_UPLOAD_TOKEN. HTTP MCP may receive it only behind the
+   * LV_API_TOKEN gate; open MCP callers must not inherit write authority.
    */
   assetUploadToken?: string;
   /**
@@ -140,7 +140,13 @@ export function createApi(options: ApiOptions): Hono {
   // an email resolve against the mail client and serve nothing.
   const serveUrl = options.serveUrl?.trim() || undefined;
   const provider = options.provider;
-  const contextFor = (url: string, raw?: Request): ToolContext => {
+  const apiToken = options.apiToken?.trim() || undefined;
+  const assetUploadToken = options.assetUploadToken?.trim() || undefined;
+  const contextFor = (
+    url: string,
+    raw?: Request,
+    contextOptions?: { assetUploader?: boolean }
+  ): ToolContext => {
     const origin = baseOf(url);
     // The caller's own geography, so build_test can default a new
     // test's region to its CREATOR's location rather than to wherever
@@ -150,7 +156,9 @@ export function createApi(options: ApiOptions): Hono {
       serverUrl: origin,
       serveUrl: serveUrl ?? origin,
       region: regionHint(geo) ?? undefined,
-      assetUploadToken: options.assetUploadToken,
+      assetUploadToken: contextOptions?.assetUploader
+        ? assetUploadToken
+        : undefined,
       fetch: options.fetch,
       // Identity resolves lazily per call: a session cookie on the
       // same-origin dashboard identifies the caller; without one the
@@ -192,7 +200,6 @@ export function createApi(options: ApiOptions): Hono {
   app.use("/api/*", openCors);
   app.use("/mcp", openCors);
 
-  const apiToken = options.apiToken?.trim() || undefined;
   if (apiToken) {
     const gate = async (
       c: Parameters<Parameters<Hono["use"]>[1]>[0],
@@ -440,7 +447,11 @@ export function createApi(options: ApiOptions): Hono {
       // no reason to hold a stream open for a request/response exchange.
       enableJsonResponse: true
     });
-    const server = createServer(contextFor(c.req.url, c.req.raw));
+    const server = createServer(
+      contextFor(c.req.url, c.req.raw, {
+        assetUploader: apiToken !== undefined
+      })
+    );
     await server.connect(transport);
     try {
       return await transport.handleRequest(c.req.raw);

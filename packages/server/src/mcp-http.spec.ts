@@ -25,12 +25,20 @@ beforeEach(() => {
 });
 
 /** Routes the client's fetch into the Hono app, no socket involved. */
-async function connect() {
+async function connect(extraHeaders?: HeadersInit) {
   const client = new Client({ name: "test", version: "0" });
   await client.connect(
     new StreamableHTTPClientTransport(new URL("https://livevariant.com/mcp"), {
-      fetch: ((input: string | URL | Request, init?: RequestInit) =>
-        app.request(String(input), init)) as unknown as typeof globalThis.fetch
+      fetch: ((input: string | URL | Request, init?: RequestInit) => {
+        if (!extraHeaders) {
+          return app.request(String(input), init);
+        }
+        const headers = new Headers(init?.headers);
+        new Headers(extraHeaders).forEach((value, key) => {
+          headers.set(key, value);
+        });
+        return app.request(String(input), { ...init, headers });
+      }) as unknown as typeof globalThis.fetch
     })
   );
   return client;
@@ -115,7 +123,7 @@ describe("MCP over HTTP", () => {
     expect(tools).toHaveLength(OPEN_TOOLS.length);
   });
 
-  it("uses the configured asset upload token on HTTP MCP uploads", async () => {
+  it("does not grant the asset upload token to open HTTP MCP callers", async () => {
     const store = new MemoryAssetStore();
     app = createApp({
       store: new MemoryStore(),
@@ -132,6 +140,34 @@ describe("MCP over HTTP", () => {
     expect(uploadImage?.inputSchema.properties).not.toHaveProperty(
       "uploadToken"
     );
+
+    const result = await client.callTool({
+      name: "upload_image",
+      arguments: {
+        data: btoa("fake"),
+        contentType: "image/png"
+      }
+    });
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text?: string }).text).toContain(
+      "requires an upload token"
+    );
+  });
+
+  it("uses the configured asset upload token on API-token-gated HTTP MCP uploads", async () => {
+    const store = new MemoryAssetStore();
+    app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      apiToken: "operator-secret",
+      assets: {
+        store,
+        signingSecret: "secret",
+        uploadToken: "upload-secret"
+      }
+    });
+    const client = await connect({ authorization: "Bearer operator-secret" });
 
     const result = await client.callTool({
       name: "upload_image",
