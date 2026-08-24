@@ -10,9 +10,14 @@ import { createServer, DEFAULT_SERVER_URL } from "./index.js";
  * LIVEVARIANT_API_TOKEN carries the deployment's LV_API_TOKEN when the
  * operator has gated their API with one: it rides as a Bearer header on
  * every call this server makes to that one origin, and nowhere else.
+ * LIVEVARIANT_ASSET_UPLOAD_TOKEN carries LV_ASSET_UPLOAD_TOKEN for
+ * deployments that gate /assets separately.
  */
 const serverUrl = process.env.LIVEVARIANT_SERVER_URL ?? DEFAULT_SERVER_URL;
 const apiToken = process.env.LIVEVARIANT_API_TOKEN;
+const assetUploadToken =
+  process.env.LIVEVARIANT_ASSET_UPLOAD_TOKEN ??
+  process.env.LV_ASSET_UPLOAD_TOKEN;
 
 const fetchImpl: typeof globalThis.fetch = apiToken
   ? (input, init) => {
@@ -36,7 +41,11 @@ const fetchImpl: typeof globalThis.fetch = apiToken
   : globalThis.fetch;
 
 async function main(): Promise<void> {
-  const server = createServer({ serverUrl, fetch: fetchImpl });
+  const server = createServer({
+    serverUrl,
+    assetUploadToken,
+    fetch: fetchImpl
+  });
   await server.connect(new StdioServerTransport());
   console.error(`livevariant mcp ready (serving ${serverUrl})`);
 }

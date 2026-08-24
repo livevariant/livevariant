@@ -846,6 +846,7 @@ export function createApp(options: AppOptions): Hono {
         serveUrl: options.serveUrl,
         basePath,
         apiToken: options.apiToken,
+        assetUploadToken: options.assets?.uploadToken,
         provider: options.provider,
         gtmId: options.gtmId,
         publishableKey: options.publishableKey,

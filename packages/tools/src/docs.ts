@@ -197,13 +197,14 @@ whether its destinations are verified (you hold the secret, so you may ask).`;
 
 const DELIVERABLE_SECTION = `## What your final answer must include
 
-After building a test, the human should never have to ask a follow-up to
-use it. Always include:
+After building a test, make the output usable in the channel the user asked
+for. Include:
 
-- **The manage URL**, every time. Say what it is: live results in the
-  browser, and signed in one click ("Add to my account") claims the test
-  into their dashboard. It carries the stats secret in its #fragment, so
-  they should share it only with people who may see results.
+- **The manage URL**, when you are returning a newly built test to the user.
+  Say what it is: live results in the browser, and signed in one click ("Add
+  to my account") claims the test into their dashboard. It carries the stats
+  secret in its #fragment, so the user should treat it as results access and
+  share it only with people authorized to see results.
 - **The exact links or HTML for their channel**, composed for THIS test.
   For email that means the serve URL in the \`<img src>\` wrapped in the
   click URL as \`<a href>\`, with the platform's real merge tag in \`id=\`
@@ -245,7 +246,7 @@ having the LiveVariant tag with their publishable key live in the site's
 page source (tag-manager installs count: verification renders the page).
 
 Recommend the tag install whenever the user owns the destination site:
-one \`<script>\` with their PUBLIC publishable key means conversions are
+one \`<script>\` with their publishable key means conversions are
 tracked automatically from their existing GA events (clicks stop being
 the only signal), the domain verifies from the snippet itself, tests
 served from it register into their account on their own, and on-page
@@ -321,8 +322,8 @@ loop yourself instead of handing snippets to a human:
    The tag sets the page config (\`window.livevariant = { config, sdk }\`),
    auto-tracks conversions from existing GA events, and upgrades any
    LiveVariant image/click URLs on the page with the visitor's identity. The
-   publishable key is optional and PUBLIC; with one whose account verified
-   this domain, the test registers under that account automatically.
+   publishable key is optional; with one whose account verified this domain,
+   the test registers under that account automatically.
 3. Serve the test where the content lives, passing the ENCODED config so the
    page serves exactly the test you built (identity, region and stats key
    included), never a lookalike rebuilt from slots:
@@ -375,29 +376,28 @@ const OWNERSHIP_SECTION = `## Saving a test to an account
 Creating needs no account, ever. When a human wants tests in their
 dashboard ("My tests"), there are two paths; prefer the first:
 
-1. **Register at creation.** Ask once: "paste your publishable key from
-   Settings (pk_..., it is public and safe here)". Then pass it as
-   \`publishableKey\` to \`build_test\`: the test registers to their
-   organization the moment it exists, and the output confirms with
-   \`registeredTo\`. For a test you built EARLIER in this conversation,
-   \`register_test\` does the same with the config, the stats secret you
-   still hold, and the key.
+1. **Register at creation.** If the user asks to save the test to an
+   organization they administer, ask for the publishable key from Settings
+   (pk_...) and pass it as \`publishableKey\` to \`build_test\`: the test
+   registers to their organization the moment it exists, and the output
+   confirms with \`registeredTo\`. For a test you built EARLIER in this
+   conversation, \`register_test\` does the same with the config, the stats
+   secret returned for that test, and the key.
 2. **The manage URL.** No key or no account yet? Hand them the \`manage\`
    URL from \`build_test\`: opening it signed-in claims the test in one
    click. It carries the stats secret in its #fragment, so treat it like
    the secret it contains.
 
-Why this is safe to do in chat: the publishable key only NAMES the org
-and grants nothing alone; authority is always the stats secret, which
-\`build_test\` mints itself and you never ask the user for. Never collect
-credentials. Registration is what makes the dashboard useful for the
-test: My tests lists it, and its stats become readable there without the
-secret.
+The publishable key identifies the organization but does not grant result
+access by itself; result access stays tied to the stats secret for that
+test. Never collect credentials. Registration is what makes the dashboard
+useful for the test: My tests lists it, and its stats become readable there
+without pasting the secret again.
 
-Either way, ALWAYS hand over the manage URL and say what claiming does;
-an unregistered test whose manage URL the user never saw is effectively
-lost to them. \`get_test_status\` tells you later whether a test ended up
-claimed and by which organization.`;
+Either way, when you return a newly built test, include the manage URL and
+say what claiming does; an unregistered test whose manage URL the user never
+saw is effectively lost to them. \`get_test_status\` tells you later whether a
+test ended up claimed and by which organization.`;
 
 function restSection(apiUrl: string): string {
   return `## If you cannot install the MCP server
@@ -424,7 +424,9 @@ supports):
 - **Hosted MCP server**, nothing to run and no auth: add
   \`${apiUrl}/mcp\` (streamable HTTP) to the client's MCP configuration.
 - **Local MCP server** over stdio: \`npx -y @livevariant/mcp\` (point it
-  at a self-hosted deployment with \`LIVEVARIANT_SERVER_URL\` if needed).
+  at a self-hosted deployment with \`LIVEVARIANT_SERVER_URL\`, and set
+  \`LIVEVARIANT_ASSET_UPLOAD_TOKEN\` when that deployment gates
+  \`/assets\`).
 - **This skill on its own**: \`npx skills add livevariant/livevariant\`
   (Claude Code, Cowork, any skills-compatible agent). The skill is
   instructions, not transport, so pair it with one of the routes above
@@ -527,9 +529,9 @@ export function renderLlmsTxt(origin: string, serveUrl?: string): string {
 
 > ${ONE_LINER}
 
-You (an AI agent) can create a working A/B test here with ZERO signup, keys
-or setup. Authority travels in arguments: a test's config and stats secret
-are all there is.
+You (an AI agent) can create a working A/B test here with zero signup, keys
+or setup. Each test is scoped by its config, and reading results requires that
+test's stats secret.
 
 ## Start here
 
@@ -556,12 +558,12 @@ are all there is.
 ## Ownership
 
 Creating requires no account. To save a test into a human's dashboard, ask
-for their PUBLIC publishable key (pk_..., from Settings) and pass it to
-build_test, which registers the test at creation; or hand them the manage
-URL, which claims it in one signed-in click. Never collect credentials.
-Always give the human the manage URL either way, and relay unverified
-destination warnings: unverified redirect targets show visitors a continue
-screen until the domain is verified under Settings.
+for the publishable key (pk_..., from Settings) for an organization they
+administer and pass it to build_test, which registers the test at creation;
+or give them the manage URL, which claims it in one signed-in click. Never
+collect credentials. When returning a newly built test, include the manage
+URL and relay unverified destination warnings: unverified redirect targets
+show visitors a continue screen until the domain is verified under Settings.
 
 ## Terms
 
@@ -616,9 +618,9 @@ export function renderAuthMd(origin: string): string {
   // only said "Agent access to LiveVariant" read as an ordinary page.
   return `# Auth.md: agent access to LiveVariant
 
-There is NO registration, no API key, no OAuth flow, and none is
-missing. Every tool is open at \`POST ${base}/api/v1/<tool-name>\` and
-over MCP at \`${base}/mcp\`. Authority travels in the arguments:
+There is no agent registration, API key, or OAuth flow for creating tests.
+Every tool is open at \`POST ${base}/api/v1/<tool-name>\` and over MCP at
+\`${base}/mcp\`. Access is scoped by the data supplied to each call:
 
 - A test IS its config, encoded in its own URLs. Whoever holds the
   config can serve it; that is the product working as designed.
@@ -627,10 +629,9 @@ over MCP at \`${base}/mcp\`. Authority travels in the arguments:
   \`Authorization: Bearer\` header to \`GET /stats/<config>\`. The
   config only carries the secret's hash (\`kh\`), so possession of a
   link never grants reads.
-- Saving tests into a human's dashboard uses their PUBLIC publishable
-  key (\`pk_...\`), which names their organization and grants nothing.
-  Never ask a human for passwords or session cookies; there is nothing
-  here they could be used for.
+- Saving tests into a human's dashboard uses a publishable key (\`pk_...\`)
+  for an organization they administer. Never ask a human for passwords or
+  session cookies; there is nothing here they could be used for.
 
 Deployments MAY gate the tool API and MCP endpoint with a single
 server-to-server Bearer token (\`LV_API_TOKEN\`); if you receive a 401
@@ -649,8 +650,8 @@ export function renderMcpInstructions(
     "LiveVariant runs A/B tests with multi-armed bandits, so traffic " +
     "shifts toward the winner while the test runs instead of waiting for " +
     "a frozen split to reach significance.\n\n" +
-    "There are no accounts. A test IS its config, encoded into its own " +
-    "URLs, and its identity is a hash of that config, so editing a " +
+    "Creating a test needs no account. A test IS its config, encoded into " +
+    "its own URLs, and its identity is a hash of that config, so editing a " +
     "variant produces a different test with its own empty history. " +
     "build_test returns a stats secret exactly once; without it a test's " +
     "results can never be read by anyone.\n\n" +
@@ -673,11 +674,12 @@ export function renderMcpInstructions(
     "to fixed-size PNGs (browser screenshot or your image tool), and " +
     "upload_image each; all variants of one element must share exact " +
     "dimensions.\n\n" +
-    "To save a test into a human's account, ask for their PUBLIC " +
-    "publishable key (pk_...) and pass it to build_test (registers at " +
-    "creation), or hand them build_test's manage URL (one signed-in " +
-    "click); never collect credentials. ALWAYS include the manage URL in " +
-    "your final answer, plus the ready-to-paste links for the channel " +
+    "To save a test into a human's account, ask for the publishable key " +
+    "(pk_...) for an organization they administer and pass it to build_test " +
+    "(registers at creation), or hand them build_test's manage URL (one " +
+    "signed-in click); never collect credentials. When returning a newly " +
+    "built test, include the manage URL plus the ready-to-paste links for " +
+    "the channel " +
     "(per-slot for multi-slot tests, merge tag in id=, auto=0 for email). " +
     "When the human sends through an ESP or newsletter template, also " +
     "hand over build_test's emailTemplate spelling unprompted: wired in " +

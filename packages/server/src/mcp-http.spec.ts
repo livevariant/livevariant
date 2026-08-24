@@ -9,6 +9,7 @@ import { TOOLS } from "@livevariant/tools";
 const OPEN_TOOLS = TOOLS.filter(t => t.scope !== "account");
 import { mulberry32 } from "@livevariant/core";
 import { createApp } from "./app.js";
+import { MemoryAssetStore } from "./assets/types.js";
 import { MemoryStore } from "./store/memory.js";
 import type { AccountsProvider } from "./accounts-port.js";
 
@@ -24,12 +25,20 @@ beforeEach(() => {
 });
 
 /** Routes the client's fetch into the Hono app, no socket involved. */
-async function connect() {
+async function connect(extraHeaders?: HeadersInit) {
   const client = new Client({ name: "test", version: "0" });
   await client.connect(
     new StreamableHTTPClientTransport(new URL("https://livevariant.com/mcp"), {
-      fetch: ((input: string | URL | Request, init?: RequestInit) =>
-        app.request(String(input), init)) as unknown as typeof globalThis.fetch
+      fetch: ((input: string | URL | Request, init?: RequestInit) => {
+        if (!extraHeaders) {
+          return app.request(String(input), init);
+        }
+        const headers = new Headers(init?.headers);
+        new Headers(extraHeaders).forEach((value, key) => {
+          headers.set(key, value);
+        });
+        return app.request(String(input), { ...init, headers });
+      }) as unknown as typeof globalThis.fetch
     })
   );
   return client;
@@ -112,6 +121,67 @@ describe("MCP over HTTP", () => {
     );
     const { tools } = await client.listTools();
     expect(tools).toHaveLength(OPEN_TOOLS.length);
+  });
+
+  it("does not grant the asset upload token to open HTTP MCP callers", async () => {
+    const store = new MemoryAssetStore();
+    app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      assets: {
+        store,
+        signingSecret: "secret",
+        uploadToken: "upload-secret"
+      }
+    });
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const uploadImage = tools.find(t => t.name === "upload_image");
+    expect(uploadImage?.inputSchema.properties).not.toHaveProperty(
+      "uploadToken"
+    );
+
+    const result = await client.callTool({
+      name: "upload_image",
+      arguments: {
+        data: btoa("fake"),
+        contentType: "image/png"
+      }
+    });
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text?: string }).text).toContain(
+      "requires an upload token"
+    );
+  });
+
+  it("uses the configured asset upload token on API-token-gated HTTP MCP uploads", async () => {
+    const store = new MemoryAssetStore();
+    app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(42),
+      apiToken: "operator-secret",
+      assets: {
+        store,
+        signingSecret: "secret",
+        uploadToken: "upload-secret"
+      }
+    });
+    const client = await connect({ authorization: "Bearer operator-secret" });
+
+    const result = await client.callTool({
+      name: "upload_image",
+      arguments: {
+        data: btoa("fake"),
+        contentType: "image/png"
+      }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      size: 4,
+      contentType: "image/png"
+    });
   });
 
   it("advertises account-scoped tools when the deployment has accounts", async () => {

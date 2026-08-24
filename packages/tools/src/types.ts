@@ -37,6 +37,11 @@ export interface ToolContext {
   /** Injected so tests need no network and hosts can supply their own. */
   fetch: typeof globalThis.fetch;
   /**
+   * Runtime-only upload credential for MCP/embedded hosts pointing at a
+   * deployment whose /assets endpoint is gated. Not model-facing.
+   */
+  assetUploadToken?: string;
+  /**
    * Account-scoped capability, present only on deployments that HAVE
    * accounts. Its absence is meaningful: hosts do not register
    * account-scoped tools without it, so an agent never sees a tool the
@@ -115,6 +120,11 @@ export interface ToolDefinition<
   /** The full description an assistant reads before choosing this tool. */
   description: string;
   input: Input;
+  /**
+   * Optional narrower MCP-facing schema. REST/OpenAPI keep `input`; MCP can
+   * omit host-specific knobs that should not be model-facing in ChatGPT.
+   */
+  mcpInput?: z.ZodType;
   output: Output;
   /**
    * MCP tool annotations. `readOnly` covers everything that only computes
