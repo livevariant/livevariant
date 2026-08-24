@@ -27,4 +27,4 @@ jobs:
           path-to-signatures: "signatures/version1/cla.json"
           path-to-document: "https://github.com/livevariant/livevariant/blob/main/.github/CLA.md"
           branch: "cla-signatures"
-          allowlist: "michi88,*[bot]"
+          allowlist: "michi88,livevariant-colony-bot,prior-livevariant-bot,*[bot]"
