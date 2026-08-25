@@ -57,6 +57,11 @@ export { decorateMedia } from "./media.js";
  * only the testId, hashes, indices, and shape numbers, and never any
  * variant content (variants live in the config the page already has).
  *
+ * Also runs headless: where no window exists (node, agents, workers),
+ * createTest substitutes explicit stand-ins for the browser surface —
+ * see headlessWindow below — so the same test runs unchanged in a
+ * script or an agent's tool call.
+ *
  * Configs are written to be READ. `createTest` takes the same input the
  * schema does, so the whole test can sit legibly in page source:
  *
@@ -132,6 +137,60 @@ export function whenTagReady(
       }
     }, pollMs);
   });
+}
+
+/**
+ * Storage stand-in for runtimes without localStorage, shared across
+ * calls: the generated external id (lv:id) and cached assignments live
+ * for the process, so consecutive createTest calls in one script or
+ * agent session count as ONE visitor rather than a new one per call.
+ */
+function memoryStorage(): Storage {
+  const map = new Map<string, string>();
+  return {
+    get length() {
+      return map.size;
+    },
+    clear: () => map.clear(),
+    getItem: (key: string) => map.get(key) ?? null,
+    key: (index: number) => [...map.keys()][index] ?? null,
+    removeItem: (key: string) => {
+      map.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      map.set(key, value);
+    }
+  };
+}
+
+const headlessStorage = memoryStorage();
+
+/**
+ * The slice of the browser surface createTest reads, stubbed for
+ * runtimes with no window at all: node scripts, agents, edge workers,
+ * CI. No cookies, no URL, no history — identity is options.externalId
+ * or a generated id persisted in headlessStorage, and a redirect
+ * handoff can never arrive because there is no address bar to arrive
+ * on. The wire contract is unchanged: the server cannot tell a
+ * headless caller from a page.
+ */
+function headlessWindow(): Window {
+  const win = {
+    localStorage: headlessStorage,
+    document: { cookie: "" },
+    location: {
+      hostname: "",
+      origin: "null",
+      pathname: "/",
+      search: "",
+      hash: ""
+    },
+    history: {
+      state: null as unknown,
+      replaceState: () => undefined
+    }
+  };
+  return win as unknown as Window;
 }
 
 export interface CreateTestOptions {
@@ -242,12 +301,24 @@ export async function createTest(
   config: TestConfig | TestConfigInput | string,
   options: CreateTestOptions = {}
 ): Promise<LiveTest> {
-  const win = options.window ?? window;
+  // No window and none injected (node, agents, workers): run headless.
+  // Everything the browser provides for free gets an explicit stand-in;
+  // what each one means is documented on headlessWindow above.
+  const headless =
+    options.window === undefined && typeof window === "undefined";
+  const win = options.window ?? (headless ? headlessWindow() : window);
   // Explicit options win; the page-wide global (set by the tag) fills
   // the gaps, which is what lets page code pass no options at all.
   let pageGlobal = (win as Window & { livevariant?: LiveVariantGlobal })
     .livevariant;
-  if (!options.serverUrl && !pageGlobal && options.tagWaitMs !== false) {
+  // Headless has no tag manager that could still inject a config, so
+  // it skips the wait and reaches the serverUrl error immediately.
+  if (
+    !options.serverUrl &&
+    !pageGlobal &&
+    !headless &&
+    options.tagWaitMs !== false
+  ) {
     // No way to reach a server yet: the tag may simply not have loaded
     // (tag managers inject it late). Waiting here, not in page code,
     // is what lets every SDK user stay oblivious to that race.
@@ -296,11 +367,14 @@ export async function createTest(
   // to the SAME test and pollute each other. Configs with a stats key
   // are already unique (the key hash is random and identity-included),
   // and pre-encoded strings must keep the identity their URLs were
-  // printed with, so neither is touched.
+  // printed with, so neither is touched. Headless there is no hostname,
+  // so the config stays unscoped; a headless run that must join a test
+  // a page serves passes the encoded string (or the page's scope).
   const scoped =
     typeof config !== "string" &&
     input.scope === undefined &&
-    input.statsKeyHash === undefined
+    input.statsKeyHash === undefined &&
+    win.location.hostname !== ""
       ? { ...input, scope: win.location.hostname }
       : input;
   const resolved: TestConfig = parseTestConfig(scoped) as TestConfig;
@@ -556,7 +630,10 @@ export async function createTest(
         resolved.rewardEvents ??
         pageGlobal?.config?.rewardEvents ??
         DEFAULT_REWARD_EVENTS);
-  if (rewardEvents && rewardEvents.length > 0) {
+  // GA interception is a page mechanism — headless there is no
+  // dataLayer that could ever fire, so no watcher starts; headless
+  // callers report conversions through trackConversion directly.
+  if (rewardEvents && rewardEvents.length > 0 && !headless) {
     if (storage) {
       // The cached assignment above makes this test visible to the
       // page-wide tracker, so ensure one exists rather than adding a
