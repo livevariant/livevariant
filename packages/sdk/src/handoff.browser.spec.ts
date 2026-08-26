@@ -315,4 +315,42 @@ describe("autoTrack (GTM one-tag mode)", () => {
     expect(rewards[0].body.testId).toBe(healthy);
     tracker.dispose();
   });
+
+  it('"none" mode sweeps no web storage for rewards', async () => {
+    // A deployment that declared no web storage must not have it READ
+    // either: the access is the consent surface, exactly as with the
+    // cookie jar. Participations sitting in both web storages stay
+    // untouched, while one in the tracker's own window store rewards.
+    sessionStorage.setItem(
+      `lv:a:${"f0".repeat(32)}`,
+      JSON.stringify({ cell: 0, idHash: "f1".repeat(32) })
+    );
+    localStorage.setItem(
+      `lv:h:${"f2".repeat(32)}`,
+      JSON.stringify({
+        testId: "f2".repeat(32),
+        idHash: "f3".repeat(32),
+        cell: 0,
+        capturedAt: Date.now()
+      })
+    );
+    const inPage = "f4".repeat(32);
+    pageStorage(window).setItem(
+      `lv:a:${inPage}`,
+      JSON.stringify({ cell: 1, idHash: "f5".repeat(32) })
+    );
+    const { calls, fetchImpl } = fakeServer();
+    const tracker = autoTrack({
+      serverUrl: "https://livevariant.link",
+      fetch: fetchImpl,
+      storage: pageStorage(window)
+    });
+    (window as any).dataLayer = (window as any).dataLayer || [];
+    (window as any).dataLayer.push({ event: "purchase" });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const rewards = calls.filter(c => c.url.endsWith("/reward"));
+    expect(rewards).toHaveLength(1);
+    expect(rewards[0].body.testId).toBe(inPage);
+    tracker.dispose();
+  });
 });

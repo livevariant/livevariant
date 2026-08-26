@@ -60,29 +60,106 @@ export function pageStorage(win: Window): Storage {
 /** The plain-data storage choice a page config or tag attribute can carry. */
 export type StorageMode = "session-storage" | "local-storage" | "none";
 
-/** A web storage whose ACCESS can throw (privacy modes); null on trouble. */
-function guarded(read: () => Storage): Storage | null {
-  try {
-    return read() ?? null;
-  } catch {
-    return null;
+const SESSION_WRAP_KEY = "__lvSessionStore";
+const LOCAL_WRAP_KEY = "__lvLocalStore";
+
+type WrapHolder = Window & {
+  [SESSION_WRAP_KEY]?: Storage;
+  [LOCAL_WRAP_KEY]?: Storage;
+};
+
+/**
+ * A web storage that keeps the SDK's promises even when the storage does
+ * not: any operation that throws (access in a privacy mode, setItem on a
+ * full or forbidden store) latches the backing over to the window store
+ * and retries there, so storage trouble degrades to a working
+ * page-lifetime install instead of an exception reaching page code.
+ * Memoized per window so every bundle shares one identity per storage,
+ * which is what keeps the store registry and the watcher's dedupe exact.
+ */
+function resilientStorage(
+  win: Window,
+  key: typeof SESSION_WRAP_KEY | typeof LOCAL_WRAP_KEY,
+  read: (w: Window) => Storage
+): Storage {
+  const holder = win as WrapHolder;
+  const existing = holder[key];
+  if (existing) {
+    return existing;
   }
+  let backing: Storage | null = null;
+  let latched = false;
+  const current = (): Storage => {
+    if (latched) {
+      return pageStorage(win);
+    }
+    if (!backing) {
+      try {
+        backing = read(win);
+      } catch {
+        latched = true;
+        return pageStorage(win);
+      }
+    }
+    return backing;
+  };
+  const attempt = <T>(op: (store: Storage) => T): T => {
+    try {
+      return op(current());
+    } catch {
+      latched = true;
+      return op(pageStorage(win));
+    }
+  };
+  const store = {
+    get length(): number {
+      return attempt(s => s.length);
+    },
+    key(index: number): string | null {
+      return attempt(s => s.key(index));
+    },
+    getItem(name: string): string | null {
+      return attempt(s => s.getItem(name));
+    },
+    setItem(name: string, value: string): void {
+      attempt(s => s.setItem(name, value));
+    },
+    removeItem(name: string): void {
+      attempt(s => s.removeItem(name));
+    },
+    clear(): void {
+      attempt(s => s.clear());
+    }
+  } as Storage;
+  holder[key] = store;
+  return store;
+}
+
+/** The SDK's view of this window's sessionStorage, failure-latched. */
+export function sessionStore(win: Window): Storage {
+  return resilientStorage(win, SESSION_WRAP_KEY, w => w.sessionStorage);
+}
+
+/** The SDK's view of this window's localStorage, failure-latched. */
+export function localStore(win: Window): Storage {
+  return resilientStorage(win, LOCAL_WRAP_KEY, w => w.localStorage);
 }
 
 /**
  * Maps a declared mode to a store. Absent means the default,
  * "session-storage". "local-storage" is the cross-visit persistence
- * opt-in. "none" is the window store: no web storage touched, the SDK
- * still fully works for the page's lifetime. An unknown future mode
- * degrades to the window store too, never to surprise persistence, and
- * a web storage that throws on access falls back the same way.
+ * opt-in. "none" is the window store: no web storage touched, read or
+ * written, and the SDK still fully works for the page's lifetime. An
+ * unknown future mode degrades to the window store too, never to
+ * surprise persistence, and a web storage that misbehaves at any
+ * operation latches over to the window store the same way.
  */
 export function resolveStorage(win: Window, mode?: string): Storage | null {
   if (mode === undefined || mode === "session-storage") {
-    return guarded(() => win.sessionStorage) ?? pageStorage(win);
+    return sessionStore(win);
   }
   if (mode === "local-storage") {
-    return guarded(() => win.localStorage) ?? pageStorage(win);
+    return localStore(win);
   }
   return pageStorage(win);
 }
@@ -118,4 +195,10 @@ export function registeredStores(win: Window): readonly Storage[] {
 /** Test hook: forgets the registered stores of a window. */
 export function resetStoreRegistry(win: Window): void {
   delete (win as RegistryHolder)[STORE_REGISTRY_KEY];
+}
+
+/** Test hook: drops the memoized web-storage wrappers (and any latch). */
+export function resetWebStores(win: Window): void {
+  delete (win as WrapHolder)[SESSION_WRAP_KEY];
+  delete (win as WrapHolder)[LOCAL_WRAP_KEY];
 }

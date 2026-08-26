@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  localStore,
   pageStorage,
   registeredStores,
   registerStore,
   resetStoreRegistry,
-  resolveStorage
+  resetWebStores,
+  resolveStorage,
+  sessionStore
 } from "./page-store.js";
 
 /**
@@ -51,17 +54,52 @@ describe("pageStorage", () => {
 
 describe("resolveStorage", () => {
   it("maps the declared modes; the default is sessionStorage", () => {
-    expect(resolveStorage(window)).toBe(window.sessionStorage);
-    expect(resolveStorage(window, "session-storage")).toBe(
-      window.sessionStorage
-    );
-    expect(resolveStorage(window, "local-storage")).toBe(window.localStorage);
+    // The resolved stores are stable wrappers (one identity per window,
+    // so the registry and the watcher dedupe by object), writing through
+    // to the real web storage.
+    const session = resolveStorage(window)!;
+    expect(resolveStorage(window, "session-storage")).toBe(session);
+    expect(session).toBe(sessionStore(window));
+    session.setItem("lv:mode-probe", "s");
+    expect(window.sessionStorage.getItem("lv:mode-probe")).toBe("s");
+    expect(window.localStorage.getItem("lv:mode-probe")).toBeNull();
+    session.removeItem("lv:mode-probe");
+
+    const local = resolveStorage(window, "local-storage")!;
+    expect(local).toBe(localStore(window));
+    local.setItem("lv:mode-probe", "l");
+    expect(window.localStorage.getItem("lv:mode-probe")).toBe("l");
+    expect(window.sessionStorage.getItem("lv:mode-probe")).toBeNull();
+    local.removeItem("lv:mode-probe");
+
     // "none" means no web storage, not no SDK: the window store keeps
     // tests sticky and rewardable for the page's lifetime.
     expect(resolveStorage(window, "none")).toBe(pageStorage(window));
     // Forward-compatible: a mode this version does not know degrades to
     // the window store, never to a persistence surprise.
     expect(resolveStorage(window, "future-mode")).toBe(pageStorage(window));
+  });
+
+  it("latches to the window store when a web storage throws mid-use", () => {
+    resetWebStores(window);
+    pageStorage(window).clear();
+    const originalSetItem = Storage.prototype.setItem;
+    try {
+      Storage.prototype.setItem = function () {
+        throw new Error("quota");
+      };
+      const store = sessionStore(window);
+      // The throwing write is retried against the window store: no
+      // exception reaches the caller, and the value is readable back.
+      store.setItem("lv:latch-probe", "x");
+      expect(store.getItem("lv:latch-probe")).toBe("x");
+      expect(pageStorage(window).getItem("lv:latch-probe")).toBe("x");
+    } finally {
+      Storage.prototype.setItem = originalSetItem;
+      resetWebStores(window);
+      pageStorage(window).clear();
+      window.sessionStorage.removeItem("lv:latch-probe");
+    }
   });
 });
 
