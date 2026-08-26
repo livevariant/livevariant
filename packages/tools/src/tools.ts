@@ -46,6 +46,38 @@ const testRef = z
       "whatever you have."
   );
 
+/**
+ * build_test returns the encoded config under the key `config`, and the
+ * obvious agent move is to feed a response field forward under its own
+ * name. Every tool that reads a test therefore accepts that spelling
+ * too, instead of costing the caller a failed round-trip to learn ours.
+ */
+const testRefAlias = testRef.describe(
+  "Alias for `test`: the same value under the name build_test returns " +
+    "it as (`config`). Pass one or the other."
+);
+
+/** The one test a read tool was given, whichever name it arrived under. */
+function givenTest(input: { test?: string; config?: string }): string {
+  if (
+    input.test !== undefined &&
+    input.config !== undefined &&
+    input.test !== input.config
+  ) {
+    throw new ToolInputError(
+      "`test` and `config` disagree; pass the test under one name"
+    );
+  }
+  const ref = input.test ?? input.config;
+  if (ref === undefined) {
+    throw new ToolInputError(
+      "pass the test as `test` (or as `config`, exactly as build_test " +
+        "returned it)"
+    );
+  }
+  return ref;
+}
+
 const contextDim = z.object({
   key: z
     .string()
@@ -596,7 +628,10 @@ export const inspectTest = defineTool({
     "Use this before sending anything, and to answer 'what is this link?'.",
   readOnly: true,
   reachesNetwork: false,
-  input: z.object({ test: testRef }),
+  input: z.object({
+    test: testRef.optional(),
+    config: testRefAlias.optional()
+  }),
   output: z.object({
     testId: z.string(),
     name: z.string().optional(),
@@ -632,7 +667,7 @@ export const inspectTest = defineTool({
     )
   }),
   async handler(input) {
-    const { config, testId } = await resolveTest(input.test);
+    const { config, testId } = await resolveTest(givenTest(input));
     const findings: Array<{
       level: "error" | "warning" | "note";
       message: string;
@@ -737,7 +772,8 @@ export const generatePriors = defineTool({
   readOnly: true,
   reachesNetwork: false,
   input: z.object({
-    test: testRef,
+    test: testRef.optional(),
+    config: testRefAlias.optional(),
     when: z
       .record(z.string(), z.string())
       .optional()
@@ -795,7 +831,7 @@ export const generatePriors = defineTool({
     notes: z.array(z.string())
   }),
   async handler(input, context) {
-    const { config, testId } = await resolveTest(input.test);
+    const { config, testId } = await resolveTest(givenTest(input));
     const entries = slotEntries(config);
     if (input.when) {
       // Checked here as well as in the schema so the answer names the
@@ -973,7 +1009,8 @@ export const getStats = defineTool({
   readOnly: true,
   reachesNetwork: true,
   input: z.object({
-    test: testRef,
+    test: testRef.optional(),
+    config: testRefAlias.optional(),
     statsSecret: z
       .string()
       .optional()
@@ -1026,7 +1063,7 @@ export const getStats = defineTool({
     })
   }),
   async handler(input, context) {
-    const resolved = await resolveTest(input.test);
+    const resolved = await resolveTest(givenTest(input));
     const secret = input.statsSecret ?? resolved.statsSecret;
     if (!secret) {
       throw new ToolInputError(
@@ -1540,7 +1577,8 @@ export const getTestStatus = defineTool({
   reachesNetwork: true,
   scope: "account",
   input: z.object({
-    test: testRef,
+    test: testRef.optional(),
+    config: testRefAlias.optional(),
     statsSecret: z
       .string()
       .optional()
@@ -1571,7 +1609,7 @@ export const getTestStatus = defineTool({
         404
       );
     }
-    const resolved = await resolveTest(input.test);
+    const resolved = await resolveTest(givenTest(input));
     const secret = input.statsSecret ?? resolved.statsSecret;
     if (!secret) {
       throw new ToolInputError(
