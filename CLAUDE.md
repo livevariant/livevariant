@@ -70,6 +70,18 @@ fields)`. Tampering derives a different test with empty state.
   injected so two sites running the same trivial test never share
   state. Explicit `scope` overrides; keyed or pre-encoded configs are
   never touched.
+- **Page-scoped storage by default.** The browser SDK writes no cookies,
+  and its client state (identity `lv:id`, assignments `lv:a:*`, handoffs
+  `lv:h:*`) defaults to a window-shared PAGE store
+  (`sdk/src/page-store.ts`): sticky and rewardable for the page's
+  lifetime, gone on navigation, so a site needs no storage consent for
+  the default install. It hangs on the window because the tag and an npm
+  bundle coordinate rewards through those keys. localStorage is an
+  explicit opt-in (`storage: window.localStorage` in code,
+  `data-storage="local"` on the tag, `storage: "local"` in the global
+  config) and buys cross-page identity and pages-later conversions; the
+  GA `_ga` cookie is still read (never written) for identity when
+  present.
 
 ## Architecture
 

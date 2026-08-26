@@ -1,5 +1,6 @@
 import { captureHandoff, listHandoffs } from "./handoff.js";
 import { SDK_VERSION } from "./version.js";
+import { pageStorage } from "./page-store.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
 
 /**
@@ -17,7 +18,8 @@ import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
  *      pageview and URL-cleaned, for tests this page never rendered;
  *   2. cached inline assignments (lv:a:*), which is how tests created
  *      by page code (createTest) are rewarded WITHOUT their own GA
- *      watcher: shared localStorage is the coordination channel, so no
+ *      watcher: the window-shared store is the coordination channel
+ *      (the page store by default, localStorage when opted in), so no
  *      cross-bundle API exists to version.
  */
 export interface AutoTrackOptions {
@@ -109,7 +111,7 @@ export function autoTrack(options: AutoTrackOptions): AutoTracker {
   const win = options.window ?? window;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const storage =
-    options.storage === undefined ? win.localStorage : options.storage;
+    options.storage === undefined ? pageStorage(win) : options.storage;
 
   captureHandoff(win, storage);
 

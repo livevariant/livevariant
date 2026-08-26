@@ -6,10 +6,13 @@ import {
 
 /**
  * Client half of the redirect identity handoff. On page load the SDK
- * captures _lvt/_lvid/_lvvar from the URL, persists them (a conversion
- * usually happens pages later), and cleans the address bar the way gclid
- * handlers do. Stored handoffs are what lets a GTM-deployed SDK attribute
- * conversions for tests the page itself never rendered.
+ * captures _lvt/_lvid/_lvvar from the URL, stores them, and cleans the
+ * address bar the way gclid handlers do. Stored handoffs are what lets
+ * a GTM-deployed SDK attribute conversions for tests the page itself
+ * never rendered. How long they live is the storage's business: the
+ * default page store holds them until navigation (the landing page must
+ * see the conversion), localStorage-opted-in deployments keep them for
+ * a pages-later conversion up to the TTL below.
  */
 
 const STORAGE_PREFIX = "lv:h:";

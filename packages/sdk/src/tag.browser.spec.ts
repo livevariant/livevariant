@@ -4,6 +4,7 @@ import { bootTag } from "./tag.js";
 import { createTest, whenTagReady } from "./index.js";
 import { resetAutoTrack } from "./auto-track.js";
 import { resetDataLayerInterception } from "./ga.js";
+import { pageStorage } from "./page-store.js";
 
 /**
  * The tag is the reward-only install: a script element, no page code.
@@ -31,6 +32,7 @@ afterEach(() => {
     .querySelectorAll("script[data-publishable-key]")
     .forEach(el => el.remove());
   localStorage.clear();
+  pageStorage(window).clear();
 });
 
 describe("the tag", () => {
@@ -49,15 +51,16 @@ describe("the tag", () => {
     expect(typeof globalTag?.sdk?.createTest).toBe("function");
   });
 
-  it("rewards stored handoffs on trackConversion with zero page code", async () => {
-    // A previous redirect landing left a handoff in storage.
-    localStorage.setItem(
-      `lv:h:${"t".repeat(64)}`,
-      JSON.stringify({
-        testId: "t".repeat(64),
-        idHash: "i".repeat(64),
-        cell: 1
-      })
+  it("rewards a redirect handoff captured from the landing URL, zero page code", async () => {
+    // The visitor just arrived through /c: the URL carries the handoff,
+    // the tag captures it into the page store and cleans the address
+    // bar, and the conversion this pageview rewards it.
+    const testId = "c".repeat(64);
+    const landing = window.location.pathname + window.location.hash;
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}?_lvt=${testId}&_lvid=${"d".repeat(64)}&_lvvar=1`
     );
     const rewards: unknown[] = [];
     const original = window.fetch;
@@ -74,22 +77,53 @@ describe("the tag", () => {
         "data-publishable-key": "pk_tagtagtagtagtagtagtagta"
       });
       const tag = bootTag(window, script);
+      // Captured and cleaned: the params are gone from the address bar.
+      expect(window.location.search).not.toContain("_lvt");
       await tag?.sdk.trackConversion();
       expect(rewards).toHaveLength(1);
-      expect((rewards[0] as { testId: string }).testId).toBe("t".repeat(64));
+      expect((rewards[0] as { testId: string }).testId).toBe(testId);
     } finally {
       window.fetch = original;
+      window.history.replaceState(window.history.state, "", landing);
+    }
+  });
+
+  it('data-storage="local" opts the deployment into persistence', async () => {
+    const testId = "e5".repeat(32);
+    const landing = window.location.pathname + window.location.hash;
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}?_lvt=${testId}&_lvid=${"a1".repeat(32)}&_lvvar=0`
+    );
+    try {
+      const tag = bootTag(
+        window,
+        scriptWith({
+          src: "https://deploy.example/sdk.js",
+          "data-publishable-key": "pk_tagtagtagtagtagtagtagta",
+          "data-storage": "local"
+        })
+      );
+      // The handoff went to localStorage, surviving navigation, and the
+      // mode rides on tag.config so npm createTest calls follow it.
+      expect(localStorage.getItem(`lv:h:${testId}`)).toBeTruthy();
+      expect(tag?.config.storage).toBe("local");
+    } finally {
+      window.history.replaceState(window.history.state, "", landing);
+      localStorage.removeItem(`lv:h:${testId}`);
     }
   });
 
   it("rewards cached inline assignments too, skipping noAuto ones", async () => {
-    // Two npm-created tests left assignments in the shared cache; one
-    // opted out of automatic rewarding (rewardEvents: false).
-    localStorage.setItem(
+    // Two npm-created tests on this page left assignments in the shared
+    // page store; one opted out of automatic rewarding (rewardEvents:
+    // false). Cross-bundle: the npm SDK wrote, the tag reads.
+    pageStorage(window).setItem(
       `lv:a:${"a".repeat(64)}`,
       JSON.stringify({ cell: 2, idHash: "x".repeat(64), region: "eu" })
     );
-    localStorage.setItem(
+    pageStorage(window).setItem(
       `lv:a:${"b".repeat(64)}`,
       JSON.stringify({ cell: 0, idHash: "y".repeat(64), noAuto: true })
     );
@@ -251,7 +285,7 @@ describe("media decoration", () => {
 
   it("prefers a stored handoff for the SAME test: email keeps its variant", async () => {
     const { encoded: cfg, testId } = await encoded();
-    localStorage.setItem(
+    pageStorage(window).setItem(
       `lv:h:${testId}`,
       JSON.stringify({
         testId,
@@ -280,7 +314,7 @@ describe("media decoration", () => {
 
   it("replays handoffs for servers mounted under a path prefix", async () => {
     const { encoded: cfg, testId } = await encoded();
-    localStorage.setItem(
+    pageStorage(window).setItem(
       `lv:h:${testId}`,
       JSON.stringify({
         testId,

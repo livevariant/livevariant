@@ -26,6 +26,7 @@ import {
 } from "./index.js";
 import { autoTrack, type AutoTracker } from "./auto-track.js";
 import { decorateMedia } from "./media.js";
+import { resolveStorage, type StorageMode } from "./page-store.js";
 
 /** The booted global: resolved config plus the callable sdk. */
 export interface LiveVariantTag extends LiveVariantGlobal {
@@ -73,14 +74,21 @@ export function bootTag(
           .map(name => name.trim())
           .filter(Boolean)
       : undefined);
+  // Storage is page-scoped unless the deployment opted into persistence
+  // (data-storage="local") or out of caching entirely ("none"). The mode
+  // rides on tag.config so npm createTest calls on the page follow it.
+  const storageMode =
+    preset.storage ?? (data.storage as StorageMode | undefined);
+  const storage = resolveStorage(win, storageMode);
   // Claims the page-wide watcher unless an earlier bundle (an npm SDK
   // that ran first) already did; either way exactly one exists.
   const tracker: AutoTracker = autoTrack({
     serverUrl,
     rewardEvents,
+    storage,
     window: win
   });
-  const decorate = () => decorateMedia(win, serverUrl, win.localStorage);
+  const decorate = () => decorateMedia(win, serverUrl, storage);
   // Upgrade any serve images / click links already in the page. The
   // preload scanner beat us to bare src images (their id-less fetch
   // recorded nothing); data-lv-src images get their one identified
@@ -90,7 +98,8 @@ export function bootTag(
     config: {
       serverUrl,
       publishableKey: preset.publishableKey ?? data.publishableKey,
-      rewardEvents
+      rewardEvents,
+      ...(storageMode ? { storage: storageMode } : {})
     },
     sdk: {
       createTest,
