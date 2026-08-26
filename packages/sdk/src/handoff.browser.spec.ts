@@ -5,7 +5,11 @@ import { SDK_VERSION } from "./version.js";
 import { autoTrack } from "./auto-track.js";
 import { captureHandoff, getHandoff, listHandoffs } from "./handoff.js";
 import { resetDataLayerInterception } from "./ga.js";
-import { pageStorage, resetStoreRegistry } from "./page-store.js";
+import {
+  pageStorage,
+  registerStore,
+  resetStoreRegistry
+} from "./page-store.js";
 
 /**
  * The redirect -> SDK identity handoff, in a real browser: URL capture and
@@ -267,6 +271,46 @@ describe("autoTrack (GTM one-tag mode)", () => {
     expect(rewards).toHaveLength(1);
     expect(rewards[0].body.testId).toBe(test.testId);
     test.dispose();
+    tracker.dispose();
+  });
+
+  it("a throwing registered store forfeits only its own participations", async () => {
+    // A registered store can stop being readable (a consent wrapper after
+    // consent is revoked). Its failure is its own: the scan skips it and
+    // the page's other participations still reward.
+    const broken = {
+      get length(): number {
+        throw new Error("revoked");
+      },
+      key: (): string | null => {
+        throw new Error("revoked");
+      },
+      getItem: (): string | null => {
+        throw new Error("revoked");
+      },
+      setItem: (): void => undefined,
+      removeItem: (): void => undefined,
+      clear: (): void => undefined
+    } as Storage;
+    registerStore(window, broken);
+    const healthy = "d7".repeat(32);
+    pageStorage(window).setItem(
+      `lv:a:${healthy}`,
+      JSON.stringify({ cell: 0, idHash: "e8".repeat(32) })
+    );
+
+    const { calls, fetchImpl } = fakeServer();
+    const tracker = autoTrack({
+      serverUrl: "https://livevariant.link",
+      fetch: fetchImpl
+    });
+    (window as any).dataLayer = (window as any).dataLayer || [];
+    (window as any).dataLayer.push({ event: "purchase" });
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    const rewards = calls.filter(c => c.url.endsWith("/reward"));
+    expect(rewards).toHaveLength(1);
+    expect(rewards[0].body.testId).toBe(healthy);
     tracker.dispose();
   });
 });

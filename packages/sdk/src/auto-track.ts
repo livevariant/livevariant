@@ -139,7 +139,17 @@ export function autoTrack(options: AutoTrackOptions): AutoTracker {
         return;
       }
       scanned.add(store);
-      for (const participation of listParticipations(store)) {
+      let found: readonly Participation[];
+      try {
+        found = listParticipations(store);
+      } catch {
+        // A store that cannot be read (a consent wrapper after consent
+        // was revoked, a privacy mode) forfeits only its OWN
+        // participations. One broken store must never cost the page's
+        // other tests their rewards.
+        return;
+      }
+      for (const participation of found) {
         const key = `${participation.testId}:${participation.idHash}`;
         if (!seen.has(key)) {
           seen.add(key);
