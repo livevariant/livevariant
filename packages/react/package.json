@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/react",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Embeddable React components for LiveVariant: create tests (email/image, page redirect, website), and soon stats and management, in your own app",
   "license": "AGPL-3.0",
   "repository": {
@@ -32,7 +32,7 @@
     "./styles.css": "./styles.css"
   },
   "dependencies": {
-    "@livevariant/core": "0.1.1"
+    "@livevariant/core": "0.1.2"
   },
   "peerDependencies": {
     "react": "^19.0.0",
