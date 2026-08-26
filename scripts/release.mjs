@@ -7,9 +7,9 @@
  * in git, and "which versions work together" becomes a question nobody
  * should ever have to ask.
  *
- *   npm run release            interactive version prompt
- *   npm run release patch      or minor / major / an exact x.y.z
- *   npm run release:dry        walk the whole flow, write nothing
+ *   npm run release patch -- --otp=123456     or minor / major / x.y.z
+ *   npm run release -- --otp=123456           interactive version prompt
+ *   npm run release:dry                       walk the whole flow, write nothing
  *
  * Steps, and why the order matters:
  *   1. nx release version: bumps every package.json in the group and
@@ -24,9 +24,14 @@
  *      drift check green on the release commit.
  *   3. one commit, one v{version} tag.
  *   4. nx release publish, every package in the group.
+ *   5. git push --follow-tags, so the release commit and tag never sit
+ *      local-only after a successful publish.
  *
  * Publishing needs `npm login` (or NPM_TOKEN in CI) with rights on the
- * @livevariant org; everything before the publish step works without it.
+ * @livevariant org, plus a fresh one-time password when the account has
+ * 2FA on writes. Both are checked before anything happens: discovering
+ * an auth problem only at the publish step would leave a commit and tag
+ * already cut. A dry run needs neither.
  */
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -42,11 +47,40 @@ const verbose = args.includes("--verbose");
 const specifier = args.find(a => !a.startsWith("--"));
 // npm accounts with 2FA on writes need a fresh one-time password at the
 // publish step: `npm run release patch -- --otp=123456`. Without it npm
-// answers EOTP and the retry is `npx nx release publish --otp=...`.
+// answers EOTP only after the commit and tag exist, so a real release
+// refuses to start without one (NPM_TOKEN covers CI, where automation
+// tokens bypass 2FA).
 const otp = args.find(a => a.startsWith("--otp="))?.slice("--otp=".length);
 
 const run = cmd => execSync(cmd, { stdio: "inherit" });
 const out = cmd => execSync(cmd, { encoding: "utf8" }).trim();
+
+/**
+ * Fails before the version bump on anything that would otherwise only
+ * fail at the publish step, where the commit and tag have already been
+ * cut and the failure leaves the release half-done.
+ */
+function assertReadyToPublish() {
+  if (!otp && !process.env.NPM_TOKEN) {
+    console.error(
+      "release: --otp is required (npm 2FA on writes rejects the publish " +
+        "without it, after the commit and tag already exist):\n" +
+        "  npm run release patch -- --otp=123456"
+    );
+    process.exit(1);
+  }
+  let user;
+  try {
+    user = execSync("npm whoami", { encoding: "utf8", stdio: "pipe" }).trim();
+  } catch {
+    console.error(
+      "release: not logged in to npm (`npm whoami` failed); run `npm login` " +
+        "first"
+    );
+    process.exit(1);
+  }
+  console.log(`release: publishing as npm user ${user}`);
+}
 
 /**
  * Every publishable package must be in the release group, and nothing
@@ -248,6 +282,11 @@ function syncServerJsonVersion(version) {
   writeFileSync("server.json", `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+// A dry run stops before the publish step, so it alone runs without npm
+// auth or an OTP.
+if (!dryRun) {
+  assertReadyToPublish();
+}
 assertReleaseGroupComplete();
 assertLockIsCrossPlatform();
 
@@ -313,11 +352,24 @@ const failed = Object.values(results).filter(r => r.code !== 0).length;
 if (failed > 0) {
   console.error(
     `release: ${failed} package(s) failed to publish. The commit and tag ` +
-      "exist; fix the npm problem (usually auth: npm login) and run " +
-      "`npx nx release publish` to retry publishing without re-versioning."
+      "exist and were NOT pushed; fix the npm problem (an expired OTP is " +
+      "the usual one) and run `npx nx release publish --otp=...` to retry " +
+      "publishing without re-versioning, then `git push --follow-tags`."
   );
   process.exit(1);
 }
-console.log(
-  `release: v${workspaceVersion} published. Push it: git push --follow-tags`
-);
+
+// The packages are live on npm at this point, so the commit and tag must
+// not stay local: --follow-tags pushes both (the tag is annotated above
+// for exactly this reason).
+try {
+  run("git push --follow-tags");
+} catch {
+  console.error(
+    `release: v${workspaceVersion} is PUBLISHED on npm but the push ` +
+      "failed; run `git push --follow-tags` yourself so the release " +
+      "commit and tag reach the remote."
+  );
+  process.exit(1);
+}
+console.log(`release: v${workspaceVersion} published and pushed.`);

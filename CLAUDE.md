@@ -297,7 +297,9 @@ npm run dev:worker         # wrangler dev, env "dev": hosted entry + local D1 ac
                            # First time: npm run migrate:local, and put a random
                            # LV_AUTH_SECRET in .dev.vars. Without a Resend key the
                            # magic sign-in link prints to this terminal.
-npm run release            # lockstep versioning: ALL five npm packages, one version, every release
+npm run release -- --otp=… # lockstep versioning: ALL five npm packages, one version, every
+                           # release. Refuses to start without npm login + an OTP (NPM_TOKEN
+                           # skips the OTP), and pushes commit + tag itself when publish succeeds.
 ```
 
 - Simulation tests in `packages/core/src/model.spec.ts` earn the
