@@ -4,7 +4,7 @@ import { bootTag } from "./tag.js";
 import { createTest, whenTagReady } from "./index.js";
 import { resetAutoTrack } from "./auto-track.js";
 import { resetDataLayerInterception } from "./ga.js";
-import { pageStorage } from "./page-store.js";
+import { pageStorage, resetStoreRegistry } from "./page-store.js";
 
 /**
  * The tag is the reward-only install: a script element, no page code.
@@ -33,6 +33,7 @@ afterEach(() => {
     .forEach(el => el.remove());
   localStorage.clear();
   pageStorage(window).clear();
+  resetStoreRegistry(window);
 });
 
 describe("the tag", () => {

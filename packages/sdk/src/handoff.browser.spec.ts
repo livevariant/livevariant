@@ -5,7 +5,7 @@ import { SDK_VERSION } from "./version.js";
 import { autoTrack } from "./auto-track.js";
 import { captureHandoff, getHandoff, listHandoffs } from "./handoff.js";
 import { resetDataLayerInterception } from "./ga.js";
-import { pageStorage } from "./page-store.js";
+import { pageStorage, resetStoreRegistry } from "./page-store.js";
 
 /**
  * The redirect -> SDK identity handoff, in a real browser: URL capture and
@@ -44,6 +44,7 @@ function visitWithParams(params: Record<string, string>): void {
 beforeEach(() => {
   localStorage.clear();
   pageStorage(window).clear();
+  resetStoreRegistry(window);
   history.replaceState(null, "", "/");
   delete (window as any).dataLayer;
   // The interceptor is a per-window singleton with an event replay buffer;
@@ -220,6 +221,52 @@ describe("autoTrack (GTM one-tag mode)", () => {
     const rewards = calls.filter(c => c.url.endsWith("/reward"));
     expect(rewards).toHaveLength(1);
     expect(rewards[0].body.testId).toBe(inlineTest);
+    tracker.dispose();
+  });
+
+  it("rewards an assignment cached in a caller-supplied custom store", async () => {
+    // Round two of the same review finding: storage is a caller's choice,
+    // so the watcher must not depend on guessing it. A custom Storage (a
+    // consent-gated wrapper, a fake in a test harness) registers itself
+    // when a test caches into it, and the already-claimed watcher scans
+    // it like the built-ins. Exactly once: one watcher, deduplicated
+    // stores, so no double reward either.
+    const data = new Map<string, string>();
+    const custom = {
+      get length() {
+        return data.size;
+      },
+      key: (i: number) => [...data.keys()][i] ?? null,
+      getItem: (k: string) => data.get(k) ?? null,
+      setItem: (k: string, v: string) => void data.set(k, String(v)),
+      removeItem: (k: string) => void data.delete(k),
+      clear: () => data.clear()
+    } as Storage;
+
+    const { calls, fetchImpl } = fakeServer();
+    // The tag's tracker claims the page watcher first, on the page store.
+    const tracker = autoTrack({
+      serverUrl: "https://livevariant.link",
+      fetch: fetchImpl
+    });
+    // Page code then creates a test that caches into its own store. Its
+    // ensure-a-tracker call is a no-op on the claim, so the tag's watcher
+    // is the only rewarder this page has.
+    const test = await createTest(CONFIG, {
+      serverUrl: "https://livevariant.link",
+      fetch: fetchImpl,
+      storage: custom
+    });
+    expect(custom.getItem(`lv:a:${test.testId}`)).toBeTruthy();
+
+    (window as any).dataLayer = (window as any).dataLayer || [];
+    (window as any).dataLayer.push({ event: "purchase" });
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    const rewards = calls.filter(c => c.url.endsWith("/reward"));
+    expect(rewards).toHaveLength(1);
+    expect(rewards[0].body.testId).toBe(test.testId);
+    test.dispose();
     tracker.dispose();
   });
 });

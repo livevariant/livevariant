@@ -27,7 +27,11 @@ import { resolveExternalId } from "./identity.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
 import { captureHandoff, getHandoff } from "./handoff.js";
 import { autoTrack } from "./auto-track.js";
-import { resolveStorage, type StorageMode } from "./page-store.js";
+import {
+  registerStore,
+  resolveStorage,
+  type StorageMode
+} from "./page-store.js";
 import { SDK_VERSION } from "./version.js";
 
 export { gaClientId, resolveExternalId } from "./identity.js";
@@ -306,6 +310,11 @@ export async function createTest(
     options.storage === undefined
       ? resolveStorage(win, pageGlobal?.config?.storage)
       : options.storage;
+  // Whatever store this test caches into, the page-wide reward watcher
+  // must scan it, including a caller-supplied custom Storage the watcher
+  // could never guess at. Registration is what keeps "which store" a
+  // caching choice rather than a rewards choice.
+  registerStore(win, storage);
 
   // Parsing rather than trusting normalizes the readable shorthands
   // (bare-string variants, `variants` for a single slot) into the

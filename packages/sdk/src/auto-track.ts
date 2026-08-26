@@ -1,6 +1,6 @@
 import { captureHandoff, listHandoffs } from "./handoff.js";
 import { SDK_VERSION } from "./version.js";
-import { pageStorage } from "./page-store.js";
+import { pageStorage, registeredStores, registerStore } from "./page-store.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
 
 /**
@@ -112,24 +112,33 @@ export function autoTrack(options: AutoTrackOptions): AutoTracker {
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const storage =
     options.storage === undefined ? pageStorage(win) : options.storage;
+  registerStore(win, storage);
 
   captureHandoff(win, storage);
 
   /**
-   * Every reward target however it was stored. The page's ONE watcher can
-   * be bound to the page store while another bundle on the page cached its
-   * assignment under the localStorage opt-in (or an earlier opted-in
-   * pageview left a handoff there), and a conversion must reward those
-   * participations too, so localStorage is always scanned alongside the
-   * tracker's own store. Scanned, never written: the lv:* keys it finds
-   * there exist only because some LiveVariant surface wrote them under the
-   * deployment's own opt-in, so reading them back adds no storage surface
-   * the deployment has not already accepted.
+   * Every reward target however it was stored. Storage is a caller's
+   * choice, so the page's ONE watcher can be bound to one store while
+   * another bundle cached its assignment in a different one: the tag on
+   * the page store next to a createTest that opted into localStorage, or
+   * into its own custom Storage. Discovery therefore never depends on
+   * which store this tracker holds: it scans its own store, every store a
+   * LiveVariant surface on this page registered, and localStorage (an
+   * earlier opted-in pageview may have persisted handoffs no live surface
+   * re-registers). Scanned, never written: any lv:* keys found in
+   * localStorage exist only because some LiveVariant surface wrote them
+   * under the deployment's own opt-in, so reading them back adds no
+   * storage surface the deployment has not already accepted.
    */
   function allParticipations(): Participation[] {
     const seen = new Set<string>();
+    const scanned = new Set<Storage>();
     const out: Participation[] = [];
     const collect = (store: Storage | null): void => {
+      if (!store || scanned.has(store)) {
+        return;
+      }
+      scanned.add(store);
       for (const participation of listParticipations(store)) {
         const key = `${participation.testId}:${participation.idHash}`;
         if (!seen.has(key)) {
@@ -139,10 +148,11 @@ export function autoTrack(options: AutoTrackOptions): AutoTracker {
       }
     };
     collect(storage);
+    for (const store of registeredStores(win)) {
+      collect(store);
+    }
     try {
-      if (win.localStorage !== storage) {
-        collect(win.localStorage);
-      }
+      collect(win.localStorage);
     } catch {
       // Storage access can throw (privacy modes); nothing extra to scan.
     }

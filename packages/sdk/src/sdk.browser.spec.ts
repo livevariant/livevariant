@@ -9,7 +9,7 @@ import { createTest, type CreateTestOptions } from "./index.js";
 import { gaClientId } from "./identity.js";
 import { eventNameOf, resetDataLayerInterception } from "./ga.js";
 import { resetAutoTrack } from "./auto-track.js";
-import { pageStorage } from "./page-store.js";
+import { pageStorage, resetStoreRegistry } from "./page-store.js";
 import { SDK_VERSION } from "./version.js";
 
 /**
@@ -90,6 +90,7 @@ function clearDataLayer(): void {
 beforeEach(() => {
   localStorage.clear();
   pageStorage(window).clear();
+  resetStoreRegistry(window);
   document.cookie = "_ga=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
   clearDataLayer();
   // Release the page-wide watcher claim an earlier test's tracker took.

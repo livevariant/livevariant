@@ -67,3 +67,36 @@ export function resolveStorage(win: Window, mode?: string): Storage | null {
   }
   return pageStorage(win);
 }
+
+const STORE_REGISTRY_KEY = "__lvStoreRegistry";
+
+type RegistryHolder = Window & { [STORE_REGISTRY_KEY]?: Storage[] };
+
+/**
+ * Every Storage a LiveVariant surface on this page caches into. The
+ * page-wide reward watcher scans all of them, so WHERE a bundle keeps
+ * its cache never decides WHETHER its conversions count: the store is a
+ * caller's choice (the page store, localStorage, a consent-gated
+ * wrapper), and the one watcher, whoever claimed it and with whatever
+ * store, must see every cached participation. On the window for the
+ * same reason as the page store itself: bundles do not share modules.
+ */
+export function registerStore(win: Window, store: Storage | null): void {
+  if (!store) {
+    return;
+  }
+  const holder = win as RegistryHolder;
+  const registry = (holder[STORE_REGISTRY_KEY] ??= []);
+  if (!registry.includes(store)) {
+    registry.push(store);
+  }
+}
+
+export function registeredStores(win: Window): readonly Storage[] {
+  return (win as RegistryHolder)[STORE_REGISTRY_KEY] ?? [];
+}
+
+/** Test hook: forgets the registered stores of a window. */
+export function resetStoreRegistry(win: Window): void {
+  delete (win as RegistryHolder)[STORE_REGISTRY_KEY];
+}

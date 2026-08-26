@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { pageStorage, resolveStorage } from "./page-store.js";
+import {
+  pageStorage,
+  registeredStores,
+  registerStore,
+  resetStoreRegistry,
+  resolveStorage
+} from "./page-store.js";
 
 /**
  * The page store is the default home for identity, assignments and
@@ -51,5 +57,19 @@ describe("resolveStorage", () => {
     // Forward-compatible: a mode this version does not know degrades to
     // the page store, never to a persistence surprise.
     expect(resolveStorage(window, "future-mode")).toBe(pageStorage(window));
+  });
+});
+
+describe("registerStore", () => {
+  it("keeps one entry per store and ignores null", () => {
+    resetStoreRegistry(window);
+    const store = pageStorage(window);
+    registerStore(window, store);
+    registerStore(window, store);
+    registerStore(window, null);
+    registerStore(window, localStorage);
+    expect(registeredStores(window)).toEqual([store, localStorage]);
+    resetStoreRegistry(window);
+    expect(registeredStores(window)).toEqual([]);
   });
 });
