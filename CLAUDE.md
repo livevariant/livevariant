@@ -1,4 +1,4 @@
-# LiveVariant — project guide
+# LiveVariant: project guide
 
 Open-source (AGPL) adaptive A/B testing. The entire test configuration
 travels base64url-encoded in the URL: no accounts, no registration. One
@@ -20,7 +20,7 @@ flag code that does not match DESIGN.md.
   encoded in the URL; `testId = sha256(canonical config minus excluded
 fields)`. Tampering derives a different test with empty state.
   Identity-EXCLUDED (change without resetting the test): `priors`,
-  `priorStrengthCap`, `decorateRedirects`, `variantParam`,
+  `ctxPriors`, `priorStrengthCap`, `decorateRedirects`, `variantParam`,
   `forwardParams`. Everything else (slots, ctx, `region`, `scope`,
   `statsKeyHash`, `rewardEvents`, redirects) is identity-INCLUDED.
 - **One model, zero choices.** No algorithm field exists. Every test
@@ -42,7 +42,13 @@ fields)`. Tampering derives a different test with empty state.
   skipped, never fatal.
 - **Priors.** Per-slot-variant `{mean, strength}`, capped by
   `priorStrengthCap` (server ceiling 50), applied as pseudo-observations
-  on the variant's main-effect coordinate. Identity-excluded;
+  on the variant's main-effect coordinate. `ctxPriors` blocks carry the
+  same per-slot shape under a `when` (dimension key to value) and land on
+  the (context x variant) INTERACTION instead, which is the only way to
+  say "image B is the one for the blue segment" rather than "for
+  everybody"; the context feature index is a pure function of
+  `key=value` and the dimension, so a segment's prior is placeable with
+  no visitor from that segment present. Both identity-excluded;
   `POST /recompute` applies changes to full history.
 - **Stats secret.** `statsKeyHash` in the config is the sha256 of a
   creator-held secret; `/stats`, `/recompute`, `/exclude` take it as a
@@ -168,6 +174,67 @@ Handoff params on redirects: `_lvt` (testId), `_lvid` (idHash), `_lvvar`
   use country/device; email examples must use `utm_*` or merge-tag
   values.
 
+## Inference: what the numbers do and do not mean
+
+A statistical audit (`docs/experiments/AB_TESTING_REVIEW.md`, every number in
+it produced by porting this repo's own numerics to Python and simulating them)
+found the SERVING correct and four things wrong with the REPORTING. Read this
+before touching `decide.ts` or `stats-derive.ts`; the reasoning is easy to
+rediscover the hard way.
+
+- **Adaptive allocation biases the reported rates.** A starved arm's sample
+  mean is low by ~11% of its true value (5% vs 10%, 300 replications), and
+  Wilson coverage drifts to ~0.94 against a nominal 0.95. This is expected,
+  not a bug: Nie, Tian, Taylor & Zou (2018, AISTATS) prove the negative bias
+  for optimism-driven algorithms including Thompson sampling; Shin, Ramdas &
+  Rinaldo (2019, NeurIPS) characterize the sign per arm. The bandit is
+  supposed to starve the loser. The defect is presenting adaptively collected
+  counts with the visual grammar of a fixed-design experiment. Do NOT "fix" it
+  by widening the interval: that repairs coverage and leaves the point
+  estimate wrong. The surfaces mark thin-exposure variants
+  (THIN_EXPOSURE_SHARE), and every stored serve now records its propensity
+  (AssignmentRecord.propensity, PROPENSITY_DRAWS extra draws off the serve's
+  own Cholesky factor), which is the input the adaptively-weighted AIPW
+  estimator of Hadad, Hirshberg, Zhan, Wager & Athey (2021, PNAS 118(15),
+  doi:10.1073/pnas.2014602118) needs per record. The estimator itself is the
+  remaining open piece.
+- **`canStop` is a per-look quantity.** It bounds posterior expected loss at
+  ONE evaluation; a dashboard polls until it fires, which is optional
+  stopping. Measured over 5% vs 6%, realized regret was 2.59% of the best rate
+  against the 1% the threshold reads like. Johari, Koomen, Pekelis & Walsh
+  (2022, Operations Research 70(3), doi:10.1287/opre.2021.2135) is what a rule
+  that survives continuous monitoring requires; Loecher (2021,
+  doi:10.3389/frai.2021.715690) covers the bandit case. The wording no longer
+  promises a bound. The threshold's VALUE is unchanged and changing it is a
+  separate decision.
+- **Per-bucket analysis is partially pooled** (Gelman, Hill & Yajima 2012,
+  doi:10.1080/19345747.2011.618213). It used to be a fresh flat-prior analysis
+  per bucket, which showed a false segment winner at P(best) >= 95% in 52.7%
+  of null 8x2 runs. Each bucket's prior is now the whole test's rate per arm
+  at BUCKET_POOLING_STRENGTH pseudo-observations, on top of the
+  `MIN_BUCKET_PULLS_TO_CALL` exposure gate. Know what pooling can and cannot
+  fix before touching the constant: it kills the SEGMENTATION illusion (a
+  confident bucket contradicting the global leader: 16-18% of null runs
+  unpooled, ~1% pooled, measured in stats-derive.spec.ts), but a bucket
+  echoing the global result's own premature confidence converges to the
+  global null rate however strong the prior, and that is the tie wording's
+  job. A bucket's `leaderRate` is the shrunk posterior mean, not the raw
+  ratio; the raw counts sit beside it.
+- **Hash collisions are common and mostly harmless.** 25-56% of features share
+  a slot at shipped dimensions. What matters is that no tested shape produced
+  same-slot main-effect aliasing and the 3x3 local-optimum simulation reaches
+  the global optimum at dim 32, 64 and 128 alike. Weinberger et al. (2009,
+  doi:10.1145/1553374.1553516) is the reference, with the caveat that
+  `dimForShape`'s ~2x ratio is below the regime its guarantees cover.
+
+**`dim` is load-bearing and unversioned.** It is recomputed from the config on
+every serve and every read, while `featIdx` is hashed modulo it and STORED per
+record. So changing how `dim` is computed does not change a test id and does
+not reset a test: it silently re-points every historical feature, and
+`recomputeState` cannot repair it because it replays the stored indices and the
+raw context is not retained. `legacyDimForShape` exists for exactly this
+reason. Never change the sizing a live test was created under.
+
 ## Storage
 
 `StateStore` (`packages/server/src/store/types.ts`) = event log
@@ -197,6 +264,23 @@ read-modify-write adapter would pass them.
 ## Development
 
 Node 24 (`nvm use`), npm, nx monorepo.
+
+**Never repair package-lock.json by rerunning `npm install` over it.** npm
+prunes the os/cpu variants the current machine does not use whenever it
+installs with a node_modules present (npm/cli#7961, #4828), so on a Mac an
+incremental rewrite silently deletes every linux binary and hands CI a tree it
+cannot build. It has cost this repo two red releases. Rebuild instead:
+
+```bash
+rm -rf node_modules package-lock.json && npm install
+```
+
+Releases do not touch the lockfile with an install at all: nx's lock-file step
+is off (`skipLockFileUpdate` in nx.json) and `scripts/release.mjs` writes the
+new versions into the lockfile itself, since a version bump changes numbers it
+already knows and needs no resolver. The same script refuses to release a
+lockfile that is already missing optional-dependency entries, which is what a
+pruned one looks like.
 
 ```bash
 npm ci

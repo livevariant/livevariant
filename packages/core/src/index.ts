@@ -9,7 +9,10 @@ export {
 } from "./canonical.js";
 export {
   cellNames,
+  clickTarget,
   ctxDimSchema,
+  destinationUrls,
+  hasPerElementDestinations,
   slotEntries,
   slotSizes,
   parseTestConfig,
@@ -30,15 +33,21 @@ export {
   validCell
 } from "./cells.js";
 export {
+  MAX_DIM,
   MODEL_NOISE,
   cellFeatures,
   chooseCell,
+  chooseCellWithPropensity,
+  PROPENSITY_DRAWS,
   cholesky,
+  ctxCardinality,
   dimForShape,
   newModel,
   observe,
   reward,
   variantFeature,
+  wantedDimForShape,
+  type CtxCardinality,
   type JointModel,
   type VariantPrior
 } from "./model.js";
@@ -91,6 +100,7 @@ export {
   deriveAutoCtx,
   deriveResolvedCtx,
   enumerateBucketLabels,
+  labelBucketsFromSignals,
   mergeFeatureIndices,
   externalIdHash,
   featureIndices,
@@ -142,7 +152,11 @@ export {
   type ExclusionResult
 } from "./exclusions.js";
 export {
+  BUCKET_POOLING_STRENGTH,
+  MIN_BUCKET_PULLS_TO_CALL,
+  MIN_PROBABILITY_GAP_TO_NAME_LEADER,
   MIN_PULLS_TO_CALL,
+  THIN_EXPOSURE_SHARE,
   analyzeOutcomes,
   marginalOutcomes,
   type ArmOutcome,

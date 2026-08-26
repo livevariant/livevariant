@@ -41,7 +41,7 @@ const POLICIES = "livevariant_policies";
 const SCAN_PAGE = 500;
 
 const ASSIGNMENT_COLUMNS =
-  "cell, slot_sizes, dim, feat_idx, ctx_key, reward_total, sdk, first_seen, src_hash, signals";
+  "cell, slot_sizes, dim, feat_idx, ctx_key, propensity, reward_total, sdk, first_seen, src_hash, signals";
 
 interface AssignmentRow {
   cell: number;
@@ -49,6 +49,7 @@ interface AssignmentRow {
   dim: number;
   feat_idx: number[];
   ctx_key: string | null;
+  propensity: number | null;
   reward_total: number;
   sdk: string | null;
   /** int8 arrives as a string from node-postgres; ms epoch is safe in a number. */
@@ -64,6 +65,7 @@ function toRecord(row: AssignmentRow): AssignmentRecord {
     dim: row.dim,
     featIdx: row.feat_idx,
     ctxKey: row.ctx_key,
+    propensity: row.propensity,
     rewardTotal: row.reward_total,
     sdk: row.sdk,
     firstSeen: Number(row.first_seen),
@@ -178,8 +180,8 @@ export class PostgresStore implements StateStore {
     const { rows } = await this.db.query<AssignmentRow & { created: boolean }>(
       `INSERT INTO ${ASSIGNMENTS}
          (test_id, id_hash, cell, slot_sizes, dim, feat_idx, ctx_key,
-          reward_total, sdk, first_seen, src_hash, signals)
-       VALUES ($1, $2, $3, $4::int[], $5, $6::int[], $7, $8, $9, $10, $11, $12::jsonb)
+          propensity, reward_total, sdk, first_seen, src_hash, signals)
+       VALUES ($1, $2, $3, $4::int[], $5, $6::int[], $7, $8, $9, $10, $11, $12, $13::jsonb)
        ON CONFLICT (test_id, id_hash) DO UPDATE SET test_id = ${ASSIGNMENTS}.test_id
        RETURNING ${ASSIGNMENT_COLUMNS}, (xmax = 0) AS created`,
       [
@@ -190,6 +192,7 @@ export class PostgresStore implements StateStore {
         rec.dim,
         rec.featIdx,
         rec.ctxKey,
+        rec.propensity ?? null,
         rec.rewardTotal,
         rec.sdk ?? null,
         rec.firstSeen,

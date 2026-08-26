@@ -1,7 +1,7 @@
 {
   "name": "livevariant",
   "description": "Run A/B tests that pick their own winner. Build tests from a set of variants, get URLs for email or web, and read results with real win probabilities instead of eyeballed conversion rates.",
-  "version": "0.0.3",
+  "version": "0.1.1",
   "author": {
     "name": "LiveVariant"
   },
@@ -17,7 +17,7 @@
     "shortDescription": "A/B tests that pick their own winner.",
     "longDescription": "Build bandit-driven A/B tests from a set of variants, get ready-made URLs for email and web, warm-start them from what you expect, and read results with genuine win probabilities and a stop/continue call rather than eyeballed conversion rates.",
     "developerName": "LiveVariant",
-    "category": "Productivity",
+    "category": "Business & Operations",
     "capabilities": [
       "MCP",
       "Analytics",

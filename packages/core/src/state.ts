@@ -1,7 +1,8 @@
 import { cellCount, validCell } from "./cells.js";
 import {
   cellFeatures,
-  chooseCell as modelChooseCell,
+  chooseCellWithPropensity,
+  MODEL_NOISE,
   newModel,
   observe,
   reward,
@@ -61,6 +62,17 @@ export interface AssignmentRecord {
    * asking anyone to re-instrument.
    */
   sdk?: string | null;
+  /**
+   * P(this cell wins a fresh Thompson draw) at the moment it was served,
+   * add-one smoothed over PROPENSITY_DRAWS draws. Null on records written
+   * before the field existed, and on server versions that did not compute
+   * it. Stored because serve time is the one moment it is exact: a replay
+   * can rebuild the posterior, but stored featIdx can lose context indices
+   * to hash collisions, so the reconstruction is approximate where this is
+   * not. The input an adaptively-weighted estimator of the true rates
+   * (Hadad et al. 2021) needs per record; nothing reads it yet.
+   */
+  propensity?: number | null;
   /** ms epoch; also the replay order for recompute. */
   firstSeen: number;
   /**
@@ -184,12 +196,26 @@ export function choose(
   state: DerivedState,
   ctxFeatIdx: number[],
   rng: Rng,
-  noise?: number
-): { cell: number; featIdx: number[] } {
+  noise?: number,
+  /**
+   * Extra posterior draws for the propensity estimate; 0 skips it. Callers
+   * that store the choice should ask for it (PROPENSITY_DRAWS), because the
+   * serve is the one moment it is exact: see chooseCellWithPropensity.
+   */
+  propensityDraws = 0
+): { cell: number; featIdx: number[]; propensity: number | null } {
   const ctx = safeFeatIdx(state.dim, ctxFeatIdx);
-  const cell = modelChooseCell(state.model, state.slotSizes, ctx, rng, noise);
+  const { cell, propensity } = chooseCellWithPropensity(
+    state.model,
+    state.slotSizes,
+    ctx,
+    rng,
+    noise ?? MODEL_NOISE,
+    propensityDraws
+  );
   return {
     cell,
-    featIdx: cellFeatures(state.dim, state.slotSizes, cell, ctx)
+    featIdx: cellFeatures(state.dim, state.slotSizes, cell, ctx),
+    propensity
   };
 }

@@ -1,0 +1,34 @@
+name: Publish to MCP Registry
+
+# Publishes server.json to the official MCP registry on every release tag.
+# Auth is GitHub Actions OIDC: the registry grants io.github.livevariant/*
+# to workflows running in this org's repositories, so no user login, app
+# installation, or stored secret is involved. scripts/release.mjs writes
+# the release version into server.json as part of the release commit, so
+# the manifest at the tag always matches the packages published to npm.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          sudo mv mcp-publisher /usr/local/bin/
+
+      - name: Publish server.json
+        run: |
+          mcp-publisher login github-oidc
+          mcp-publisher publish

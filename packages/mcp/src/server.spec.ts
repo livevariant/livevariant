@@ -13,6 +13,7 @@ import pkg from "@livevariant/mcp/package.json" with { type: "json" };
 async function connect(fetchImpl?: typeof globalThis.fetch) {
   const server = createServer({
     serverUrl: "https://livevariant.link",
+    assetUploadToken: "upload-secret",
     fetch:
       fetchImpl ??
       ((() => {
@@ -68,6 +69,53 @@ describe("the MCP server", () => {
       expect(tool.inputSchema.type).toBe("object");
       expect(tool.outputSchema).toBeTruthy();
     }
+  });
+
+  it("does not advertise self-host-only knobs in MCP input schemas", async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    const byName = new Map(tools.map(t => [t.name, t]));
+
+    expect(byName.get("build_test")?.inputSchema.properties).not.toHaveProperty(
+      "serverUrl"
+    );
+    expect(
+      byName.get("upload_image")?.inputSchema.properties
+    ).not.toHaveProperty("serverUrl");
+    expect(
+      byName.get("upload_image")?.inputSchema.properties
+    ).not.toHaveProperty("uploadToken");
+  });
+
+  it("uses the runtime asset upload token without advertising it", async () => {
+    let authorization: string | null = null;
+    const client = await connect(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      expect(url).toBe("https://livevariant.link/assets");
+      authorization = new Headers(init?.headers).get("authorization");
+      return Response.json(
+        {
+          assetId: "a".repeat(64),
+          url: "https://livevariant.link/a/" + "a".repeat(64),
+          previewUrl:
+            "https://livevariant.link/a/" + "a".repeat(64) + "?e=1&s=x",
+          size: 4,
+          contentType: "image/png"
+        },
+        { status: 201 }
+      );
+    });
+
+    const result = await client.callTool({
+      name: "upload_image",
+      arguments: {
+        data: btoa("fake"),
+        contentType: "image/png"
+      }
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(authorization).toBe("Bearer upload-secret");
   });
 
   it("marks the read-only tools read-only and the rest honestly", async () => {

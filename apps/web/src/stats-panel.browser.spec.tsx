@@ -81,17 +81,26 @@ function payload(overrides: Partial<TestStats> = {}): TestStats {
       ]
     },
     buckets: {
+      // Sized past MIN_BUCKET_PULLS_TO_CALL on purpose: below it a bucket is
+      // reported without a leader, so a smaller fixture would be testing the
+      // gate rather than the labeling this case is about. The opaque bucket
+      // additionally has to OUT-ARGUE partial pooling: its analysis carries
+      // the whole test's rates as a 200-pseudo-observation prior, so a
+      // bucket that contradicts the global lean (control wins here, variant
+      // wins everywhere else) needs sustained local evidence before the
+      // summary believes it. 400 starved-arm pulls at zero conversions is
+      // that; the 100 this fixture used to hold is deliberately not.
       ["a".repeat(64)]: {
-        pulls: [10, 30],
-        conversions: [1, 12],
+        pulls: [400, 1200],
+        conversions: [40, 480],
         label: "country=nl"
       },
-      ["b".repeat(64)]: { pulls: [20, 10], conversions: [4, 0] }
+      ["b".repeat(64)]: { pulls: [800, 400], conversions: [160, 0] }
     },
     bySignal: {
       country: {
-        nl: { pulls: 40, conversions: 13 },
-        de: { pulls: 30, conversions: 4 }
+        nl: { pulls: 400, conversions: 130 },
+        de: { pulls: 300, conversions: 40 }
       }
     },
     perSource: { ["c".repeat(64)]: 90, ["d".repeat(64)]: 30 },
@@ -142,13 +151,31 @@ describe("derived analytics", () => {
 
   it("finds each bucket's own winner, labeled or not", () => {
     const { top, hidden } = summarizeBuckets(payload());
-    // Sorted by pulls: the nl bucket (40) ahead of the opaque one (30).
+    // Sorted by pulls: the nl bucket (1600) ahead of the opaque one (1200).
     expect(top[0].name).toBe("country=nl");
     expect(top[0].leader).toBe("variant");
     // The opaque bucket leans the OTHER way: control converts there.
     expect(top[1].labeled).toBe(false);
     expect(top[1].leader).toBe("control");
     expect(hidden).toBe(0);
+  });
+
+  it("reports a thin bucket's counts but refuses to call a winner in it", () => {
+    // The measured reason: with every segment and variant on an identical
+    // rate, 52.7% of 8x2 runs still showed a bucket at P(best) >= 95%.
+    const thin = payload();
+    thin.buckets = {
+      ["c".repeat(64)]: {
+        pulls: [20, 20],
+        conversions: [0, 6],
+        label: "country=be"
+      }
+    };
+    const { top } = summarizeBuckets(thin);
+    expect(top[0].pulls).toBe(40);
+    expect(top[0].conversions).toBe(6);
+    expect(top[0].leader).toBeNull();
+    expect(top[0].probabilityBest).toBeNull();
   });
 
   it("spends the posterior work only on the buckets it will show", () => {
@@ -191,9 +218,11 @@ describe("the live panel", () => {
     // Buckets: the labeled one readable, the opaque one shortened.
     expect(container.textContent).toContain("country=nl");
     expect(container.textContent).toContain("bbbbbbbb…");
-    // Signals and sources.
+    // Signals show; traffic sources deliberately do not (opaque rotating
+    // hashes, twice misread as a bug), while the exclusion audit line stays.
     expect(container.textContent).toContain("audience signals");
-    expect(container.textContent).toContain("cccccccccccc…");
+    expect(container.textContent).not.toContain("traffic sources");
+    expect(container.textContent).not.toContain("cccccccccccc");
     expect(container.textContent).toContain("5 assignments excluded");
 
     // A second event over the same connection updates the numbers.

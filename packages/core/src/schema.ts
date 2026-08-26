@@ -141,6 +141,30 @@ const configObject = z
      * its history (a recompute rebuilds the model).
      */
     priors: z.optional(z.record(z.string(), z.array(variantPriorSchema))),
+    /**
+     * Priors that hold only inside one context bucket: "for the blue
+     * segment, image B is the one". `priors` above cannot say that, because
+     * it writes to a variant's MAIN effect, which is the belief about that
+     * variant for everybody; a belief about one segment lives on the
+     * (context x variant) interaction, and this is what writes to it.
+     *
+     * Each block carries the same positional per-slot shape as `priors`, so
+     * one block reads as a whole opinion about one segment. Identity-
+     * excluded exactly like `priors`.
+     */
+    ctxPriors: z.optional(
+      z.array(
+        z.object({
+          /**
+           * The one dimension this belief holds for, as key to value, as
+           * declared under `ctx.dims`. Exactly one entry: the model has no
+           * feature for a combination of dimensions (see the check below).
+           */
+          when: z.record(z.string(), z.string()),
+          priors: z.record(z.string(), z.array(variantPriorSchema))
+        })
+      )
+    ),
     /** Max pseudo-observations any prior may contribute per variant. */
     priorStrengthCap: z._default(z.number().check(z.positive()), 50),
     /**
@@ -169,8 +193,25 @@ const configObject = z
      * explicitly to share one test across domains.
      */
     scope: z.optional(z.string().check(z.minLength(1), z.maxLength(120))),
-    /** Fallback click-redirect target when the variant has none. */
+    /** Fallback click-redirect target when neither slot nor variant has one. */
     redirectUrl: z.optional(httpUrl),
+    /**
+     * Per-slot click destination, for a multi-element test whose elements
+     * point at different pages: a hero image leading to the campaign
+     * landing page while the CTA below it leads to the pricing page.
+     *
+     * Sits between the two destinations that already existed, so the full
+     * precedence is: an explicit `?to=`, then the variant's own
+     * `redirectUrl`, then this, then the config-level `redirectUrl`. The
+     * common test still names ONE destination and says nothing here.
+     *
+     * Identity-included like every other destination: a click link that
+     * disagreed with the image links about where clicks go would reward a
+     * different test than the one being served.
+     */
+    slotRedirects: z.optional(
+      z.record(z.string().check(z.regex(SLOT_KEY)), httpUrl)
+    ),
     /** GA4 event names the SDK auto-rewards on (dataLayer interception). */
     rewardEvents: z.optional(z.array(z.string().check(z.minLength(1)))),
     /**
@@ -220,29 +261,113 @@ const configObject = z
           "fewer variants per slot, or split into composed tests"
       });
     }
-    for (const [slotKey, priors] of Object.entries(config.priors ?? {})) {
-      const variants = config.slots[slotKey];
-      if (!variants) {
+    for (const slotKey of Object.keys(config.slotRedirects ?? {})) {
+      if (!config.slots[slotKey]) {
         ctx.issues.push({
           code: "custom",
-          path: ["priors", slotKey],
-          input: priors,
+          path: ["slotRedirects", slotKey],
+          input: config.slotRedirects,
           message:
-            `priors name a slot that does not exist ` +
+            `slotRedirects name a slot that does not exist ` +
             `(have: ${Object.keys(config.slots).join(", ")})`
-        });
-      } else if (priors.length !== variants.length) {
-        ctx.issues.push({
-          code: "custom",
-          path: ["priors", slotKey],
-          input: priors,
-          message:
-            `slot "${slotKey}" has ${variants.length} variants ` +
-            `but ${priors.length} priors`
         });
       }
     }
+    checkPriorSlots(ctx, config, config.priors, ["priors"]);
+    const dims = new Map((config.ctx?.dims ?? []).map(d => [d.key, d.values]));
+    for (let i = 0; i < (config.ctxPriors ?? []).length; i++) {
+      const block = config.ctxPriors![i];
+      checkPriorSlots(ctx, config, block.priors, ["ctxPriors", i, "priors"]);
+      const conditions = Object.entries(block.when);
+      if (conditions.length === 0) {
+        ctx.issues.push({
+          code: "custom",
+          path: ["ctxPriors", i, "when"],
+          input: block.when,
+          message:
+            "a conditioned prior needs a condition; an unconditioned " +
+            "belief belongs in `priors`"
+        });
+      } else if (conditions.length > 1) {
+        // The model is ADDITIVE across context dimensions: serving builds
+        // one (context feature x variant) interaction per dimension and
+        // never a conjunction of two, so there is no coordinate that means
+        // "blue AND gold". Accepting the pair would put the whole belief on
+        // each dimension separately, which moves every blue visitor and
+        // every gold one and counts a blue-gold visitor twice. Refused
+        // rather than approximated: an unrepresentable belief is worse
+        // stored than absent.
+        ctx.issues.push({
+          code: "custom",
+          path: ["ctxPriors", i, "when"],
+          input: block.when,
+          message:
+            "a conditioned prior holds for ONE dimension " +
+            `(got ${conditions.map(([key]) => key).join(", ")}); the model ` +
+            "has no feature for a combination of dimensions, so give each " +
+            "its own block"
+        });
+      }
+      for (const [key, value] of conditions) {
+        if (!dims.has(key)) {
+          ctx.issues.push({
+            code: "custom",
+            path: ["ctxPriors", i, "when", key],
+            input: block.when,
+            message:
+              `"${key}" is not a declared context dimension ` +
+              `(have: ${[...dims.keys()].join(", ") || "none"})`
+          });
+          continue;
+        }
+        const allowed = dims.get(key);
+        // A prior on a value the dimension can never take would sit on a
+        // feature no request ever activates: dead weight that reads as a
+        // configured belief.
+        if (allowed && !allowed.includes(value)) {
+          ctx.issues.push({
+            code: "custom",
+            path: ["ctxPriors", i, "when", key],
+            input: block.when,
+            message:
+              `"${value}" is not one of the declared values for "${key}" ` +
+              `(have: ${allowed.join(", ")})`
+          });
+        }
+      }
+    }
   });
+
+/** The rule both prior shapes share: name a real slot, one entry per variant. */
+function checkPriorSlots(
+  ctx: { issues: Record<string, unknown>[] },
+  config: { slots: Record<string, unknown[]> },
+  priors: Record<string, unknown[]> | undefined,
+  path: (string | number)[]
+): void {
+  for (const [slotKey, entries] of Object.entries(priors ?? {})) {
+    const variants = config.slots[slotKey];
+    if (!variants) {
+      ctx.issues.push({
+        code: "custom",
+        path: [...path, slotKey],
+        input: priors,
+        message:
+          `priors name a slot that does not exist ` +
+          `(have: ${Object.keys(config.slots).join(", ")})`
+      });
+    } else if (entries.length !== variants.length) {
+      ctx.issues.push({
+        code: "custom",
+        path: [...path, slotKey],
+        input: priors,
+        message:
+          `slot "${slotKey}" has ${variants.length} variants ` +
+          `but ${entries.length} priors`
+      });
+    }
+  }
+}
 
 export const testConfigSchema = z.pipe(
   z.transform(value => {
@@ -305,6 +430,61 @@ export function slotEntries(config: TestConfig): Array<[string, Variant[]]> {
 /** Variant counts per slot, canonical order. */
 export function slotSizes(config: TestConfig): number[] {
   return slotEntries(config).map(([, variants]) => variants.length);
+}
+
+/**
+ * Where a click on one variant lands: the single place that knows the
+ * precedence, so the click route, the trust check and every tool answer
+ * the question the same way.
+ *
+ * `to` wins because it is the caller being explicit, then the variant,
+ * then its slot, then the test. Undefined means the click has nowhere to
+ * go, which is a 400 rather than a guess.
+ */
+export function clickTarget(
+  config: TestConfig,
+  slotKey: string,
+  variant: Variant | undefined,
+  to?: string
+): string | undefined {
+  return (
+    to ??
+    variant?.redirectUrl ??
+    config.slotRedirects?.[slotKey] ??
+    config.redirectUrl
+  );
+}
+
+/**
+ * Whether any click destination in this test depends on WHICH element was
+ * clicked. When nothing does, one slot-less click link can wrap every
+ * element of a multi-slot email; when something does, each click link has
+ * to name its slot.
+ */
+export function hasPerElementDestinations(config: TestConfig): boolean {
+  if (Object.keys(config.slotRedirects ?? {}).length > 0) {
+    return true;
+  }
+  return Object.values(config.slots).some(variants =>
+    variants.some(variant => variant.redirectUrl !== undefined)
+  );
+}
+
+/** Every URL a config can send a visitor to, for trust checks. */
+export function destinationUrls(config: TestConfig): string[] {
+  const urls: string[] = [];
+  for (const variants of Object.values(config.slots)) {
+    for (const variant of variants) {
+      urls.push(
+        variant.url ?? "",
+        variant.image ?? "",
+        variant.redirectUrl ?? ""
+      );
+    }
+  }
+  urls.push(...Object.values(config.slotRedirects ?? {}));
+  urls.push(config.redirectUrl ?? "");
+  return urls.filter(Boolean);
 }
 
 /** A variant's display name, defaulting per slot to v1, v2, ... */

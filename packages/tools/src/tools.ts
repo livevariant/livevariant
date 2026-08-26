@@ -6,6 +6,7 @@ import {
   configToTemplateQuery,
   encodeConfig,
   generateStatsSecret,
+  hasPerElementDestinations,
   hashStatsSecret,
   slotEntries,
   slotSizes,
@@ -56,7 +57,12 @@ const contextDim = z.object({
     .optional()
     .describe(
       "Allowed values, when they are enumerable. Anything else is rejected " +
-        "at serving time, which is what stops a crafted URL inventing buckets."
+        "at serving time, which is what stops a crafted URL inventing " +
+        "buckets. It also makes the results readable: bucket keys are " +
+        "one-way hashes, and a declared list is what lets stats recover " +
+        '"country=nl" from one. Worth passing even for a `from` ' +
+        "dimension, and worth getting right the first time, since `ctx` is " +
+        "inside the test identity and adding values later starts a new test."
     ),
   from: signalEnum
     .optional()
@@ -131,6 +137,110 @@ function serveOriginOf(context: ToolContext, override?: string): string {
 
 // ---------------------------------------------------------------------------
 
+const buildTestInputBase = z.object({
+  variants: z
+    .array(variantInput)
+    .min(2)
+    .max(64)
+    .optional()
+    .describe(
+      "Single-element test: two or more variants. The first is the control."
+    ),
+  slots: z
+    .record(
+      z.string().regex(SLOT_KEY_INPUT),
+      z.array(variantInput).min(1).max(64)
+    )
+    .optional()
+    .describe(
+      "Multi-element test: variants per element, keyed by a short name " +
+        'like "hero" or "cta". The test serves and learns combinations.'
+    ),
+  slotRedirects: z
+    .record(z.string().regex(SLOT_KEY_INPUT), z.string().url())
+    .optional()
+    .describe(
+      "Where clicks on ONE element land, when elements point at " +
+        "different pages (a hero leading to the campaign landing page, " +
+        "a CTA below it to pricing). Keyed like `slots`. Falls back to " +
+        "`redirectUrl`; a variant's own redirectUrl still wins over " +
+        "both. Setting any of these means every click link must name " +
+        "its slot, which slotLinks does for you."
+    ),
+  name: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "A label for your own reference, and the one field worth " +
+        "spending a merge tag on in a recurring ESP template: it is " +
+        "part of the test's identity, so n={{campaign_name}} mints a " +
+        "separate, separately readable test per campaign, and the name " +
+        "is what list_tests searches."
+    ),
+  context: z
+    .array(contextDim)
+    .max(8)
+    .optional()
+    .describe("Dimensions to learn a separate winner for."),
+  redirectUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe("Where clicks land when a variant does not say."),
+  variantParam: z
+    .string()
+    .min(1)
+    .max(32)
+    .optional()
+    .describe(
+      "Stamp the served combination into this parameter on redirect, e.g. " +
+        '"utm_content", so the test shows up in the customer\'s own analytics.'
+    ),
+  publishableKey: z
+    .string()
+    .regex(/^pk_[a-z0-9]{24}$/)
+    .optional()
+    .describe(
+      "Registers the new test to the organization identified by a " +
+        "publishable key the user provides for an organization they " +
+        "administer. Result access stays tied to this test's stats " +
+        "secret. Only works on account-enabled deployments; elsewhere " +
+        "a warning says so and the test still works."
+    ),
+  region: z
+    .enum(TEST_REGIONS)
+    .optional()
+    .describe(
+      "Where the test's state lives. A placement hint (wnam, enam, sam, " +
+        'weur, eeur, apac, oc, afr, me) or "eu" for the EU jurisdiction ' +
+        "(state guaranteed created and kept inside the EU). Defaults to " +
+        "the creator's own region when the host can tell; without any, " +
+        "state is born wherever the FIRST request comes from, which in " +
+        "email is routinely a mail provider's US datacenter."
+    ),
+  serverUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe("Self-hosted deployments only.")
+});
+
+const exactlyOneVariantShape = (input: {
+  variants?: unknown;
+  slots?: unknown;
+}): boolean => Boolean(input.variants) !== Boolean(input.slots);
+
+const buildTestInput = buildTestInputBase.refine(exactlyOneVariantShape, {
+  message: "pass exactly one of `variants` (one element) or `slots`"
+});
+
+const buildTestMcpInput = buildTestInputBase
+  .omit({ serverUrl: true })
+  .refine(exactlyOneVariantShape, {
+    message: "pass exactly one of `variants` (one element) or `slots`"
+  });
+
 export const buildTest = defineTool({
   name: "build_test",
   title: "Build a test",
@@ -158,81 +268,8 @@ export const buildTest = defineTool({
     "it to the person who will read the results.",
   readOnly: false,
   reachesNetwork: false,
-  input: z
-    .object({
-      variants: z
-        .array(variantInput)
-        .min(2)
-        .max(64)
-        .optional()
-        .describe(
-          "Single-element test: two or more variants. The first is the control."
-        ),
-      slots: z
-        .record(
-          z.string().regex(SLOT_KEY_INPUT),
-          z.array(variantInput).min(1).max(64)
-        )
-        .optional()
-        .describe(
-          "Multi-element test: variants per element, keyed by a short name " +
-            'like "hero" or "cta". The test serves and learns combinations.'
-        ),
-      name: z
-        .string()
-        .min(1)
-        .optional()
-        .describe("A label for your own reference."),
-      context: z
-        .array(contextDim)
-        .max(8)
-        .optional()
-        .describe("Dimensions to learn a separate winner for."),
-      redirectUrl: z
-        .string()
-        .url()
-        .optional()
-        .describe("Where clicks land when a variant does not say."),
-      variantParam: z
-        .string()
-        .min(1)
-        .max(32)
-        .optional()
-        .describe(
-          "Stamp the served combination into this parameter on redirect, e.g. " +
-            '"utm_content", so the test shows up in the customer\'s own analytics.'
-        ),
-      publishableKey: z
-        .string()
-        .regex(/^pk_[a-z0-9]{24}$/)
-        .optional()
-        .describe(
-          "Registers the new test to this key's organization at creation, " +
-            "so it appears under My tests immediately. The key is PUBLIC " +
-            "(from the dashboard's Settings); authority comes from the " +
-            "stats secret this call mints. Only works on deployments with " +
-            "accounts; elsewhere a warning says so and the test still works."
-        ),
-      region: z
-        .enum(TEST_REGIONS)
-        .optional()
-        .describe(
-          "Where the test's state lives. A placement hint (wnam, enam, sam, " +
-            'weur, eeur, apac, oc, afr, me) or "eu" for the EU jurisdiction ' +
-            "(state guaranteed created and kept inside the EU). Defaults to " +
-            "the creator's own region when the host can tell; without any, " +
-            "state is born wherever the FIRST request comes from, which in " +
-            "email is routinely a mail provider's US datacenter."
-        ),
-      serverUrl: z
-        .string()
-        .url()
-        .optional()
-        .describe("Self-hosted deployments only.")
-    })
-    .refine(input => Boolean(input.variants) !== Boolean(input.slots), {
-      message: "pass exactly one of `variants` (one element) or `slots`"
-    }),
+  input: buildTestInput,
+  mcpInput: buildTestMcpInput,
   output: z.object({
     testId: z.string(),
     config: z.string().describe("The encoded config: this is the test."),
@@ -258,11 +295,10 @@ export const buildTest = defineTool({
       manage: z
         .string()
         .describe(
-          "ALWAYS show this URL to the user in your final answer and tell " +
-            "them: opening it shows live results, and signed in they can " +
+          "Opening this URL shows live results, and signed-in users can " +
             "click 'Add to my account' to claim the test into their " +
-            "dashboard. It carries the stats secret in its #fragment, so " +
-            "they should share it only with people who may see results."
+            "dashboard. It contains the stats secret in its #fragment, so " +
+            "share it only with people authorized to see results."
         ),
       serveNoAutoContext: z.string(),
       clickNoAutoContext: z.string()
@@ -275,7 +311,8 @@ export const buildTest = defineTool({
           "urls.serve returns 400 for these tests, because a serve must " +
           "say which element it renders. The bare urls.click works when " +
           "the destination is uniform (a config redirectUrl or ?to=); " +
-          "per-slot clicks matter only for per-variant redirectUrls."
+          "per-slot clicks matter as soon as an element carries its own " +
+          "destination, via slotRedirects or a variant redirectUrl."
       ),
     emailTemplate: z
       .record(
@@ -287,10 +324,12 @@ export const buildTest = defineTool({
         "Query-parameter spelling per slot for an ESP template: wire it " +
           "once, then campaign managers fill only the merge fields. All " +
           "links share one identical config string (names, ctx dims, kh " +
-          "and the landing r= included, so serve and click stay ONE " +
-          "test); image links add &slot= per element, the click link " +
-          "needs none. Absent when a variant has inline content or its " +
-          "own redirectUrl, which the parameter form cannot express."
+          "and the landing r=/sr= included, so serve and click stay ONE " +
+          "test); image links add &slot= per element. The click link " +
+          "needs no slot unless the test sets slotRedirects, in which " +
+          "case each element's click link carries its own. Absent when a " +
+          "variant has inline content or its own redirectUrl, which the " +
+          "parameter form cannot express."
       ),
     warnings: z.array(z.string()),
     registeredTo: z
@@ -325,6 +364,9 @@ export const buildTest = defineTool({
       ...(input.name ? { name: input.name } : {}),
       ...(input.context?.length ? { ctx: { dims: input.context } } : {}),
       ...(input.redirectUrl ? { redirectUrl: input.redirectUrl } : {}),
+      ...(input.slotRedirects && Object.keys(input.slotRedirects).length > 0
+        ? { slotRedirects: input.slotRedirects }
+        : {}),
       ...(input.variantParam ? { variantParam: input.variantParam } : {}),
       ...((input.region ?? context.region)
         ? { region: input.region ?? context.region }
@@ -378,13 +420,15 @@ export const buildTest = defineTool({
 
     // ESP-template spelling: ONE query string from the core serializer
     // (so vn names, ctx dims and kh all survive into every future
-    // campaign), plus runtime tails per link. r rides inside that shared
-    // string because it is part of the test's identity: a click link
-    // that carried r alone would reward a different test than the one
-    // the images serve. The click link needs no slot=, since the
-    // template's destination never depends on the clicked element.
+    // campaign), plus runtime tails per link. r and sr ride inside that
+    // shared string because they are part of the test's identity: a
+    // click link that carried a destination alone would reward a
+    // different test than the one the images serve. The click link takes
+    // a slot= only when the destination depends on which element was
+    // clicked; otherwise one link can wrap the whole email.
     const templateQuery = configToTemplateQuery(parsed);
     const templateTail = "&auto=0&id={{recipient_id}}";
+    const clickNeedsSlot = multiSlot && hasPerElementDestinations(parsed);
     const emailTemplate =
       templateQuery === null
         ? undefined
@@ -395,7 +439,9 @@ export const buildTest = defineTool({
                 imageSrc:
                   `${serveOrigin}/s?${templateQuery}${templateTail}` +
                   (multiSlot ? `&slot=${key}` : ""),
-                linkHref: `${serveOrigin}/c?${templateQuery}${templateTail}`
+                linkHref:
+                  `${serveOrigin}/c?${templateQuery}${templateTail}` +
+                  (clickNeedsSlot ? `&slot=${key}` : "")
               }
             ])
           );
@@ -684,11 +730,22 @@ export const generatePriors = defineTool({
     "wash your guess out, so you can judge whether you have been too " +
     "confident. Being wrong here costs a little early traffic, not the test.\n\n" +
     "Priors are outside the identity hash, so the test keeps its id, its URLs " +
-    "and any history it already has.",
+    "and any history it already has.\n\n" +
+    'Pass `when` to make the belief hold for ONE segment only ("image B is ' +
+    'the one for the blue segment"). Without it the belief is about every ' +
+    "visitor, which is a different and much stronger claim.",
   readOnly: true,
   reachesNetwork: false,
   input: z.object({
     test: testRef,
+    when: z
+      .record(z.string(), z.string())
+      .optional()
+      .describe(
+        "Context this belief is limited to, as dimension key to value " +
+          '(e.g. {"color": "blauw"}). The keys must be dimensions the ' +
+          "test declares. Omit it for a belief about every visitor."
+      ),
     beliefs: z
       .array(
         z.object({
@@ -740,6 +797,28 @@ export const generatePriors = defineTool({
   async handler(input, context) {
     const { config, testId } = await resolveTest(input.test);
     const entries = slotEntries(config);
+    if (input.when) {
+      // Checked here as well as in the schema so the answer names the
+      // dimensions this test actually has, instead of a validation dump.
+      const dims = new Map(
+        (config.ctx?.dims ?? []).map(dim => [dim.key, dim.values])
+      );
+      for (const [key, value] of Object.entries(input.when)) {
+        const allowed = dims.get(key);
+        if (!dims.has(key)) {
+          throw new ToolInputError(
+            `this test has no context dimension "${key}" ` +
+              `(it has: ${[...dims.keys()].join(", ") || "none"})`
+          );
+        }
+        if (allowed && !allowed.includes(value)) {
+          throw new ToolInputError(
+            `"${value}" is not a value of "${key}" ` +
+              `(it allows: ${allowed.join(", ")})`
+          );
+        }
+      }
+    }
     const strength =
       typeof input.confidence === "number"
         ? input.confidence
@@ -813,7 +892,23 @@ export const generatePriors = defineTool({
       );
     }
 
-    const next = parseTestConfig({ ...config, priors });
+    // A conditioned belief is added to the existing blocks rather than
+    // replacing them: each block is one segment's opinion, and a second
+    // call about a second segment must not erase the first.
+    const when = input.when;
+    const next = parseTestConfig(
+      when
+        ? {
+            ...config,
+            ctxPriors: [
+              ...(config.ctxPriors ?? []).filter(
+                block => canonicalWhen(block.when) !== canonicalWhen(when)
+              ),
+              { when, priors }
+            ]
+          }
+        : { ...config, priors }
+    );
     const encoded = await encodeConfig(next);
     if (encoded.testId !== testId) {
       // Cannot happen: priors are identity-excluded. Loud if it ever does,
@@ -842,6 +937,20 @@ export const generatePriors = defineTool({
     };
   }
 });
+
+/**
+ * Two conditions are the same condition whatever order they were written in.
+ *
+ * Serialized as JSON rather than joined with separators: dimension keys and
+ * free-form values may contain `=` and `&`, so `{"a": "b=c"}` and
+ * `{"a=b": "c"}` would flatten to one string and make a replace hit the
+ * wrong segment's block.
+ */
+function canonicalWhen(when: Record<string, string>): string {
+  return JSON.stringify(
+    Object.entries(when).sort(([a], [b]) => a.localeCompare(b))
+  );
+}
 
 // ---------------------------------------------------------------------------
 
@@ -1155,6 +1264,38 @@ export const variantBrief = defineTool({
 
 // ---------------------------------------------------------------------------
 
+const uploadImageInput = z.object({
+  data: z
+    .string()
+    .min(1)
+    .max(8_000_000)
+    .describe(
+      "The image bytes, base64-encoded (plain base64, not a data: URL)."
+    ),
+  contentType: z
+    .enum(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"])
+    .describe(
+      "The image's actual type; the server stores and serves it as this."
+    ),
+  serverUrl: z
+    .string()
+    .url()
+    .optional()
+    .describe("Self-hosted deployments only."),
+  uploadToken: z
+    .string()
+    .optional()
+    .describe(
+      "Optional self-hosted upload authorization for deployments " +
+        "configured with LV_ASSET_UPLOAD_TOKEN; omit for the hosted service."
+    )
+});
+
+const uploadImageMcpInput = uploadImageInput.omit({
+  serverUrl: true,
+  uploadToken: true
+});
+
 export const uploadImage = defineTool({
   name: "upload_image",
   title: "Upload an image",
@@ -1173,37 +1314,8 @@ export const uploadImage = defineTool({
     "when yours does not.",
   readOnly: false,
   reachesNetwork: true,
-  input: z.object({
-    data: z
-      .string()
-      .min(1)
-      .max(8_000_000)
-      .describe(
-        "The image bytes, base64-encoded (plain base64, not a data: URL)."
-      ),
-    contentType: z
-      .enum([
-        "image/png",
-        "image/jpeg",
-        "image/gif",
-        "image/webp",
-        "image/avif"
-      ])
-      .describe(
-        "The image's actual type; the server stores and serves it as this."
-      ),
-    serverUrl: z
-      .string()
-      .url()
-      .optional()
-      .describe("Self-hosted deployments only."),
-    uploadToken: z
-      .string()
-      .optional()
-      .describe(
-        "Only for deployments that gate uploads with LV_ASSET_UPLOAD_TOKEN."
-      )
-  }),
+  input: uploadImageInput,
+  mcpInput: uploadImageMcpInput,
   output: z.object({
     assetId: z.string().describe("sha256 of the bytes; the id inside the URL."),
     url: z
@@ -1229,13 +1341,12 @@ export const uploadImage = defineTool({
       );
     }
     const origin = originOf(context, input.serverUrl);
+    const uploadToken = input.uploadToken ?? context.assetUploadToken;
     const response = await context.fetch(`${origin}/assets`, {
       method: "POST",
       headers: {
         "content-type": input.contentType,
-        ...(input.uploadToken
-          ? { authorization: `Bearer ${input.uploadToken}` }
-          : {})
+        ...(uploadToken ? { authorization: `Bearer ${uploadToken}` } : {})
       },
       body: bytes as unknown as BodyInit
     });
@@ -1328,16 +1439,15 @@ const registerTestTool = defineTool({
     "Registers a test you built earlier to the organization a publishable " +
     "key belongs to, so it shows under My tests and its stats are readable " +
     "from the dashboard without the secret.\n\n" +
-    "Authority is the STATS SECRET: its hash is inside the config, so " +
-    "presenting it proves you created (or were entrusted with) the test. " +
-    "The publishable key is public and only names the org; alone it grants " +
-    "nothing, which is why it is safe for a user to paste into chat. " +
+    "Use this only when the user provides both the test's stats secret and " +
+    "a publishable key for an organization they administer. The stats " +
+    "secret must match the hash inside the config, and the publishable key " +
+    "identifies the organization to register into. " +
     "Prefer passing publishableKey to build_test directly: it registers at " +
     "creation in one step. Keyless tests cannot be registered this way " +
     "(nothing to prove with); they register through the tag on a verified " +
-    "domain. Because the key is public, an org's list is publicly " +
-    "writable by design, and the org can always remove a listing from " +
-    "its dashboard (the test itself keeps serving).",
+    "domain. The organization can remove a listing from its dashboard " +
+    "(the test itself keeps serving).",
   readOnly: false,
   reachesNetwork: true,
   scope: "account",
@@ -1353,7 +1463,10 @@ const registerTestTool = defineTool({
     publishableKey: z
       .string()
       .regex(/^pk_[a-z0-9]{24}$/)
-      .describe("The target organization's publishable key (pk_..., public).")
+      .describe(
+        "A publishable key for the target organization, provided by a user " +
+          "authorized to register tests there."
+      )
   }),
   output: z.object({
     registered: z.literal(true),
@@ -1421,9 +1534,8 @@ export const getTestStatus = defineTool({
     "the SDK tag with their publishable key live in the site's source. " +
     "If the test is unclaimed, remind them the manage URL claims it in " +
     "one click when opened signed in.\n\n" +
-    "Authority is the stats secret, same as get_stats: holding it proves " +
-    "you administer the test. A manage URL's #fragment is used " +
-    "automatically.",
+    "Requires the test's stats secret, the same as get_stats. A manage " +
+    "URL's #fragment is used automatically.",
   readOnly: true,
   reachesNetwork: true,
   scope: "account",

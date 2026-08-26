@@ -41,6 +41,21 @@ export interface CtxResolveInput {
   raw: Readonly<Record<string, string>>;
   /** Signals derived from the request (country, device, utm tags). */
   signals: RequestSignals;
+  /**
+   * Whether network-derived signals were suppressed for this request:
+   * an `?auto=0` link, or a fetch that announced itself as an image
+   * proxy. True means the connection belongs to a mail provider or a
+   * link scanner, not the person.
+   *
+   * A resolver that falls back to the connection when its input is
+   * missing (an IP-to-region lookup behind a postcode dimension, the
+   * obvious case) MUST honour this and return the dimension absent
+   * instead. Otherwise a whole campaign resolves to whatever city the
+   * ESP's datacenter sits in, and because assignment is sticky, that
+   * verdict is permanent. Suppression is exactly why `signals` looks
+   * thin here rather than wrong.
+   */
+  networkSignalsSuppressed: boolean;
   /** The request being served, for anything else the host needs. */
   request?: Request;
   /** Already armed with the deployment's resolve timeout. */
@@ -74,6 +89,7 @@ export type ResolveCtxFn = (input: {
   dims: readonly CtxDim[];
   raw: Readonly<Record<string, string>>;
   signals: RequestSignals;
+  networkSignalsSuppressed: boolean;
 }) => Promise<Record<string, string | undefined>>;
 
 /** Default budget for the whole resolution step, in milliseconds. */
@@ -115,7 +131,7 @@ export function bindCtxResolvers(options: {
     return undefined;
   }
   const timeoutMs = options.timeoutMs ?? DEFAULT_CTX_RESOLVE_TIMEOUT_MS;
-  return async ({ dims, raw, signals }) => {
+  return async ({ dims, raw, signals, networkSignalsSuppressed }) => {
     const byName = new Map<string, CtxDim[]>();
     for (const dim of dims) {
       if (dim.resolve && resolvers[dim.resolve]) {
@@ -138,6 +154,7 @@ export function bindCtxResolvers(options: {
             dims: resolverDims,
             raw,
             signals,
+            networkSignalsSuppressed,
             request: options.request,
             signal
           }),

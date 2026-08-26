@@ -109,6 +109,45 @@ describe("configToParams", () => {
     expect(reparsed.testId).toBe(original.testId);
   });
 
+  it("round-trips per-slot landing pages", async () => {
+    // The multi-element email whose hero and CTA point at different
+    // pages: the destination has to survive the round trip, or the
+    // template form silently sends every click to one of them.
+    const { configToParams } = await import("./params.js");
+    const original = await configFromParams(
+      query(
+        `s=hero&sr=https://example.com/campaign&v=${A}&v=${B}` +
+          `&s=cta&sr=https://example.com/pricing&v=https://example.com/x&v=https://example.com/y`
+      )
+    );
+    expect(original.config.slotRedirects).toEqual({
+      hero: "https://example.com/campaign",
+      cta: "https://example.com/pricing"
+    });
+    const params = configToParams(original.config) as URLSearchParams;
+    const reparsed = await configFromParams(params);
+    expect(reparsed.config.slotRedirects).toEqual(
+      original.config.slotRedirects
+    );
+    expect(reparsed.testId).toBe(original.testId);
+  });
+
+  it("binds sr to the slot it follows, not to a position", async () => {
+    // Position IS the grammar here, exactly as it is for v: an sr sits
+    // with the element it belongs to, so a template author moving one
+    // block moves its landing page with it.
+    const { config } = await configFromParams(
+      query(
+        `s=hero&v=${A}&v=${B}&sr=https://example.com/one` +
+          `&s=cta&v=${A}&v=${B}&sr=https://example.com/two`
+      )
+    );
+    expect(config.slotRedirects).toEqual({
+      hero: "https://example.com/one",
+      cta: "https://example.com/two"
+    });
+  });
+
   it("returns null for configs the parameter form cannot express", async () => {
     const { configToParams } = await import("./params.js");
     const { parseTestConfig } = await import("./schema.js");
@@ -188,6 +227,53 @@ describe("configToTemplateQuery", () => {
     const click = await configFromParams(query(`${filled}&id=r1`));
     expect(serveCta.testId).toBe(serveHero.testId);
     expect(click.testId).toBe(serveHero.testId);
+  });
+
+  it("makes per-slot landing pages merge fields too", async () => {
+    // A recurring campaign changes where it points as often as what it
+    // shows, and both are identity, so both are fields the campaign
+    // manager fills. With every slot covered there is nothing left for a
+    // fallback r to do.
+    const { configToTemplateQuery } = await import("./params.js");
+    const { config } = await configFromParams(
+      query(
+        `s=hero&sr=https://example.com/campaign&v=${A}&v=${B}` +
+          `&s=cta&sr=https://example.com/pricing&v=${A}&v=${B}`
+      )
+    );
+    const template = configToTemplateQuery(config) as string;
+    expect(template).toContain("sr={{hero_landing_url}}");
+    expect(template).toContain("sr={{cta_landing_url}}");
+    expect(template).not.toContain("r={{landing_url}}");
+    // Filled in, it is still one test across every link in the email.
+    const filled = template
+      .replace("{{hero_variant_1_url}}", encodeURIComponent(A))
+      .replace("{{hero_variant_2_url}}", encodeURIComponent(B))
+      .replace("{{cta_variant_1_url}}", encodeURIComponent(A))
+      .replace("{{cta_variant_2_url}}", encodeURIComponent(B))
+      .replace(
+        "{{hero_landing_url}}",
+        encodeURIComponent("https://x.example/a")
+      )
+      .replace(
+        "{{cta_landing_url}}",
+        encodeURIComponent("https://x.example/b")
+      );
+    const serve = await configFromParams(query(`${filled}&auto=0&slot=hero`));
+    const click = await configFromParams(query(`${filled}&slot=cta`));
+    expect(click.testId).toBe(serve.testId);
+  });
+
+  it("still offers a fallback when only some slots name a page", async () => {
+    const { configToTemplateQuery } = await import("./params.js");
+    const { config } = await configFromParams(
+      query(
+        `s=hero&sr=https://example.com/campaign&v=${A}&v=${B}&s=cta&v=${A}&v=${B}`
+      )
+    );
+    const template = configToTemplateQuery(config) as string;
+    expect(template).toContain("sr={{hero_landing_url}}");
+    expect(template).toContain("r={{landing_url}}");
   });
 
   it("has no spelling when the config has none", async () => {

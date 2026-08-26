@@ -267,6 +267,89 @@ export async function enumerateBucketLabels(
 }
 
 /**
+ * Readable names for bucket keys, recovered from what the SERVER already
+ * derived rather than from a declared allowlist.
+ *
+ * `enumerateBucketLabels` can only name a bucket when every dimension
+ * declares its `values`, and a dimension filled from a signal usually does
+ * not: nobody writes out 250 country codes, and `values` is documented as a
+ * tampering guard rather than as the switch that makes stats readable. The
+ * result is a stats page showing `country us` under audience signals and an
+ * opaque hash for the very same request under context buckets.
+ *
+ * The information is already on the record. Signals are stored readable on
+ * purpose (see `AssignmentRecord.signals`), so the candidate context can be
+ * rebuilt from them and hashed the exact way serving hashed it. The rule
+ * that matters is unchanged: a label is attached only when the hash AGREES,
+ * never because it looked likely.
+ *
+ * That check is also what keeps the label honest in the cases it cannot
+ * serve. A caller-supplied value overrides a signal (`deriveAutoCtx`), a
+ * resolver's answer never reaches `signals` at all, and a caller's own
+ * dimensions hash into a key this cannot see. Each of those makes the
+ * recomputed hash differ, so the bucket stays unlabeled instead of being
+ * given a name that describes a different visitor.
+ */
+export async function labelBucketsFromSignals(
+  testId: string,
+  dims: readonly CtxDim[] | undefined,
+  records: Iterable<{
+    ctxKey?: string | null;
+    signals?: RequestSignals | null;
+  }>
+): Promise<Map<string, string>> {
+  const labels = new Map<string, string>();
+  const auto = (dims ?? []).filter(
+    (dim): dim is CtxDim & { from: NonNullable<CtxDim["from"]> } =>
+      dim.from !== undefined
+  );
+  if (auto.length === 0) {
+    return labels;
+  }
+  // One hash per distinct context, not per record: a test with a thousand
+  // visitors from one country asks the same question a thousand times.
+  const seen = new Map<string, string | null>();
+  for (const record of records) {
+    const key = record.ctxKey;
+    if (!key || labels.has(key)) {
+      continue;
+    }
+    const ctx: Record<string, string> = {};
+    for (const dim of auto) {
+      const value = record.signals?.[dim.from];
+      if (value === undefined) {
+        continue;
+      }
+      if (dim.values && !dim.values.includes(value)) {
+        continue;
+      }
+      ctx[dim.key] = value;
+    }
+    if (Object.keys(ctx).length === 0) {
+      continue;
+    }
+    const fingerprint = canonicalJson(ctx);
+    let candidate = seen.get(fingerprint);
+    if (candidate === undefined) {
+      // Composed with no caller key, which is the shape this can prove: a
+      // test whose dimensions are all server-derived.
+      candidate = await composeBucketKey(testId, null, ctx);
+      seen.set(fingerprint, candidate);
+    }
+    if (candidate === key) {
+      labels.set(
+        key,
+        auto
+          .filter(dim => ctx[dim.key] !== undefined)
+          .map(dim => `${dim.key}=${ctx[dim.key]}`)
+          .join(", ")
+      );
+    }
+  }
+  return labels;
+}
+
+/**
  * Hashed one-hot feature indices for the linear bandit: bias slot 0 plus
  * one slot per context key=value pair, hashed into [1, dim). Collisions
  * just merge two features, which linear models tolerate.

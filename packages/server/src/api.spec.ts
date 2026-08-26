@@ -583,9 +583,11 @@ describe("agent discovery well-knowns", () => {
       expect(card.documentation).toBe(
         "https://self.example/skills/livevariant/SKILL.md"
       );
-      // Open deployment: the card says so.
+      // Open deployment: the card says tests can be created without account
+      // setup while result reads still require the per-test secret.
       expect(card.authentication).toEqual({ type: "none" });
-      expect(card.description).toContain("No authentication");
+      expect(card.description).toContain("Creating tests needs no account");
+      expect(card.description).toContain("result reads require");
     }
   });
 
@@ -605,7 +607,7 @@ describe("agent discovery well-knowns", () => {
     expect(card.authentication.type).toBe("bearer");
     expect(card.authentication.description).toContain("LV_API_TOKEN");
     expect(card.description).toContain("Bearer token");
-    expect(card.description).not.toContain("No authentication");
+    expect(card.description).not.toContain("Creating tests needs no account");
   });
 
   it("indexes the skill with a digest of the exact served bytes", async () => {
@@ -655,7 +657,7 @@ describe("agent discovery well-knowns", () => {
     // Consumers identify the document by its H1, so it must name the
     // convention rather than just the service.
     expect(text).toMatch(/^# Auth\.md/i);
-    expect(text).toContain("NO registration");
+    expect(text).toContain("no agent registration");
     expect(text).toContain("https://self.example/api/v1/");
     // No aspirational OAuth: the honest story is the whole story.
     expect(text).not.toContain("authorization_endpoint");

@@ -77,7 +77,8 @@ one variant: a bundled win never tells you which half worked.
 | `variant.image` | yes | Image served for this variant; upload via `upload_image` or any public URL. |
 | `variant.text/html/md` | yes | Inline content for SDK-served website tests. |
 | `variant.redirectUrl` | yes | Per-variant CLICK destination, wins over the config-level one. |
-| `name` | yes | Human label for the whole test. |
+| `slotRedirects` | yes | Per-SLOT click destination, keyed like `slots`: the hero leads to the campaign page, the CTA under it to pricing. Sits between the variant's own `redirectUrl` and the config-level one. Setting any means every click link must name its slot. |
+| `name` | yes | Human label for the whole test, and what `list_tests` searches. In an ESP template it earns a merge tag of its own (`n={{campaign_name}}`): it is inside the identity, so each campaign becomes its own separately readable test. |
 | `ctx.dims` | yes | Audience dimensions the model learns separate winners for. `{key}` = caller-supplied value (hashed in the browser); `{key, from}` = filled automatically from the request. `from` may be: country, continent, region, city, timezone, device, language, organization, utm_source, utm_medium, utm_campaign, utm_content, utm_term. The utm ones survive email proxies; the network ones do not (see the email section). |
 | `region` | yes | Where the test's counters and model live. `eu` is a hard guarantee (data never leaves the EU); weur/eeur/wnam/enam/sam/apac/oc/afr/me are placement preferences. Unset = wherever the first request lands, which in email is often a mail provider's datacenter, so set it for email tests. Changing it later = a new test. |
 | `redirectUrl` | yes | Fallback click destination when neither `?to=` nor a per-variant redirectUrl says where to go. The click link REFUSES rather than 404s when all three are missing. |
@@ -86,6 +87,7 @@ one variant: a bundled win never tells you which half worked.
 | `forwardParams` | no | Default true: unrecognized query params (utm_*, gclid...) are forwarded onto the destination. `false` turns that off; safe to change mid-campaign. |
 | `decorateRedirects` | no | Default true: redirects carry the identity handoff (_lvt/_lvid/_lvvar) to the destination so its tag can keep attribution and consistency. |
 | `priors` | **no** | Warm-start beliefs via `generate_priors`. Deliberately OUTSIDE the identity hash: add or tune priors mid-test without losing history. |
+| `ctxPriors` | **no** | The same warm start, limited to one segment: `generate_priors` with `when`. Says "B is the one for blue" instead of "B is the one", so the other segments keep learning from their own traffic. Also outside the identity hash. |
 | `statsKeyHash` | yes | The sha256 of the stats secret. Safe in public links; the secret itself never appears in any URL except the manage link's #fragment. |
 
 ## Creating a test with nothing but a URL
@@ -109,7 +111,9 @@ Config parameters (these define the test, and therefore its identity):
 - `n`: test name; `kh`: the stats-secret HASH (never the secret);
 - `ctx`: audience dims, e.g. `ctx=country:country,persona` (`key:from` fills
   automatically, bare `key` expects a `c_<key>=` value on the link);
-- `r`: fallback click destination; `stamp`: write the served variant name
+- `r`: fallback click destination; `sr`: click destination for ONE element,
+  binding to the slot most recently opened (`s=hero&sr=https://...&v=..&v=..`),
+  exactly the way `v` binds; `stamp`: write the served variant name
   into this parameter on the destination; `fw=0`: stop forwarding unknown
   params.
 
@@ -120,15 +124,19 @@ destination), `slot`.
 
 Why this matters for email templates: wire the fixed parts (`kh`, `auto=0`,
 `id={{merge_tag}}`) into an ESP template once, and campaign managers fill in
-nothing but variant URLs through ordinary template fields. Because variant
-URLs are inside the identity hash, **each campaign automatically becomes its
-own fresh test**, while the one shared `kh` means one stats secret reads all
-of them. `build_test` returns this spelling ready-made as `emailTemplate`.
+nothing but variant URLs, landing pages and a campaign name through ordinary
+template fields. Because all of those are inside the identity hash, **each
+campaign automatically becomes its own fresh test**, while the one shared
+`kh` means one stats secret reads all of them. Spend a merge tag on `n=`
+too (`n={{campaign_name}}`): the name is what `list_tests` searches, and it
+is the difference between finding March's newsletter and reading a list of
+hashes. `build_test` returns this spelling ready-made as `emailTemplate`.
 A two-slot template carries three links: the same config with
 `&slot=hero` in one image and `&slot=cta` in the other, plus the `/c`
-click link around them. A malformed parameter link degrades to serving the
-first valid variant URL rather than showing an error to a full recipient
-list.
+click link around them, which takes a `&slot=` of its own only when the
+elements point at different pages. A malformed parameter link degrades to
+serving the first valid variant URL rather than showing an error to a full
+recipient list.
 
 ## Working flow
 
@@ -152,7 +160,8 @@ empty history. So iteration happens on the PLAN, never on a live test.
    then build. Running unattended, skip the pause but still put the plan
    in your output.
 4. `build_test` to get the URLs and the stats secret. Store the secret.
-5. `generate_priors`, optionally, to warm-start from what you expect.
+5. `generate_priors`, optionally, to warm-start from what you expect. Add
+   `when` when the belief is about one segment rather than everybody.
 6. `get_stats` to read results.
 
 `inspect_test` answers "what does this link do?" for any LiveVariant URL, and
@@ -162,13 +171,14 @@ whether its destinations are verified (you hold the secret, so you may ask).
 
 ## What your final answer must include
 
-After building a test, the human should never have to ask a follow-up to
-use it. Always include:
+After building a test, make the output usable in the channel the user asked
+for. Include:
 
-- **The manage URL**, every time. Say what it is: live results in the
-  browser, and signed in one click ("Add to my account") claims the test
-  into their dashboard. It carries the stats secret in its #fragment, so
-  they should share it only with people who may see results.
+- **The manage URL**, when you are returning a newly built test to the user.
+  Say what it is: live results in the browser, and signed in one click ("Add
+  to my account") claims the test into their dashboard. It carries the stats
+  secret in its #fragment, so the user should treat it as results access and
+  share it only with people authorized to see results.
 - **The exact links or HTML for their channel**, composed for THIS test.
   For email that means the serve URL in the `<img src>` wrapped in the
   click URL as `<a href>`, with the platform's real merge tag in `id=`
@@ -230,8 +240,15 @@ Email is where this is most useful and most easily got wrong.
 - **Multi-slot SERVE links need `slot=`.** The bare serve URL returns an
   error for them; `build_test`'s `slotLinks` has the per-element pair
   ready. The click link is the exception: one slot-less click link can
-  wrap every element, unless variants carry their own `redirectUrl`s
-  (then the click must say which element was clicked).
+  wrap every element, unless an element carries its own destination
+  (`slotRedirects`, or a variant `redirectUrl`), in which case the click
+  must say which element was clicked.
+
+- **Elements can lead to different pages.** `slotRedirects` per slot is
+  the ordinary case for a newsletter whose hero points at the campaign
+  landing page and whose CTA points at pricing. Reach for a per-variant
+  `redirectUrl` only when the destination differs per CREATIVE, which is
+  rare and costs the parameter-form spelling.
 
 `build_test` also returns an `emailTemplate`: the query-parameter spelling of
 the same test (see "Creating a test with nothing but a URL"), for wiring into
@@ -257,8 +274,8 @@ loop yourself instead of handing snippets to a human:
    The tag sets the page config (`window.livevariant = { config, sdk }`),
    auto-tracks conversions from existing GA events, and upgrades any
    LiveVariant image/click URLs on the page with the visitor's identity. The
-   publishable key is optional and PUBLIC; with one whose account verified
-   this domain, the test registers under that account automatically.
+   publishable key is optional; with one whose account verified this domain,
+   the test registers under that account automatically.
 3. Serve the test where the content lives, passing the ENCODED config so the
    page serves exactly the test you built (identity, region and stats key
    included), never a lookalike rebuilt from slots:
@@ -311,29 +328,28 @@ size travel best.
 Creating needs no account, ever. When a human wants tests in their
 dashboard ("My tests"), there are two paths; prefer the first:
 
-1. **Register at creation.** Ask once: "paste your publishable key from
-   Settings (pk_..., it is public and safe here)". Then pass it as
-   `publishableKey` to `build_test`: the test registers to their
-   organization the moment it exists, and the output confirms with
-   `registeredTo`. For a test you built EARLIER in this conversation,
-   `register_test` does the same with the config, the stats secret you
-   still hold, and the key.
+1. **Register at creation.** If the user asks to save the test to an
+   organization they administer, ask for the publishable key from Settings
+   (pk_...) and pass it as `publishableKey` to `build_test`: the test
+   registers to their organization the moment it exists, and the output
+   confirms with `registeredTo`. For a test you built EARLIER in this
+   conversation, `register_test` does the same with the config, the stats
+   secret returned for that test, and the key.
 2. **The manage URL.** No key or no account yet? Hand them the `manage`
    URL from `build_test`: opening it signed-in claims the test in one
    click. It carries the stats secret in its #fragment, so treat it like
    the secret it contains.
 
-Why this is safe to do in chat: the publishable key only NAMES the org
-and grants nothing alone; authority is always the stats secret, which
-`build_test` mints itself and you never ask the user for. Never collect
-credentials. Registration is what makes the dashboard useful for the
-test: My tests lists it, and its stats become readable there without the
-secret.
+The publishable key identifies the organization but does not grant result
+access by itself; result access stays tied to the stats secret for that
+test. Never collect credentials. Registration is what makes the dashboard
+useful for the test: My tests lists it, and its stats become readable there
+without pasting the secret again.
 
-Either way, ALWAYS hand over the manage URL and say what claiming does;
-an unregistered test whose manage URL the user never saw is effectively
-lost to them. `get_test_status` tells you later whether a test ended up
-claimed and by which organization.
+Either way, when you return a newly built test, include the manage URL and
+say what claiming does; an unregistered test whose manage URL the user never
+saw is effectively lost to them. `get_test_status` tells you later whether a
+test ended up claimed and by which organization.
 
 ## Verified domains and the interstitial
 
@@ -350,7 +366,7 @@ having the LiveVariant tag with their publishable key live in the site's
 page source (tag-manager installs count: verification renders the page).
 
 Recommend the tag install whenever the user owns the destination site:
-one `<script>` with their PUBLIC publishable key means conversions are
+one `<script>` with their publishable key means conversions are
 tracked automatically from their existing GA events (clicks stop being
 the only signal), the domain verifies from the snippet itself, tests
 served from it register into their account on their own, and on-page
@@ -381,7 +397,9 @@ supports):
 - **Hosted MCP server**, nothing to run and no auth: add
   `https://livevariant.com/mcp` (streamable HTTP) to the client's MCP configuration.
 - **Local MCP server** over stdio: `npx -y @livevariant/mcp` (point it
-  at a self-hosted deployment with `LIVEVARIANT_SERVER_URL` if needed).
+  at a self-hosted deployment with `LIVEVARIANT_SERVER_URL`, and set
+  `LIVEVARIANT_ASSET_UPLOAD_TOKEN` when that deployment gates
+  `/assets`).
 - **This skill on its own**: `npx skills add livevariant/livevariant`
   (Claude Code, Cowork, any skills-compatible agent). The skill is
   instructions, not transport, so pair it with one of the routes above

@@ -29,6 +29,7 @@ export const CONFIG_PARAMS = [
   "kh", // statsKeyHash: the HASH of the stats secret, never the secret
   "ctx", // comma-separated dims: "country:country,persona"
   "r", // fallback redirect target for clicks
+  "sr", // per-slot redirect target, binds to the slot most recently opened
   "stamp", // write the served combination into this param on redirect
   "fw" // fw=0 turns off forwarding unrecognized params
 ] as const;
@@ -93,6 +94,7 @@ export async function configFromParams(
   // pairs that follow belong to it, the next `s=` opens the next slot. A
   // template with no `s=` at all is the single-slot common case.
   const slots: Record<string, Array<{ name?: string; url: string }>> = {};
+  const slotRedirects: Record<string, string> = {};
   let current = "main";
   let variantOrdinal = 0;
   // Names are positional against the v order across the whole query, so
@@ -112,6 +114,12 @@ export async function configFromParams(
       list.push({ ...(name ? { name } : {}), url: value });
       variantOrdinal++;
     }
+    // `sr` binds to the slot most recently opened, exactly like `v` does,
+    // so an element's landing page sits next to its variants in the
+    // template instead of in a positional list somewhere else.
+    if (key === "sr" && value.trim().length > 0) {
+      slotRedirects[current] = value;
+    }
   }
   if (Object.keys(slots).length === 0) {
     throw new Error("a query-parameter test needs at least two `v` variants");
@@ -129,6 +137,7 @@ export async function configFromParams(
     ...(query.get("kh") ? { statsKeyHash: query.get("kh") as string } : {}),
     ...(ctx ? { ctx } : {}),
     ...(query.get("r") ? { redirectUrl: query.get("r") as string } : {}),
+    ...(Object.keys(slotRedirects).length > 0 ? { slotRedirects } : {}),
     ...(query.get("stamp")
       ? { variantParam: query.get("stamp") as string }
       : {}),
@@ -182,6 +191,12 @@ export function configToParams(config: TestConfig): URLSearchParams | null {
     if (!singleMain) {
       query.append("s", slotKey);
     }
+    // After the `s` that opens the slot and before its variants: `sr`
+    // binds to the slot currently open, so position is the grammar.
+    const slotRedirect = config.slotRedirects?.[slotKey];
+    if (slotRedirect) {
+      query.append("sr", slotRedirect);
+    }
     for (const variant of list) {
       query.append("v", variant.url as string);
       if (variant.name !== undefined) {
@@ -216,8 +231,14 @@ export function configToParams(config: TestConfig): URLSearchParams | null {
  * The ESP-template spelling of a config: the same query string
  * configToParams produces, with every variant URL swapped for a merge
  * placeholder ({{hero_variant_1_url}}, or {{variant_1_url}} when the
- * test has one slot) and, when the config sets no redirectUrl, an
+ * test has one slot), every per-slot landing page swapped for
+ * {{hero_landing_url}}, and, when no destination is set at all, an
  * r={{landing_url}} placeholder appended.
+ *
+ * Every URL in the template is a placeholder for the same reason: a
+ * recurring campaign changes its creative AND where it points, and the
+ * fields a campaign manager fills in are exactly the ones that should
+ * mint a fresh test when they change.
  *
  * The critical property is that ONE string feeds every link in the
  * template. `r` is part of a test's identity, so a click link that
@@ -244,16 +265,29 @@ export function configToTemplateQuery(config: TestConfig): string | null {
       (_, i) => `{{${singleMain ? "" : `${slotKey}_`}variant_${i + 1}_url}}`
     )
   );
+  // Same grammar for the per-slot landing pages: the nth sr= belongs to
+  // the nth slot that declares one, in the same declaration order.
+  const landingPlaceholders = entries
+    .filter(([slotKey]) => config.slotRedirects?.[slotKey])
+    .map(([slotKey]) => `{{${singleMain ? "" : `${slotKey}_`}landing_url}}`);
   let variantOrdinal = 0;
+  let landingOrdinal = 0;
   const pieces: string[] = [];
   for (const [key, value] of params.entries()) {
     if (key === "v") {
       pieces.push(`v=${placeholders[variantOrdinal++]}`);
+    } else if (key === "sr") {
+      pieces.push(`sr=${landingPlaceholders[landingOrdinal++]}`);
     } else {
       pieces.push(`${key}=${encodeURIComponent(value)}`);
     }
   }
-  if (!params.has("r")) {
+  // A test whose every slot names its own landing page needs no fallback;
+  // anything else does, or its click links have nowhere to go.
+  const everySlotCovered = entries.every(
+    ([slotKey]) => config.slotRedirects?.[slotKey]
+  );
+  if (!params.has("r") && !everySlotCovered) {
     pieces.push("r={{landing_url}}");
   }
   return pieces.join("&");
