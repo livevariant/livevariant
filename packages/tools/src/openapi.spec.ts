@@ -39,6 +39,27 @@ describe("buildOpenApiDocument", () => {
     );
   });
 
+  it("states that read tools need `test` or `config`, in the schema itself", () => {
+    // givenTest rejects an empty request at runtime; the contract has to
+    // say so too, or a schema-guided caller can construct a request that
+    // validates and then fails. anyOf/required is how JSON Schema spells
+    // "at least one of these names".
+    for (const name of [
+      "inspect-test",
+      "generate-priors",
+      "get-stats",
+      "get-test-status"
+    ]) {
+      const op = paths[`/api/v1/${name}`].post;
+      const schema = op.requestBody.content["application/json"].schema;
+      expect(schema.required ?? []).not.toContain("test");
+      expect(schema.anyOf).toEqual([
+        { required: ["test"] },
+        { required: ["config"] }
+      ]);
+    }
+  });
+
   it("declares no security, because there is none to declare", () => {
     // A test's authority is its config and its stats secret, both passed
     // in the body. There is no key to put in a header.

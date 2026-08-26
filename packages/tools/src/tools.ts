@@ -78,6 +78,18 @@ function givenTest(input: { test?: string; config?: string }): string {
   return ref;
 }
 
+/**
+ * The schema-level statement of what givenTest enforces: one of the two
+ * names must be present. A zod refinement cannot say this in the
+ * generated JSON Schema (refinements are dropped), but meta merges
+ * verbatim into it, so schema-guided callers — MCP clients, OpenAPI
+ * codegen — see the requirement up front instead of discovering it as a
+ * failed round-trip.
+ */
+const ONE_TEST_NAME_REQUIRED = {
+  anyOf: [{ required: ["test"] }, { required: ["config"] }]
+};
+
 const contextDim = z.object({
   key: z
     .string()
@@ -628,10 +640,12 @@ export const inspectTest = defineTool({
     "Use this before sending anything, and to answer 'what is this link?'.",
   readOnly: true,
   reachesNetwork: false,
-  input: z.object({
-    test: testRef.optional(),
-    config: testRefAlias.optional()
-  }),
+  input: z
+    .object({
+      test: testRef.optional(),
+      config: testRefAlias.optional()
+    })
+    .meta(ONE_TEST_NAME_REQUIRED),
   output: z.object({
     testId: z.string(),
     name: z.string().optional(),
@@ -771,46 +785,50 @@ export const generatePriors = defineTool({
     "visitor, which is a different and much stronger claim.",
   readOnly: true,
   reachesNetwork: false,
-  input: z.object({
-    test: testRef.optional(),
-    config: testRefAlias.optional(),
-    when: z
-      .record(z.string(), z.string())
-      .optional()
-      .describe(
-        "Context this belief is limited to, as dimension key to value " +
-          '(e.g. {"color": "blauw"}). The keys must be dimensions the ' +
-          "test declares. Omit it for a belief about every visitor."
-      ),
-    beliefs: z
-      .array(
-        z.object({
-          slot: z
-            .string()
-            .optional()
-            .describe(
-              "Which slot the variant belongs to. Optional for single-slot tests."
-            ),
-          variant: z
-            .union([z.string(), z.number().int()])
-            .describe("Variant name or index within its slot."),
-          rate: z
-            .number()
-            .min(0)
-            .max(1)
-            .describe("Your estimate of its conversion rate, e.g. 0.04 for 4%.")
-        })
-      )
-      .min(1),
-    confidence: z
-      .union([z.enum(["low", "medium", "high"]), z.number().positive()])
-      .default("medium")
-      .describe(
-        "How much your guess is worth in observations. low=5, medium=15, " +
-          "high=30, or give a number directly. Higher means the test trusts " +
-          "you for longer before the data takes over."
-      )
-  }),
+  input: z
+    .object({
+      test: testRef.optional(),
+      config: testRefAlias.optional(),
+      when: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe(
+          "Context this belief is limited to, as dimension key to value " +
+            '(e.g. {"color": "blauw"}). The keys must be dimensions the ' +
+            "test declares. Omit it for a belief about every visitor."
+        ),
+      beliefs: z
+        .array(
+          z.object({
+            slot: z
+              .string()
+              .optional()
+              .describe(
+                "Which slot the variant belongs to. Optional for single-slot tests."
+              ),
+            variant: z
+              .union([z.string(), z.number().int()])
+              .describe("Variant name or index within its slot."),
+            rate: z
+              .number()
+              .min(0)
+              .max(1)
+              .describe(
+                "Your estimate of its conversion rate, e.g. 0.04 for 4%."
+              )
+          })
+        )
+        .min(1),
+      confidence: z
+        .union([z.enum(["low", "medium", "high"]), z.number().positive()])
+        .default("medium")
+        .describe(
+          "How much your guess is worth in observations. low=5, medium=15, " +
+            "high=30, or give a number directly. Higher means the test trusts " +
+            "you for longer before the data takes over."
+        )
+    })
+    .meta(ONE_TEST_NAME_REQUIRED),
   output: z.object({
     testId: z.string(),
     config: z.string(),
@@ -1008,16 +1026,18 @@ export const getStats = defineTool({
     "secret and it will be used automatically.",
   readOnly: true,
   reachesNetwork: true,
-  input: z.object({
-    test: testRef.optional(),
-    config: testRefAlias.optional(),
-    statsSecret: z
-      .string()
-      .optional()
-      .describe(
-        "Omit when passing a manage URL that carries it in the fragment."
-      )
-  }),
+  input: z
+    .object({
+      test: testRef.optional(),
+      config: testRefAlias.optional(),
+      statsSecret: z
+        .string()
+        .optional()
+        .describe(
+          "Omit when passing a manage URL that carries it in the fragment."
+        )
+    })
+    .meta(ONE_TEST_NAME_REQUIRED),
   output: z.object({
     testId: z.string(),
     totalAssignments: z.number(),
@@ -1576,16 +1596,18 @@ export const getTestStatus = defineTool({
   readOnly: true,
   reachesNetwork: true,
   scope: "account",
-  input: z.object({
-    test: testRef.optional(),
-    config: testRefAlias.optional(),
-    statsSecret: z
-      .string()
-      .optional()
-      .describe(
-        "Omit when passing a manage URL that carries it in the fragment."
-      )
-  }),
+  input: z
+    .object({
+      test: testRef.optional(),
+      config: testRefAlias.optional(),
+      statsSecret: z
+        .string()
+        .optional()
+        .describe(
+          "Omit when passing a manage URL that carries it in the fragment."
+        )
+    })
+    .meta(ONE_TEST_NAME_REQUIRED),
   output: z.object({
     testId: z.string(),
     claimed: z
