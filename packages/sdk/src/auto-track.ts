@@ -115,9 +115,43 @@ export function autoTrack(options: AutoTrackOptions): AutoTracker {
 
   captureHandoff(win, storage);
 
+  /**
+   * Every reward target however it was stored. The page's ONE watcher can
+   * be bound to the page store while another bundle on the page cached its
+   * assignment under the localStorage opt-in (or an earlier opted-in
+   * pageview left a handoff there), and a conversion must reward those
+   * participations too, so localStorage is always scanned alongside the
+   * tracker's own store. Scanned, never written: the lv:* keys it finds
+   * there exist only because some LiveVariant surface wrote them under the
+   * deployment's own opt-in, so reading them back adds no storage surface
+   * the deployment has not already accepted.
+   */
+  function allParticipations(): Participation[] {
+    const seen = new Set<string>();
+    const out: Participation[] = [];
+    const collect = (store: Storage | null): void => {
+      for (const participation of listParticipations(store)) {
+        const key = `${participation.testId}:${participation.idHash}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(participation);
+        }
+      }
+    };
+    collect(storage);
+    try {
+      if (win.localStorage !== storage) {
+        collect(win.localStorage);
+      }
+    } catch {
+      // Storage access can throw (privacy modes); nothing extra to scan.
+    }
+    return out;
+  }
+
   async function trackConversion(amount = 1): Promise<void> {
     await Promise.all(
-      listParticipations(storage).map(
+      allParticipations().map(
         participation =>
           fetchImpl(`${options.serverUrl}/reward`, {
             method: "POST",

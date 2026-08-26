@@ -5,6 +5,7 @@ import { SDK_VERSION } from "./version.js";
 import { autoTrack } from "./auto-track.js";
 import { captureHandoff, getHandoff, listHandoffs } from "./handoff.js";
 import { resetDataLayerInterception } from "./ga.js";
+import { pageStorage } from "./page-store.js";
 
 /**
  * The redirect -> SDK identity handoff, in a real browser: URL capture and
@@ -42,6 +43,7 @@ function visitWithParams(params: Record<string, string>): void {
 
 beforeEach(() => {
   localStorage.clear();
+  pageStorage(window).clear();
   history.replaceState(null, "", "/");
   delete (window as any).dataLayer;
   // The interceptor is a per-window singleton with an event replay buffer;
@@ -152,7 +154,9 @@ describe("autoTrack (GTM one-tag mode)", () => {
   it("captures on load and rewards every stored handoff on GA events", async () => {
     const testId = await computeTestId(CONFIG);
     const otherTest = "cd".repeat(32);
-    // A second test's handoff captured on an earlier pageview.
+    // A second test's handoff, persisted under the localStorage opt-in by
+    // an earlier pageview. Today's tag runs in the default page mode, and
+    // the watcher must still reward it.
     localStorage.setItem(
       `lv:h:${otherTest}`,
       JSON.stringify({
@@ -170,7 +174,10 @@ describe("autoTrack (GTM one-tag mode)", () => {
       fetch: fetchImpl
     });
     expect(location.search).toBe("?utm_source=mail");
-    expect(listHandoffs(localStorage)).toHaveLength(2);
+    // The URL capture landed in the default page store; the legacy handoff
+    // stayed where it was. One in each, both about to be rewarded.
+    expect(listHandoffs(pageStorage(window))).toHaveLength(1);
+    expect(listHandoffs(localStorage)).toHaveLength(1);
 
     (window as any).dataLayer = (window as any).dataLayer || [];
     (window as any).dataLayer.push({ event: "purchase" });
@@ -188,6 +195,31 @@ describe("autoTrack (GTM one-tag mode)", () => {
         "testId"
       ]);
     }
+    tracker.dispose();
+  });
+
+  it("rewards a localStorage assignment from a page-store watcher", async () => {
+    // The Greptile P1 scenario: the tag booted first and claimed the page's
+    // one GA watcher on the DEFAULT page store; page code then created a
+    // test with the documented localStorage opt-in. Its cached assignment
+    // lives where the watcher's own store does not, and the conversion
+    // must reward it anyway.
+    const inlineTest = "ab".repeat(32);
+    localStorage.setItem(
+      `lv:a:${inlineTest}`,
+      JSON.stringify({ cell: 1, idHash: "0f".repeat(32) })
+    );
+    const { calls, fetchImpl } = fakeServer();
+    const tracker = autoTrack({
+      serverUrl: "https://livevariant.link",
+      fetch: fetchImpl
+    });
+    (window as any).dataLayer = (window as any).dataLayer || [];
+    (window as any).dataLayer.push({ event: "purchase" });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const rewards = calls.filter(c => c.url.endsWith("/reward"));
+    expect(rewards).toHaveLength(1);
+    expect(rewards[0].body.testId).toBe(inlineTest);
     tracker.dispose();
   });
 });
