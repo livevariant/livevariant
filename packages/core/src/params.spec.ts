@@ -330,6 +330,24 @@ describe("configToTemplateQuery", () => {
     const click = await configFromParams(query(`${filled}&id=r1`));
     expect(click.testId).toBe(serve.testId);
   });
+
+  it("spells a variant carrying both image and url: still a template", async () => {
+    // Both are content fields the schema accepts together, and both are
+    // replaced by the same merge placeholder — so the pair flattens to
+    // the url spelling rather than losing the template. (A per-variant
+    // redirectUrl is different grammar, not a different spelling, and
+    // still returns null — covered above.)
+    const { configToTemplateQuery } = await import("./params.js");
+    const { parseTestConfig } = await import("./schema.js");
+    const config = parseTestConfig({
+      redirectUrl: "https://example.com/offer",
+      variants: [{ image: A, url: "https://example.com/hero-a" }, { image: B }]
+    });
+    const template = configToTemplateQuery(config) as string;
+    expect(template).not.toBeNull();
+    expect(template).toContain("v={{variant_1_url}}");
+    expect(template).toContain("v={{variant_2_url}}");
+  });
 });
 
 describe("passthroughParams", () => {

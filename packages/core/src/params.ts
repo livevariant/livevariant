@@ -255,7 +255,12 @@ export function configToParams(config: TestConfig): URLSearchParams | null {
  * refuses it. The template never needed that fidelity: every variant
  * URL becomes a merge placeholder below, and a filled-in template mints
  * its own test either way. Image variants are the canonical email case,
- * so they must not be the case that loses the template.
+ * so they must not be the case that loses the template — including a
+ * variant that carries BOTH image and url (both are content fields; the
+ * flattened value is swapped for a placeholder regardless, so only the
+ * slot structure has to survive). Per-variant redirectUrl stays
+ * inexpressible: that field is grammar the parameter form truly lacks,
+ * not a spelling difference.
  */
 export function configToTemplateQuery(config: TestConfig): string | null {
   const spellable: TestConfig = {
@@ -264,8 +269,8 @@ export function configToTemplateQuery(config: TestConfig): string | null {
       Object.entries(config.slots).map(([slotKey, list]) => [
         slotKey,
         list.map(v =>
-          v.image !== undefined && v.url === undefined
-            ? { ...v, url: v.image, image: undefined }
+          v.image !== undefined
+            ? { ...v, url: v.url ?? v.image, image: undefined }
             : v
         )
       ])
