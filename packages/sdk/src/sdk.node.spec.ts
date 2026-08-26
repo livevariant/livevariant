@@ -54,7 +54,11 @@ function options(
   server: FakeServer,
   extra?: Partial<CreateTestOptions>
 ): CreateTestOptions {
-  return { serverUrl: "https://livevariant.link", fetch: server.fetch, ...extra };
+  return {
+    serverUrl: "https://livevariant.link",
+    fetch: server.fetch,
+    ...extra
+  };
 }
 
 describe("createTest headless", () => {
@@ -89,9 +93,7 @@ describe("createTest headless", () => {
     await createTest(shared, options(server, { externalId: "bob" }));
     // A different id cannot reuse alice's cached assignment.
     expect(server.chooseCalls).toHaveLength(2);
-    expect(server.chooseCalls[0].idHash).not.toBe(
-      server.chooseCalls[1].idHash
-    );
+    expect(server.chooseCalls[0].idHash).not.toBe(server.chooseCalls[1].idHash);
   });
 
   it("keeps keyless configs unscoped: no hostname exists to scope to", async () => {
