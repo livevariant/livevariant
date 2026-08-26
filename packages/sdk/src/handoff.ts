@@ -10,9 +10,10 @@ import {
  * address bar the way gclid handlers do. Stored handoffs are what lets
  * a GTM-deployed SDK attribute conversions for tests the page itself
  * never rendered. How long they live is the storage's business: the
- * default page store holds them until navigation (the landing page must
- * see the conversion), localStorage-opted-in deployments keep them for
- * a pages-later conversion up to the TTL below.
+ * default sessionStorage holds them for the tab's lifetime (a
+ * pages-later conversion in the same tab attributes), "none" mode keeps
+ * them only until navigation, and the "local-storage" opt-in keeps them
+ * across visits up to the TTL below.
  */
 
 const STORAGE_PREFIX = "lv:h:";

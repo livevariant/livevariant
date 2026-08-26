@@ -47,6 +47,7 @@ function visitWithParams(params: Record<string, string>): void {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   pageStorage(window).clear();
   resetStoreRegistry(window);
   history.replaceState(null, "", "/");
@@ -179,9 +180,9 @@ describe("autoTrack (GTM one-tag mode)", () => {
       fetch: fetchImpl
     });
     expect(location.search).toBe("?utm_source=mail");
-    // The URL capture landed in the default page store; the legacy handoff
-    // stayed where it was. One in each, both about to be rewarded.
-    expect(listHandoffs(pageStorage(window))).toHaveLength(1);
+    // The URL capture landed in the default sessionStorage; the legacy
+    // handoff stayed in localStorage. One in each, both rewarded.
+    expect(listHandoffs(sessionStorage)).toHaveLength(1);
     expect(listHandoffs(localStorage)).toHaveLength(1);
 
     (window as any).dataLayer = (window as any).dataLayer || [];
@@ -203,9 +204,9 @@ describe("autoTrack (GTM one-tag mode)", () => {
     tracker.dispose();
   });
 
-  it("rewards a localStorage assignment from a page-store watcher", async () => {
+  it("rewards a localStorage assignment from a default-store watcher", async () => {
     // The Greptile P1 scenario: the tag booted first and claimed the page's
-    // one GA watcher on the DEFAULT page store; page code then created a
+    // one GA watcher on the default sessionStorage; page code then created a
     // test with the documented localStorage opt-in. Its cached assignment
     // lives where the watcher's own store does not, and the conversion
     // must reward it anyway.
@@ -248,7 +249,8 @@ describe("autoTrack (GTM one-tag mode)", () => {
     } as Storage;
 
     const { calls, fetchImpl } = fakeServer();
-    // The tag's tracker claims the page watcher first, on the page store.
+    // The tag's tracker claims the page watcher first, on the default
+    // sessionStorage.
     const tracker = autoTrack({
       serverUrl: "https://livevariant.link",
       fetch: fetchImpl
@@ -294,7 +296,7 @@ describe("autoTrack (GTM one-tag mode)", () => {
     } as Storage;
     registerStore(window, broken);
     const healthy = "d7".repeat(32);
-    pageStorage(window).setItem(
+    sessionStorage.setItem(
       `lv:a:${healthy}`,
       JSON.stringify({ cell: 0, idHash: "e8".repeat(32) })
     );
@@ -311,6 +313,44 @@ describe("autoTrack (GTM one-tag mode)", () => {
     const rewards = calls.filter(c => c.url.endsWith("/reward"));
     expect(rewards).toHaveLength(1);
     expect(rewards[0].body.testId).toBe(healthy);
+    tracker.dispose();
+  });
+
+  it('"none" mode sweeps no web storage for rewards', async () => {
+    // A deployment that declared no web storage must not have it READ
+    // either: the access is the consent surface, exactly as with the
+    // cookie jar. Participations sitting in both web storages stay
+    // untouched, while one in the tracker's own window store rewards.
+    sessionStorage.setItem(
+      `lv:a:${"f0".repeat(32)}`,
+      JSON.stringify({ cell: 0, idHash: "f1".repeat(32) })
+    );
+    localStorage.setItem(
+      `lv:h:${"f2".repeat(32)}`,
+      JSON.stringify({
+        testId: "f2".repeat(32),
+        idHash: "f3".repeat(32),
+        cell: 0,
+        capturedAt: Date.now()
+      })
+    );
+    const inPage = "f4".repeat(32);
+    pageStorage(window).setItem(
+      `lv:a:${inPage}`,
+      JSON.stringify({ cell: 1, idHash: "f5".repeat(32) })
+    );
+    const { calls, fetchImpl } = fakeServer();
+    const tracker = autoTrack({
+      serverUrl: "https://livevariant.link",
+      fetch: fetchImpl,
+      storage: pageStorage(window)
+    });
+    (window as any).dataLayer = (window as any).dataLayer || [];
+    (window as any).dataLayer.push({ event: "purchase" });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const rewards = calls.filter(c => c.url.endsWith("/reward"));
+    expect(rewards).toHaveLength(1);
+    expect(rewards[0].body.testId).toBe(inPage);
     tracker.dispose();
   });
 });
