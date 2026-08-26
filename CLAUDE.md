@@ -85,9 +85,11 @@ fields)`. Tampering derives a different test with empty state.
   bundle coordinate rewards through those keys. localStorage is an
   explicit opt-in (`storage: window.localStorage` in code,
   `data-storage="local"` on the tag, `storage: "local"` in the global
-  config) and buys cross-page identity and pages-later conversions; the
-  GA `_ga` cookie is still read (never written) for identity when
-  present.
+  config) and buys cross-page identity and pages-later conversions. The
+  GA `_ga` cookie is likewise read (never written) for identity ONLY
+  under the `autoIdentify` opt-in (option / `data-auto-identify` /
+  global config), so the default install performs no storage reads
+  either and has zero consent surface.
 
 ## Architecture
 

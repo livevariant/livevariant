@@ -460,14 +460,28 @@ describe("resilience: the page must render regardless", () => {
 });
 
 describe("external id resolution", () => {
-  it("prefers the GA client id from the _ga cookie", async () => {
+  it("reads the _ga cookie only under the autoIdentify opt-in", async () => {
     document.cookie = "_ga=GA1.1.1234567890.1699999999";
     const server = fakeServer();
-    const a = await createTest(CONFIG, options(server));
+    const a = await createTest(CONFIG, options(server, { autoIdentify: true }));
     // Same cookie -> same idHash on a fresh createTest.
     pageStorage(window).clear();
-    const b = await createTest(CONFIG, options(server));
+    const b = await createTest(CONFIG, options(server, { autoIdentify: true }));
     expect(server.chooseCalls[0].idHash).toBe(server.chooseCalls[1].idHash);
+    a.dispose();
+    b.dispose();
+  });
+
+  it("ignores an existing _ga cookie by default: no reads without the opt-in", async () => {
+    document.cookie = "_ga=GA1.1.1234567890.1699999999";
+    const server = fakeServer();
+    // Two fresh page stores with the same cookie present: were the cookie
+    // read, the identities would match. They must not, because the default
+    // install touches nothing in the browser's storage, read or write.
+    const a = await createTest(CONFIG, options(server));
+    pageStorage(window).clear();
+    const b = await createTest(CONFIG, options(server));
+    expect(server.chooseCalls[0].idHash).not.toBe(server.chooseCalls[1].idHash);
     a.dispose();
     b.dispose();
   });

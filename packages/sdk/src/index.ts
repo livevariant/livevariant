@@ -97,6 +97,15 @@ export interface LiveVariantConfig {
    * this global is the plain-data cross-version contract.
    */
   storage?: StorageMode;
+  /**
+   * Opt-in to reading the site's _ga cookie for visitor identity. OFF by
+   * default: reading a cookie is itself access to stored information
+   * under the consent rules, so the default install touches nothing in
+   * the browser's storage, read or write. Turning it on buys cross-page
+   * identity aligned with the site's own analytics, under the site's own
+   * GA consent flow (a consent-denied visitor has no _ga to read).
+   */
+  autoIdentify?: boolean;
 }
 
 /** The tag's callable surface, for pages without an npm install. */
@@ -170,6 +179,11 @@ export interface CreateTestOptions {
    * conversions (your consent story), or null to disable caching.
    */
   storage?: Storage | null;
+  /**
+   * Opt-in to reading the _ga cookie for identity (see
+   * LiveVariantConfig.autoIdentify). Default false: no cookie reads.
+   */
+  autoIdentify?: boolean;
   /**
    * How long to wait for a tag-manager-loaded tag's global config when
    * no serverUrl is otherwise known. Tag managers inject the tag late,
@@ -362,7 +376,9 @@ export async function createTest(
           explicit: options.externalId,
           cookieString: win.document.cookie,
           locationSearch: win.location.search,
-          storage
+          storage,
+          autoIdentify:
+            options.autoIdentify ?? pageGlobal?.config?.autoIdentify ?? false
         })
       );
 

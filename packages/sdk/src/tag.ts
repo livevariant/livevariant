@@ -80,6 +80,13 @@ export function bootTag(
   const storageMode =
     preset.storage ?? (data.storage as StorageMode | undefined);
   const storage = resolveStorage(win, storageMode);
+  // Identity via the site's _ga cookie is the same kind of decision as
+  // persistent storage: an explicit deployment opt-in, never a default.
+  const autoIdentify =
+    preset.autoIdentify ??
+    (data.autoIdentify !== undefined &&
+      data.autoIdentify !== "false" &&
+      data.autoIdentify !== "off");
   // Claims the page-wide watcher unless an earlier bundle (an npm SDK
   // that ran first) already did; either way exactly one exists.
   const tracker: AutoTracker = autoTrack({
@@ -88,7 +95,7 @@ export function bootTag(
     storage,
     window: win
   });
-  const decorate = () => decorateMedia(win, serverUrl, storage);
+  const decorate = () => decorateMedia(win, serverUrl, storage, autoIdentify);
   // Upgrade any serve images / click links already in the page. The
   // preload scanner beat us to bare src images (their id-less fetch
   // recorded nothing); data-lv-src images get their one identified
@@ -99,7 +106,9 @@ export function bootTag(
       serverUrl,
       publishableKey: preset.publishableKey ?? data.publishableKey,
       rewardEvents,
-      ...(storageMode ? { storage: storageMode } : {})
+      ...(storageMode ? { storage: storageMode } : {}),
+      // Carried so npm createTest calls on the page follow the tag's choice.
+      ...(autoIdentify ? { autoIdentify } : {})
     },
     sdk: {
       createTest,

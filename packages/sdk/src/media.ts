@@ -33,7 +33,9 @@ import { resolveExternalId } from "./identity.js";
 export async function decorateMedia(
   win: Window,
   serverUrl: string,
-  storage: Storage | null
+  storage: Storage | null,
+  /** Opt-in to _ga-based identity for the decorated URLs. Default: off. */
+  autoIdentify = false
 ): Promise<number> {
   const origin = serverUrl.replace(/\/+$/, "");
   let upgraded = 0;
@@ -58,7 +60,8 @@ export async function decorateMedia(
         resolveExternalId({
           cookieString: win.document.cookie,
           locationSearch: win.location.search,
-          storage
+          storage,
+          autoIdentify
         })
       );
     }

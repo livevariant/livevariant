@@ -116,6 +116,31 @@ describe("the tag", () => {
     }
   });
 
+  it("data-auto-identify opts the page into _ga identity, off otherwise", () => {
+    const withFlag = bootTag(
+      window,
+      scriptWith({
+        src: "https://deploy.example/sdk.js",
+        "data-publishable-key": "pk_tagtagtagtagtagtagtagta",
+        "data-auto-identify": ""
+      })
+    );
+    // Carried on tag.config so npm createTest calls follow the tag's choice.
+    expect(withFlag?.config.autoIdentify).toBe(true);
+    withFlag?.sdk.dispose();
+    resetAutoTrack(window);
+    delete (window as { livevariant?: unknown }).livevariant;
+
+    const without = bootTag(
+      window,
+      scriptWith({
+        src: "https://deploy.example/sdk.js",
+        "data-publishable-key": "pk_tagtagtagtagtagtagtagta"
+      })
+    );
+    expect(without?.config.autoIdentify).toBeUndefined();
+  });
+
   it("rewards cached inline assignments too, skipping noAuto ones", async () => {
     // Two npm-created tests on this page left assignments in the shared
     // page store; one opted out of automatic rewarding (rewardEvents:
