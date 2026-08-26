@@ -89,6 +89,7 @@ function clearDataLayer(): void {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   pageStorage(window).clear();
   resetStoreRegistry(window);
   document.cookie = "_ga=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
@@ -227,9 +228,9 @@ describe("assignment", () => {
 
     // Sabotage the cache: same assignment, expired signatures.
     const cacheKey = `lv:a:${first.testId}`;
-    const cached = JSON.parse(pageStorage(window).getItem(cacheKey)!);
+    const cached = JSON.parse(sessionStorage.getItem(cacheKey)!);
     cached.assetsExpireAt = Date.now() - 1;
-    pageStorage(window).setItem(cacheKey, JSON.stringify(cached));
+    sessionStorage.setItem(cacheKey, JSON.stringify(cached));
 
     const second = await createTest(assetConfig, {
       ...options(server),
@@ -390,7 +391,7 @@ describe("resilience: the page must render regardless", () => {
     expect(test.variant.name).toBe("control");
     expect(test.fallback).toBe(true);
     // A transient outage must not pin this visitor to control for good.
-    expect(pageStorage(window).getItem(`lv:a:${test.testId}`)).toBeNull();
+    expect(sessionStorage.getItem(`lv:a:${test.testId}`)).toBeNull();
     test.dispose();
   });
 
@@ -465,7 +466,7 @@ describe("external id resolution", () => {
     const server = fakeServer();
     const a = await createTest(CONFIG, options(server, { autoIdentify: true }));
     // Same cookie -> same idHash on a fresh createTest.
-    pageStorage(window).clear();
+    sessionStorage.clear();
     const b = await createTest(CONFIG, options(server, { autoIdentify: true }));
     expect(server.chooseCalls[0].idHash).toBe(server.chooseCalls[1].idHash);
     a.dispose();
@@ -496,16 +497,16 @@ describe("external id resolution", () => {
       const server = fakeServer();
       const a = await createTest(CONFIG, options(server));
       expect(reads).toBe(0);
-      // Two fresh page stores, same cookie present: identities differ,
+      // Two fresh stores, same cookie present: identities differ,
       // proving the cookie also never influenced the result.
-      pageStorage(window).clear();
+      sessionStorage.clear();
       const b = await createTest(CONFIG, options(server));
       expect(server.chooseCalls[0].idHash).not.toBe(
         server.chooseCalls[1].idHash
       );
       expect(reads).toBe(0);
       // The opt-in is what performs the read.
-      pageStorage(window).clear();
+      sessionStorage.clear();
       const c = await createTest(
         CONFIG,
         options(server, { autoIdentify: true })
@@ -526,22 +527,22 @@ describe("external id resolution", () => {
     expect(gaClientId("_ga=garbage")).toBeNull();
   });
 
-  it("generates an id kept for the page when nothing else is available", async () => {
+  it("generates an id kept for the tab when nothing else is available", async () => {
     const server = fakeServer();
     (await createTest(CONFIG, options(server))).dispose();
-    const generated = pageStorage(window).getItem("lv:id");
+    const generated = sessionStorage.getItem("lv:id");
     expect(generated).toBeTruthy();
-    // The default writes NOTHING an exit banner would have to disclose.
+    // Session-scoped functional state only: nothing crosses visits.
     expect(localStorage.getItem("lv:id")).toBeNull();
-    pageStorage(window).removeItem(
+    sessionStorage.removeItem(
       `lv:a:${(await createTest(CONFIG, options(server))).testId}`
     );
     (await createTest(CONFIG, options(server))).dispose();
-    // Stable within the page: same store, same id.
-    expect(pageStorage(window).getItem("lv:id")).toBe(generated);
+    // Stable within the tab: same store, same id.
+    expect(sessionStorage.getItem("lv:id")).toBe(generated);
   });
 
-  it("persists identity only when localStorage is opted into", async () => {
+  it("persists across visits only when localStorage is opted into", async () => {
     const server = fakeServer();
     const test = await createTest(
       CONFIG,
@@ -550,8 +551,26 @@ describe("external id resolution", () => {
     test.dispose();
     expect(localStorage.getItem("lv:id")).toBeTruthy();
     expect(localStorage.getItem(`lv:a:${test.testId}`)).toBeTruthy();
-    // And nothing leaked into the page store meanwhile.
-    expect(pageStorage(window).getItem("lv:id")).toBeNull();
+    // And nothing leaked into the default store meanwhile.
+    expect(sessionStorage.getItem("lv:id")).toBeNull();
+  });
+
+  it('"none" mode touches no web storage and still assigns', async () => {
+    (window as { livevariant?: unknown }).livevariant = {
+      config: { storage: "none" }
+    };
+    try {
+      const server = fakeServer();
+      const test = await createTest(CONFIG, options(server));
+      expect(test.variant.name).toBeTruthy();
+      expect(sessionStorage.getItem("lv:id")).toBeNull();
+      expect(localStorage.getItem("lv:id")).toBeNull();
+      // The window store is what keeps it sticky for the page.
+      expect(pageStorage(window).getItem("lv:id")).toBeTruthy();
+      test.dispose();
+    } finally {
+      delete (window as { livevariant?: unknown }).livevariant;
+    }
   });
 });
 

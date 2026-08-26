@@ -47,6 +47,7 @@ function visitWithParams(params: Record<string, string>): void {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   pageStorage(window).clear();
   resetStoreRegistry(window);
   history.replaceState(null, "", "/");
@@ -179,9 +180,9 @@ describe("autoTrack (GTM one-tag mode)", () => {
       fetch: fetchImpl
     });
     expect(location.search).toBe("?utm_source=mail");
-    // The URL capture landed in the default page store; the legacy handoff
-    // stayed where it was. One in each, both about to be rewarded.
-    expect(listHandoffs(pageStorage(window))).toHaveLength(1);
+    // The URL capture landed in the default sessionStorage; the legacy
+    // handoff stayed in localStorage. One in each, both rewarded.
+    expect(listHandoffs(sessionStorage)).toHaveLength(1);
     expect(listHandoffs(localStorage)).toHaveLength(1);
 
     (window as any).dataLayer = (window as any).dataLayer || [];
@@ -203,9 +204,9 @@ describe("autoTrack (GTM one-tag mode)", () => {
     tracker.dispose();
   });
 
-  it("rewards a localStorage assignment from a page-store watcher", async () => {
+  it("rewards a localStorage assignment from a default-store watcher", async () => {
     // The Greptile P1 scenario: the tag booted first and claimed the page's
-    // one GA watcher on the DEFAULT page store; page code then created a
+    // one GA watcher on the default sessionStorage; page code then created a
     // test with the documented localStorage opt-in. Its cached assignment
     // lives where the watcher's own store does not, and the conversion
     // must reward it anyway.
@@ -248,7 +249,8 @@ describe("autoTrack (GTM one-tag mode)", () => {
     } as Storage;
 
     const { calls, fetchImpl } = fakeServer();
-    // The tag's tracker claims the page watcher first, on the page store.
+    // The tag's tracker claims the page watcher first, on the default
+    // sessionStorage.
     const tracker = autoTrack({
       serverUrl: "https://livevariant.link",
       fetch: fetchImpl
@@ -294,7 +296,7 @@ describe("autoTrack (GTM one-tag mode)", () => {
     } as Storage;
     registerStore(window, broken);
     const healthy = "d7".repeat(32);
-    pageStorage(window).setItem(
+    sessionStorage.setItem(
       `lv:a:${healthy}`,
       JSON.stringify({ cell: 0, idHash: "e8".repeat(32) })
     );

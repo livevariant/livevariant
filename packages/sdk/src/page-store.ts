@@ -1,17 +1,24 @@
 /**
- * The default client-side store: Storage-shaped, held on the window so
- * every LiveVariant bundle on the page shares one, and gone with the
- * page. Being the DEFAULT is the point: sticky assignments, handoff
- * capture and cross-bundle reward coordination all work for the life of
- * the page while the SDK writes nothing a consent banner would have to
- * ask about. Deployments that want identity and conversions to survive
- * navigation opt INTO localStorage (`storage: window.localStorage` in
- * code, `data-storage="local"` on the tag) and own that consent story.
+ * Client-side storage comes in three declared modes, and the DEFAULT is
+ * sessionStorage: per-tab, expiring with the session, holding nothing
+ * but functional A/B state (which variant this visitor got, which
+ * participations a conversion should reward). That is the classic
+ * functional-storage posture: sticky assignments and in-tab pages-later
+ * conversions work out of the box, with no cross-visit identifier and
+ * nothing that outlives the tab. "local-storage" upgrades persistence
+ * to cross-visit localStorage and is the deployment's own consent
+ * story. "none" means NO web storage at all: the SDK then runs on the
+ * window store below, so tests stay sticky and rewardable for the life
+ * of the page while nothing is written anywhere a consent rule could
+ * reach.
  *
- * On the window rather than module state because bundles don't share
- * modules: the tag and an npm SDK coordinate rewards through the lv:a:*
- * keys, so they must see one store (the same reason the auto-track
- * watcher claim lives on the window).
+ * The window store lives on the window rather than module state because
+ * bundles don't share modules: the tag and an npm SDK coordinate
+ * rewards through the lv:a:* keys, so they must see one store (the
+ * same reason the auto-track watcher claim lives on the window). It is
+ * also the fallback whenever a chosen web storage cannot be touched
+ * (privacy modes throw on access), so storage trouble degrades to a
+ * working page-lifetime install, never to a broken one.
  */
 
 const PAGE_STORE_KEY = "__lvPageStore";
@@ -51,19 +58,31 @@ export function pageStorage(win: Window): Storage {
 }
 
 /** The plain-data storage choice a page config or tag attribute can carry. */
-export type StorageMode = "page" | "local" | "none";
+export type StorageMode = "session-storage" | "local-storage" | "none";
+
+/** A web storage whose ACCESS can throw (privacy modes); null on trouble. */
+function guarded(read: () => Storage): Storage | null {
+  try {
+    return read() ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
- * Maps a declared mode to a store: "local" is the persistence opt-in,
- * "none" disables caching entirely, anything else (including absence
- * and unknown future values) is the page store.
+ * Maps a declared mode to a store. Absent means the default,
+ * "session-storage". "local-storage" is the cross-visit persistence
+ * opt-in. "none" is the window store: no web storage touched, the SDK
+ * still fully works for the page's lifetime. An unknown future mode
+ * degrades to the window store too, never to surprise persistence, and
+ * a web storage that throws on access falls back the same way.
  */
 export function resolveStorage(win: Window, mode?: string): Storage | null {
-  if (mode === "local") {
-    return win.localStorage;
+  if (mode === undefined || mode === "session-storage") {
+    return guarded(() => win.sessionStorage) ?? pageStorage(win);
   }
-  if (mode === "none") {
-    return null;
+  if (mode === "local-storage") {
+    return guarded(() => win.localStorage) ?? pageStorage(win);
   }
   return pageStorage(win);
 }

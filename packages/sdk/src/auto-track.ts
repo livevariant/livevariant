@@ -1,6 +1,10 @@
 import { captureHandoff, listHandoffs } from "./handoff.js";
 import { SDK_VERSION } from "./version.js";
-import { pageStorage, registeredStores, registerStore } from "./page-store.js";
+import {
+  registeredStores,
+  registerStore,
+  resolveStorage
+} from "./page-store.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
 
 /**
@@ -111,7 +115,7 @@ export function autoTrack(options: AutoTrackOptions): AutoTracker {
   const win = options.window ?? window;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const storage =
-    options.storage === undefined ? pageStorage(win) : options.storage;
+    options.storage === undefined ? resolveStorage(win) : options.storage;
   registerStore(win, storage);
 
   captureHandoff(win, storage);
@@ -161,10 +165,20 @@ export function autoTrack(options: AutoTrackOptions): AutoTracker {
     for (const store of registeredStores(win)) {
       collect(store);
     }
+    // The two web storages are always scanned besides the registered
+    // stores: an earlier pageview in this tab wrote to sessionStorage
+    // under the default, an earlier visit may have written to
+    // localStorage under the "local-storage" opt-in, and neither has a
+    // live surface on THIS page to register it.
+    try {
+      collect(win.sessionStorage);
+    } catch {
+      // Storage access can throw (privacy modes); nothing extra to scan.
+    }
     try {
       collect(win.localStorage);
     } catch {
-      // Storage access can throw (privacy modes); nothing extra to scan.
+      // Same.
     }
     return out;
   }

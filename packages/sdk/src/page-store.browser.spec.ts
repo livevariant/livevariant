@@ -8,11 +8,11 @@ import {
 } from "./page-store.js";
 
 /**
- * The page store is the default home for identity, assignments and
- * handoffs, and its one structural promise is Storage-compatibility on
- * a WINDOW-SHARED instance: the tag and an npm bundle are separate
- * module graphs, so if each got its own store, auto-track could not see
- * createTest's assignments and rewards would silently stop.
+ * The window store backs "none" mode and every fallback, and its one
+ * structural promise is Storage-compatibility on a WINDOW-SHARED
+ * instance: the tag and an npm bundle are separate module graphs, so if
+ * each got its own store, auto-track could not see createTest's
+ * assignments and rewards would silently stop.
  */
 describe("pageStorage", () => {
   it("returns one store per window, shared across callers", () => {
@@ -50,12 +50,17 @@ describe("pageStorage", () => {
 });
 
 describe("resolveStorage", () => {
-  it("maps the declared modes and defaults unknowns to the page store", () => {
-    expect(resolveStorage(window, "local")).toBe(window.localStorage);
-    expect(resolveStorage(window, "none")).toBeNull();
-    expect(resolveStorage(window)).toBe(pageStorage(window));
+  it("maps the declared modes; the default is sessionStorage", () => {
+    expect(resolveStorage(window)).toBe(window.sessionStorage);
+    expect(resolveStorage(window, "session-storage")).toBe(
+      window.sessionStorage
+    );
+    expect(resolveStorage(window, "local-storage")).toBe(window.localStorage);
+    // "none" means no web storage, not no SDK: the window store keeps
+    // tests sticky and rewardable for the page's lifetime.
+    expect(resolveStorage(window, "none")).toBe(pageStorage(window));
     // Forward-compatible: a mode this version does not know degrades to
-    // the page store, never to a persistence surprise.
+    // the window store, never to a persistence surprise.
     expect(resolveStorage(window, "future-mode")).toBe(pageStorage(window));
   });
 });

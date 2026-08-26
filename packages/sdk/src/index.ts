@@ -90,11 +90,13 @@ export interface LiveVariantConfig {
   rewardEvents?: string[];
   /**
    * Where client state (identity, cached assignments, handoffs) lives.
-   * Default "page": a window-shared store that dies with the page, so
-   * the SDK needs no storage consent anywhere. "local" opts into
-   * localStorage for cross-page identity and pages-later conversions;
-   * "none" disables caching. A string, not a Storage object, because
-   * this global is the plain-data cross-version contract.
+   * Default "session-storage": per-tab, expiring with the session,
+   * holding only functional A/B state, the posture that needs no
+   * consent banner. "local-storage" opts into cross-visit persistence
+   * (the deployment's consent story). "none" touches no web storage at
+   * all: the SDK runs on a window-shared in-memory store, sticky and
+   * rewardable for the page's lifetime. A string, not a Storage object,
+   * because this global is the plain-data cross-version contract.
    */
   storage?: StorageMode;
   /**
@@ -172,11 +174,15 @@ export interface CreateTestOptions {
   /** Override config.rewardEvents; false disables GA interception. */
   rewardEvents?: string[] | false;
   /**
-   * Defaults to the page store: shared by every LiveVariant bundle on
-   * the window, gone on navigation, so assignments are sticky and
-   * rewardable for the page's lifetime with no storage consent needed.
-   * Pass window.localStorage for cross-page identity and pages-later
-   * conversions (your consent story), or null to disable caching.
+   * Defaults to sessionStorage: per-tab, expiring with the session,
+   * functional A/B state only, so assignments are sticky and in-tab
+   * conversions attributable with no consent banner needed. Pass
+   * window.localStorage for cross-visit persistence (your consent
+   * story), any Storage-shaped object to bring your own, or null to
+   * disable caching outright. The declared modes on the tag and the
+   * global config are "session-storage" (default), "local-storage" and
+   * "none" (no web storage: a window-shared in-memory store keeps the
+   * SDK working for the page's lifetime).
    */
   storage?: Storage | null;
   /**
@@ -318,8 +324,8 @@ export async function createTest(
     options.publishableKey ?? pageGlobal?.config?.publishableKey;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   // Explicit Storage object first, then the mode the page's global
-  // config declared (so a tag-configured "local" governs npm createTest
-  // calls too), then the shared page store.
+  // config declared (so a tag-configured mode governs npm createTest
+  // calls too), then the default, sessionStorage.
   const storage =
     options.storage === undefined
       ? resolveStorage(win, pageGlobal?.config?.storage)

@@ -74,9 +74,10 @@ export function bootTag(
           .map(name => name.trim())
           .filter(Boolean)
       : undefined);
-  // Storage is page-scoped unless the deployment opted into persistence
-  // (data-storage="local") or out of caching entirely ("none"). The mode
-  // rides on tag.config so npm createTest calls on the page follow it.
+  // Storage defaults to sessionStorage; data-storage picks
+  // "local-storage" (cross-visit persistence) or "none" (no web storage,
+  // window memory only). The mode rides on tag.config so npm createTest
+  // calls on the page follow it.
   const storageMode =
     preset.storage ?? (data.storage as StorageMode | undefined);
   const storage = resolveStorage(win, storageMode);
