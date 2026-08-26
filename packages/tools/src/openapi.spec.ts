@@ -39,11 +39,14 @@ describe("buildOpenApiDocument", () => {
     );
   });
 
-  it("states that read tools need `test` or `config`, in the schema itself", () => {
-    // givenTest rejects an empty request at runtime; the contract has to
-    // say so too, or a schema-guided caller can construct a request that
-    // validates and then fails. anyOf/required is how JSON Schema spells
-    // "at least one of these names".
+  it("states that read tools need exactly one of `test`/`config`, in the schema itself", () => {
+    // givenTest rejects an empty request — and a disagreeing pair — at
+    // runtime; the contract has to say so too, or a schema-guided caller
+    // can construct a request that validates and then fails. oneOf makes
+    // both-names-present schema-invalid (both branches match), which is
+    // the only JSON-Schema-expressible superset of the disagreeing-values
+    // rejection: the schema is strictly tighter than the handler, never
+    // looser.
     for (const name of [
       "inspect-test",
       "generate-priors",
@@ -53,10 +56,11 @@ describe("buildOpenApiDocument", () => {
       const op = paths[`/api/v1/${name}`].post;
       const schema = op.requestBody.content["application/json"].schema;
       expect(schema.required ?? []).not.toContain("test");
-      expect(schema.anyOf).toEqual([
+      expect(schema.oneOf).toEqual([
         { required: ["test"] },
         { required: ["config"] }
       ]);
+      expect(schema.anyOf).toBeUndefined();
     }
   });
 

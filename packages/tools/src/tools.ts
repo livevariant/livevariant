@@ -79,15 +79,21 @@ function givenTest(input: { test?: string; config?: string }): string {
 }
 
 /**
- * The schema-level statement of what givenTest enforces: one of the two
- * names must be present. A zod refinement cannot say this in the
- * generated JSON Schema (refinements are dropped), but meta merges
- * verbatim into it, so schema-guided callers — MCP clients, OpenAPI
- * codegen — see the requirement up front instead of discovering it as a
- * failed round-trip.
+ * The schema-level statement of what givenTest enforces: exactly one of
+ * the two names. A zod refinement cannot say this in the generated JSON
+ * Schema (refinements are dropped), but meta merges verbatim into it, so
+ * schema-guided callers — MCP clients, OpenAPI codegen — see the
+ * requirement up front instead of discovering it as a failed round-trip.
+ *
+ * oneOf, not anyOf: with both names present, both branches match and the
+ * request is schema-invalid — which is the only way JSON Schema can rule
+ * out the disagreeing-values case givenTest rejects. The runtime stays
+ * one notch more forgiving (both names with the same value is accepted
+ * as redundancy), so the schema is strictly tighter than the handler and
+ * every schema-valid request succeeds.
  */
 const ONE_TEST_NAME_REQUIRED = {
-  anyOf: [{ required: ["test"] }, { required: ["config"] }]
+  oneOf: [{ required: ["test"] }, { required: ["config"] }]
 };
 
 const contextDim = z.object({
