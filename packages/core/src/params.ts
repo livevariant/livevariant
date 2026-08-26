@@ -247,12 +247,31 @@ export function configToParams(config: TestConfig): URLSearchParams | null {
  * string makes that mistake impossible. Callers append only runtime
  * parameters (auto, id, slot), which never touch identity.
  *
- * Returns null exactly when configToParams does: a config with inline
- * content, per-variant redirects or other query-inexpressible fields
- * has no template spelling.
+ * Returns null for inline content, per-variant redirects and the other
+ * query-inexpressible fields — with one deliberate exception to
+ * configToParams' strictness: image variants. The parameter form's `v=`
+ * always parses back as `url`, so an image-variant config has no
+ * identity-preserving parameter spelling and configToParams rightly
+ * refuses it. The template never needed that fidelity: every variant
+ * URL becomes a merge placeholder below, and a filled-in template mints
+ * its own test either way. Image variants are the canonical email case,
+ * so they must not be the case that loses the template.
  */
 export function configToTemplateQuery(config: TestConfig): string | null {
-  const params = configToParams(config);
+  const spellable: TestConfig = {
+    ...config,
+    slots: Object.fromEntries(
+      Object.entries(config.slots).map(([slotKey, list]) => [
+        slotKey,
+        list.map(v =>
+          v.image !== undefined && v.url === undefined
+            ? { ...v, url: v.image, image: undefined }
+            : v
+        )
+      ])
+    )
+  };
+  const params = configToParams(spellable);
   if (params === null) {
     return null;
   }
