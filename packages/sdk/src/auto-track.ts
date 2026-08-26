@@ -1,5 +1,6 @@
 import { captureHandoff, listHandoffs } from "./handoff.js";
 import { SDK_VERSION } from "./version.js";
+import { pageStorage, registeredStores, registerStore } from "./page-store.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
 
 /**
@@ -17,7 +18,8 @@ import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
  *      pageview and URL-cleaned, for tests this page never rendered;
  *   2. cached inline assignments (lv:a:*), which is how tests created
  *      by page code (createTest) are rewarded WITHOUT their own GA
- *      watcher: shared localStorage is the coordination channel, so no
+ *      watcher: the window-shared store is the coordination channel
+ *      (the page store by default, localStorage when opted in), so no
  *      cross-bundle API exists to version.
  */
 export interface AutoTrackOptions {
@@ -109,13 +111,67 @@ export function autoTrack(options: AutoTrackOptions): AutoTracker {
   const win = options.window ?? window;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const storage =
-    options.storage === undefined ? win.localStorage : options.storage;
+    options.storage === undefined ? pageStorage(win) : options.storage;
+  registerStore(win, storage);
 
   captureHandoff(win, storage);
 
+  /**
+   * Every reward target however it was stored. Storage is a caller's
+   * choice, so the page's ONE watcher can be bound to one store while
+   * another bundle cached its assignment in a different one: the tag on
+   * the page store next to a createTest that opted into localStorage, or
+   * into its own custom Storage. Discovery therefore never depends on
+   * which store this tracker holds: it scans its own store, every store a
+   * LiveVariant surface on this page registered, and localStorage (an
+   * earlier opted-in pageview may have persisted handoffs no live surface
+   * re-registers). Scanned, never written: any lv:* keys found in
+   * localStorage exist only because some LiveVariant surface wrote them
+   * under the deployment's own opt-in, so reading them back adds no
+   * storage surface the deployment has not already accepted.
+   */
+  function allParticipations(): Participation[] {
+    const seen = new Set<string>();
+    const scanned = new Set<Storage>();
+    const out: Participation[] = [];
+    const collect = (store: Storage | null): void => {
+      if (!store || scanned.has(store)) {
+        return;
+      }
+      scanned.add(store);
+      let found: readonly Participation[];
+      try {
+        found = listParticipations(store);
+      } catch {
+        // A store that cannot be read (a consent wrapper after consent
+        // was revoked, a privacy mode) forfeits only its OWN
+        // participations. One broken store must never cost the page's
+        // other tests their rewards.
+        return;
+      }
+      for (const participation of found) {
+        const key = `${participation.testId}:${participation.idHash}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(participation);
+        }
+      }
+    };
+    collect(storage);
+    for (const store of registeredStores(win)) {
+      collect(store);
+    }
+    try {
+      collect(win.localStorage);
+    } catch {
+      // Storage access can throw (privacy modes); nothing extra to scan.
+    }
+    return out;
+  }
+
   async function trackConversion(amount = 1): Promise<void> {
     await Promise.all(
-      listParticipations(storage).map(
+      allParticipations().map(
         participation =>
           fetchImpl(`${options.serverUrl}/reward`, {
             method: "POST",

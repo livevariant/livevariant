@@ -4,7 +4,9 @@
  *   2. the GA client id from the _ga cookie (aligns our identity with the
  *      site's existing analytics for free)
  *   3. an `id` URL parameter (the redirect-flow landing-page case)
- *   4. a generated id persisted in storage
+ *   4. a generated id kept in storage (the page store by default, so it
+ *      lives exactly as long as the page; localStorage when the
+ *      deployment opted into persistence)
  * Whatever wins is hashed with the testId before it ever leaves the page.
  */
 

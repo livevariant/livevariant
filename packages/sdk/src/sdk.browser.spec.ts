@@ -9,6 +9,7 @@ import { createTest, type CreateTestOptions } from "./index.js";
 import { gaClientId } from "./identity.js";
 import { eventNameOf, resetDataLayerInterception } from "./ga.js";
 import { resetAutoTrack } from "./auto-track.js";
+import { pageStorage, resetStoreRegistry } from "./page-store.js";
 import { SDK_VERSION } from "./version.js";
 
 /**
@@ -88,6 +89,8 @@ function clearDataLayer(): void {
 
 beforeEach(() => {
   localStorage.clear();
+  pageStorage(window).clear();
+  resetStoreRegistry(window);
   document.cookie = "_ga=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
   clearDataLayer();
   // Release the page-wide watcher claim an earlier test's tracker took.
@@ -224,9 +227,9 @@ describe("assignment", () => {
 
     // Sabotage the cache: same assignment, expired signatures.
     const cacheKey = `lv:a:${first.testId}`;
-    const cached = JSON.parse(localStorage.getItem(cacheKey)!);
+    const cached = JSON.parse(pageStorage(window).getItem(cacheKey)!);
     cached.assetsExpireAt = Date.now() - 1;
-    localStorage.setItem(cacheKey, JSON.stringify(cached));
+    pageStorage(window).setItem(cacheKey, JSON.stringify(cached));
 
     const second = await createTest(assetConfig, {
       ...options(server),
@@ -252,7 +255,7 @@ describe("assignment", () => {
     again.dispose();
   });
 
-  it("caches the assignment in localStorage and skips the network", async () => {
+  it("caches the assignment for the page and skips the network", async () => {
     const server = fakeServer();
     (await createTest(CONFIG, options(server, { externalId: "u1" }))).dispose();
     const again = await createTest(
@@ -387,7 +390,7 @@ describe("resilience: the page must render regardless", () => {
     expect(test.variant.name).toBe("control");
     expect(test.fallback).toBe(true);
     // A transient outage must not pin this visitor to control for good.
-    expect(localStorage.getItem(`lv:a:${test.testId}`)).toBeNull();
+    expect(pageStorage(window).getItem(`lv:a:${test.testId}`)).toBeNull();
     test.dispose();
   });
 
@@ -462,7 +465,7 @@ describe("external id resolution", () => {
     const server = fakeServer();
     const a = await createTest(CONFIG, options(server));
     // Same cookie -> same idHash on a fresh createTest.
-    localStorage.clear();
+    pageStorage(window).clear();
     const b = await createTest(CONFIG, options(server));
     expect(server.chooseCalls[0].idHash).toBe(server.chooseCalls[1].idHash);
     a.dispose();
@@ -476,16 +479,32 @@ describe("external id resolution", () => {
     expect(gaClientId("_ga=garbage")).toBeNull();
   });
 
-  it("generates and persists an id when nothing else is available", async () => {
+  it("generates an id kept for the page when nothing else is available", async () => {
     const server = fakeServer();
     (await createTest(CONFIG, options(server))).dispose();
-    const generated = localStorage.getItem("lv:id");
+    const generated = pageStorage(window).getItem("lv:id");
     expect(generated).toBeTruthy();
-    localStorage.removeItem(
+    // The default writes NOTHING an exit banner would have to disclose.
+    expect(localStorage.getItem("lv:id")).toBeNull();
+    pageStorage(window).removeItem(
       `lv:a:${(await createTest(CONFIG, options(server))).testId}`
     );
     (await createTest(CONFIG, options(server))).dispose();
-    expect(localStorage.getItem("lv:id")).toBe(generated); // stable across visits
+    // Stable within the page: same store, same id.
+    expect(pageStorage(window).getItem("lv:id")).toBe(generated);
+  });
+
+  it("persists identity only when localStorage is opted into", async () => {
+    const server = fakeServer();
+    const test = await createTest(
+      CONFIG,
+      options(server, { storage: localStorage })
+    );
+    test.dispose();
+    expect(localStorage.getItem("lv:id")).toBeTruthy();
+    expect(localStorage.getItem(`lv:a:${test.testId}`)).toBeTruthy();
+    // And nothing leaked into the page store meanwhile.
+    expect(pageStorage(window).getItem("lv:id")).toBeNull();
   });
 });
 

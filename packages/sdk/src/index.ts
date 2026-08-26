@@ -27,6 +27,11 @@ import { resolveExternalId } from "./identity.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
 import { captureHandoff, getHandoff } from "./handoff.js";
 import { autoTrack } from "./auto-track.js";
+import {
+  registerStore,
+  resolveStorage,
+  type StorageMode
+} from "./page-store.js";
 import { SDK_VERSION } from "./version.js";
 
 export { gaClientId, resolveExternalId } from "./identity.js";
@@ -50,6 +55,7 @@ export {
 } from "./auto-track.js";
 export { SDK_VERSION } from "./version.js";
 export { decorateMedia } from "./media.js";
+export { pageStorage, resolveStorage, type StorageMode } from "./page-store.js";
 
 /**
  * LiveVariant browser SDK. Privacy contract: the raw external id and raw
@@ -82,6 +88,15 @@ export interface LiveVariantConfig {
   publishableKey?: string;
   /** GA4 event names treated as conversions by automatic tracking. */
   rewardEvents?: string[];
+  /**
+   * Where client state (identity, cached assignments, handoffs) lives.
+   * Default "page": a window-shared store that dies with the page, so
+   * the SDK needs no storage consent anywhere. "local" opts into
+   * localStorage for cross-page identity and pages-later conversions;
+   * "none" disables caching. A string, not a Storage object, because
+   * this global is the plain-data cross-version contract.
+   */
+  storage?: StorageMode;
 }
 
 /** The tag's callable surface, for pages without an npm install. */
@@ -147,7 +162,13 @@ export interface CreateTestOptions {
   context?: Record<string, string>;
   /** Override config.rewardEvents; false disables GA interception. */
   rewardEvents?: string[] | false;
-  /** Defaults to window.localStorage; pass null to disable caching. */
+  /**
+   * Defaults to the page store: shared by every LiveVariant bundle on
+   * the window, gone on navigation, so assignments are sticky and
+   * rewardable for the page's lifetime with no storage consent needed.
+   * Pass window.localStorage for cross-page identity and pages-later
+   * conversions (your consent story), or null to disable caching.
+   */
   storage?: Storage | null;
   /**
    * How long to wait for a tag-manager-loaded tag's global config when
@@ -282,8 +303,18 @@ export async function createTest(
   const publishableKey =
     options.publishableKey ?? pageGlobal?.config?.publishableKey;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+  // Explicit Storage object first, then the mode the page's global
+  // config declared (so a tag-configured "local" governs npm createTest
+  // calls too), then the shared page store.
   const storage =
-    options.storage === undefined ? win.localStorage : options.storage;
+    options.storage === undefined
+      ? resolveStorage(win, pageGlobal?.config?.storage)
+      : options.storage;
+  // Whatever store this test caches into, the page-wide reward watcher
+  // must scan it, including a caller-supplied custom Storage the watcher
+  // could never guess at. Registration is what keeps "which store" a
+  // caching choice rather than a rewards choice.
+  registerStore(win, storage);
 
   // Parsing rather than trusting normalizes the readable shorthands
   // (bare-string variants, `variants` for a single slot) into the
