@@ -58,10 +58,13 @@ export async function decorateMedia(
       url.searchParams.set(
         "id",
         resolveExternalId({
-          cookieString: win.document.cookie,
+          // Touch the jar only under the opt-in (see createTest): the
+          // property access is the read, not the parse.
+          ...(autoIdentify
+            ? { cookieString: win.document.cookie, autoIdentify: true }
+            : { cookieString: "" }),
           locationSearch: win.location.search,
-          storage,
-          autoIdentify
+          storage
         })
       );
     }

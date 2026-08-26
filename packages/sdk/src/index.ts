@@ -374,11 +374,14 @@ export async function createTest(
         testId,
         resolveExternalId({
           explicit: options.externalId,
-          cookieString: win.document.cookie,
+          // The jar itself is only touched under the opt-in: evaluating
+          // document.cookie IS the read the default promises not to make,
+          // whatever happens to the value afterwards.
+          ...((options.autoIdentify ?? pageGlobal?.config?.autoIdentify)
+            ? { cookieString: win.document.cookie, autoIdentify: true }
+            : { cookieString: "" }),
           locationSearch: win.location.search,
-          storage,
-          autoIdentify:
-            options.autoIdentify ?? pageGlobal?.config?.autoIdentify ?? false
+          storage
         })
       );
 

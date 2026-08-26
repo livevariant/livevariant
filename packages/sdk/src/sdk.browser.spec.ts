@@ -472,18 +472,51 @@ describe("external id resolution", () => {
     b.dispose();
   });
 
-  it("ignores an existing _ga cookie by default: no reads without the opt-in", async () => {
+  it("never touches document.cookie without the opt-in", async () => {
     document.cookie = "_ga=GA1.1.1234567890.1699999999";
-    const server = fakeServer();
-    // Two fresh page stores with the same cookie present: were the cookie
-    // read, the identities would match. They must not, because the default
-    // install touches nothing in the browser's storage, read or write.
-    const a = await createTest(CONFIG, options(server));
-    pageStorage(window).clear();
-    const b = await createTest(CONFIG, options(server));
-    expect(server.chooseCalls[0].idHash).not.toBe(server.chooseCalls[1].idHash);
-    a.dispose();
-    b.dispose();
+    // Counting actual jar accesses, because evaluating document.cookie IS
+    // the read whatever happens to the value: a gate that only skips the
+    // parse would still have the consent surface.
+    const original = Object.getOwnPropertyDescriptor(
+      Document.prototype,
+      "cookie"
+    )!;
+    let reads = 0;
+    Object.defineProperty(Document.prototype, "cookie", {
+      configurable: true,
+      get(this: Document) {
+        reads++;
+        return original.get!.call(this) as string;
+      },
+      set(this: Document, value: string) {
+        original.set!.call(this, value);
+      }
+    });
+    try {
+      const server = fakeServer();
+      const a = await createTest(CONFIG, options(server));
+      expect(reads).toBe(0);
+      // Two fresh page stores, same cookie present: identities differ,
+      // proving the cookie also never influenced the result.
+      pageStorage(window).clear();
+      const b = await createTest(CONFIG, options(server));
+      expect(server.chooseCalls[0].idHash).not.toBe(
+        server.chooseCalls[1].idHash
+      );
+      expect(reads).toBe(0);
+      // The opt-in is what performs the read.
+      pageStorage(window).clear();
+      const c = await createTest(
+        CONFIG,
+        options(server, { autoIdentify: true })
+      );
+      expect(reads).toBeGreaterThan(0);
+      a.dispose();
+      b.dispose();
+      c.dispose();
+    } finally {
+      Object.defineProperty(Document.prototype, "cookie", original);
+    }
   });
 
   it("parses realistic _ga cookies", () => {

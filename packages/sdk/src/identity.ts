@@ -33,7 +33,12 @@ export function resolveExternalId(options: {
   cookieString: string;
   locationSearch: string;
   storage: Storage | null;
-  /** Opt-in to reading the _ga cookie for identity. Default: no reads. */
+  /**
+   * Opt-in to using the _ga cookie for identity. Default: off. Callers
+   * must also withhold cookieString itself when off (pass ""), because
+   * evaluating document.cookie is already the read; this flag is the
+   * second lock, not the first.
+   */
   autoIdentify?: boolean;
 }): string {
   if (options.explicit) {
