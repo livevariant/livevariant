@@ -9,6 +9,7 @@
  *
  *   npm run release patch -- --otp=123456     or minor / major / x.y.z
  *   npm run release -- --otp=123456           interactive version prompt
+ *   npm run release -- --continue --otp=…     resume after a failed publish
  *   npm run release:dry                       walk the whole flow, write nothing
  *
  * Steps, and why the order matters:
@@ -27,6 +28,13 @@
  *   5. git push --follow-tags, so the release commit and tag never sit
  *      local-only after a successful publish.
  *
+ * A failed publish (an expired OTP, usually) leaves the commit and tag
+ * in place and needs no re-versioning: `--continue` picks the release
+ * back up from the v{version} tag on HEAD and reruns steps 4 and 5.
+ * nx checks the registry per package and skips versions that already
+ * exist, so continuing after a partial publish only sends what is
+ * missing.
+ *
  * Publishing needs `npm login` (or NPM_TOKEN in CI) with rights on the
  * @livevariant org, plus a fresh one-time password when the account has
  * 2FA on writes. Both are checked before anything happens: discovering
@@ -44,6 +52,7 @@ import { releasePublish, releaseVersion } from "nx/release";
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const verbose = args.includes("--verbose");
+const continueRelease = args.includes("--continue");
 const specifier = args.find(a => !a.startsWith("--"));
 // npm accounts with 2FA on writes need a fresh one-time password at the
 // publish step: `npm run release patch -- --otp=123456`. Without it npm
@@ -282,6 +291,45 @@ function syncServerJsonVersion(version) {
   writeFileSync("server.json", `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+/**
+ * Publishes the group and pushes the release commit + tag: the last two
+ * steps of a release, shared by the normal flow and --continue. nx skips
+ * any package whose version already exists on the registry, so rerunning
+ * this after a partial publish only sends what is missing.
+ */
+async function publishAndPush(version, firstRelease) {
+  const results = await releasePublish({ dryRun, verbose, firstRelease, otp });
+  const failed = Object.values(results).filter(r => r.code !== 0).length;
+  if (failed > 0) {
+    console.error(
+      `release: ${failed} package(s) failed to publish. The commit and tag ` +
+        "exist and were NOT pushed; nothing needs re-versioning. Fix the " +
+        "npm problem (an expired OTP is the usual one) and continue with a " +
+        "fresh OTP:\n" +
+        "  npm run release -- --continue --otp=123456\n" +
+        "It publishes only the packages still missing from npm, then pushes " +
+        "the commit and tag."
+    );
+    process.exit(1);
+  }
+
+  // The packages are live on npm at this point, so the commit and tag must
+  // not stay local: --follow-tags pushes both (the tag is annotated for
+  // exactly this reason). Explicit refspec, so a stray push.default or
+  // upstream config cannot fail the last step of a successful release.
+  try {
+    run("git push --follow-tags origin main");
+  } catch {
+    console.error(
+      `release: v${version} is PUBLISHED on npm but the push failed; run ` +
+        "`git push --follow-tags origin main` yourself so the release " +
+        "commit and tag reach the remote."
+    );
+    process.exit(1);
+  }
+  console.log(`release: v${version} published and pushed.`);
+}
+
 // A dry run stops before the publish step, so it alone runs without npm
 // auth or an OTP.
 if (!dryRun) {
@@ -297,6 +345,37 @@ if (out("git status --porcelain") !== "") {
 if (out("git branch --show-current") !== "main" && !dryRun) {
   console.error("release: releases are cut from main");
   process.exit(1);
+}
+
+// Resumes a release whose publish (or push) failed: the version bump,
+// commit and tag already happened, so the only work left is publish +
+// push, keyed off the v{version} tag the failed run left on HEAD.
+if (continueRelease) {
+  if (dryRun || specifier) {
+    console.error(
+      "release: --continue takes no version specifier and no --dry-run; it " +
+        "republishes exactly what the tag on HEAD says"
+    );
+    process.exit(1);
+  }
+  const tags = out("git tag --points-at HEAD --list 'v*'")
+    .split("\n")
+    .filter(Boolean);
+  if (tags.length !== 1) {
+    console.error(
+      tags.length === 0
+        ? "release: --continue expects HEAD to be a release commit, but it " +
+            "carries no v* tag; run a normal release instead"
+        : `release: HEAD carries ${tags.length} v* tags (${tags.join(", ")}); ` +
+            "cannot tell which release to continue"
+    );
+    process.exit(1);
+  }
+  const version = tags[0].slice(1);
+  // firstRelease matters to nx's registry lookup; "the tag on HEAD is the
+  // only v* tag" means the failed run was itself a first release.
+  await publishAndPush(version, out("git tag --list 'v*'") === tags[0]);
+  process.exit(0);
 }
 
 // No v* tag yet means nx has no previous release to diff against.
@@ -347,29 +426,4 @@ run(`git commit -m "release: v${workspaceVersion}"`);
 // annotated tags, and a tag that stays local defeats its purpose.
 run(`git tag -a v${workspaceVersion} -m "v${workspaceVersion}"`);
 
-const results = await releasePublish({ dryRun, verbose, firstRelease, otp });
-const failed = Object.values(results).filter(r => r.code !== 0).length;
-if (failed > 0) {
-  console.error(
-    `release: ${failed} package(s) failed to publish. The commit and tag ` +
-      "exist and were NOT pushed; fix the npm problem (an expired OTP is " +
-      "the usual one) and run `npx nx release publish --otp=...` to retry " +
-      "publishing without re-versioning, then `git push --follow-tags`."
-  );
-  process.exit(1);
-}
-
-// The packages are live on npm at this point, so the commit and tag must
-// not stay local: --follow-tags pushes both (the tag is annotated above
-// for exactly this reason).
-try {
-  run("git push --follow-tags");
-} catch {
-  console.error(
-    `release: v${workspaceVersion} is PUBLISHED on npm but the push ` +
-      "failed; run `git push --follow-tags` yourself so the release " +
-      "commit and tag reach the remote."
-  );
-  process.exit(1);
-}
-console.log(`release: v${workspaceVersion} published and pushed.`);
+await publishAndPush(workspaceVersion, firstRelease);
