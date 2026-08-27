@@ -337,8 +337,9 @@ deliberately and say why; do not nudge it to make a build green.
 
 ## Conventions
 
-- Git identity: a tool identity (Claude, Codex, etc.) is never the
-  author or committer. An agent working on behalf of a person commits as
+- Git identity: a tool or harness identity (Claude, Codex, or whatever
+  default the coding harness ships with) is never the author or
+  committer. An agent working on behalf of a person commits as
   that person — before committing, set `git config user.name` and
   `user.email` to THAT person's GitHub account. An autonomous bot with
   no human driving it commits under its own GitHub account (e.g.
