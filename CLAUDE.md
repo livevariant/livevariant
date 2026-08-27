@@ -337,15 +337,16 @@ deliberately and say why; do not nudge it to make a build green.
 
 ## Conventions
 
-- Git identity: commits are authored by the person driving the session,
-  never by a tool identity — before committing, `git config user.name`
-  and `user.email` must match YOUR GitHub account (each contributor
-  their own; a session run by the maintainer uses the maintainer's). An
-  email that maps to no GitHub account fails the CLA check on every PR.
-  No AI attribution anywhere: no Co-Authored-By trailers, session links,
-  or tool mentions in commit messages, PR titles/bodies, or code
-  (`.claude/settings.json` disables the automatic ones; don't add them
-  by hand either).
+- Git identity: a tool identity (Claude, Codex, etc.) is never the
+  author or committer. An agent working on behalf of a person commits as
+  that person — before committing, set `git config user.name` and
+  `user.email` to THAT person's GitHub account. An autonomous bot with
+  no human driving it commits under its own GitHub account (e.g.
+  prior-livevariant-bot). An email that maps to no GitHub account fails
+  the CLA check on every PR. No AI attribution anywhere: no
+  Co-Authored-By trailers, session links, or tool mentions in commit
+  messages, PR titles/bodies, or code (`.claude/settings.json` disables
+  the automatic ones; don't add them by hand either).
 - Tools live ONLY in the `@livevariant/tools` registry; MCP, REST,
   OpenAPI and SKILL are all generated from it. Never hand-edit
   `skills/` or `plugins/` (edit `packages/tools/src/docs.ts` +
