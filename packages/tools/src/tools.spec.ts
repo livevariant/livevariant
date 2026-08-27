@@ -231,6 +231,27 @@ describe("build_test", () => {
         .replace(/\?(auto|id|slot)=[^&]*&?/, "?");
     expect(configOf(linkHref)).toBe(configOf(imageSrc));
   });
+
+  it("returns the template for image variants: the case email exists for", async () => {
+    // Image variants with a shared redirectUrl is the canonical email
+    // shape (hosted uploads land as `image`), and for a while it was the
+    // one shape that came back with no emailTemplate at all (#60).
+    const out = await buildTest.handler(
+      {
+        redirectUrl: "https://example.com/offer",
+        variants: [{ image: A }, { image: B }]
+      },
+      ctx
+    );
+    const { imageSrc, linkHref } = out.emailTemplate.main;
+    expect(imageSrc).toContain("v={{variant_1_url}}");
+    expect(imageSrc).toContain(
+      `r=${encodeURIComponent("https://example.com/offer")}`
+    );
+    expect(linkHref).toContain(
+      `r=${encodeURIComponent("https://example.com/offer")}`
+    );
+  });
 });
 
 describe("inspect_test", () => {
