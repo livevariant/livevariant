@@ -145,9 +145,17 @@ function usePageTest(): PageTestState {
             };
         created = await createTest(PAGE_TEST, {
           ...options,
-          // Conversions are tracked manually on the CTA click; no GA
-          // interception on our own page.
-          rewardEvents: false
+          // Our own page runs the SDK the way a full-featured install
+          // does, opting into both conveniences the default withholds.
+          // autoIdentify: _ga-based identity, so a returning visitor
+          // keeps their variant across visits (our site, our consent
+          // story). GA interception stays on too (the rewardEvents
+          // default), so events our GTM container pushes reward the
+          // test; the deterministic conversion remains the manual
+          // trackConversion on the CTA clicks below, and the container
+          // must not also push a GA4 default conversion event for
+          // those clicks or they would count twice.
+          autoIdentify: true
         });
         if (!live) {
           // Unmounted while awaiting: the cleanup below already ran

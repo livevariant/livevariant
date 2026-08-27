@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/postgres",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "description": "PostgreSQL state store for LiveVariant: a StateStore adapter whose event log and derived cache live in Postgres, plus the drizzle schema so an embedding application can own the migrations",
   "license": "AGPL-3.0",
   "repository": {
@@ -36,8 +36,8 @@
     }
   },
   "dependencies": {
-    "@livevariant/core": "0.1.1",
-    "@livevariant/server": "0.1.1"
+    "@livevariant/core": "0.1.3",
+    "@livevariant/server": "0.1.3"
   },
   "peerDependencies": {
     "drizzle-orm": ">=0.37.0 <1.0.0"

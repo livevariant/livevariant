@@ -27,6 +27,11 @@ import { resolveExternalId } from "./identity.js";
 import { DEFAULT_REWARD_EVENTS, watchDataLayer, type GaWatcher } from "./ga.js";
 import { captureHandoff, getHandoff } from "./handoff.js";
 import { autoTrack } from "./auto-track.js";
+import {
+  registerStore,
+  resolveStorage,
+  type StorageMode
+} from "./page-store.js";
 import { SDK_VERSION } from "./version.js";
 
 export { gaClientId, resolveExternalId } from "./identity.js";
@@ -50,6 +55,7 @@ export {
 } from "./auto-track.js";
 export { SDK_VERSION } from "./version.js";
 export { decorateMedia } from "./media.js";
+export { pageStorage, resolveStorage, type StorageMode } from "./page-store.js";
 
 /**
  * LiveVariant browser SDK. Privacy contract: the raw external id and raw
@@ -82,6 +88,26 @@ export interface LiveVariantConfig {
   publishableKey?: string;
   /** GA4 event names treated as conversions by automatic tracking. */
   rewardEvents?: string[];
+  /**
+   * Where client state (identity, cached assignments, handoffs) lives.
+   * Default "session-storage": per-tab, expiring with the session,
+   * holding only functional A/B state, the posture that needs no
+   * consent banner. "local-storage" opts into cross-visit persistence
+   * (the deployment's consent story). "none" touches no web storage at
+   * all: the SDK runs on a window-shared in-memory store, sticky and
+   * rewardable for the page's lifetime. A string, not a Storage object,
+   * because this global is the plain-data cross-version contract.
+   */
+  storage?: StorageMode;
+  /**
+   * Opt-in to reading the site's _ga cookie for visitor identity. OFF by
+   * default: reading a cookie is itself access to stored information
+   * under the consent rules, so the default install touches nothing in
+   * the browser's storage, read or write. Turning it on buys cross-page
+   * identity aligned with the site's own analytics, under the site's own
+   * GA consent flow (a consent-denied visitor has no _ga to read).
+   */
+  autoIdentify?: boolean;
 }
 
 /** The tag's callable surface, for pages without an npm install. */
@@ -147,8 +173,23 @@ export interface CreateTestOptions {
   context?: Record<string, string>;
   /** Override config.rewardEvents; false disables GA interception. */
   rewardEvents?: string[] | false;
-  /** Defaults to window.localStorage; pass null to disable caching. */
+  /**
+   * Defaults to sessionStorage: per-tab, expiring with the session,
+   * functional A/B state only, so assignments are sticky and in-tab
+   * conversions attributable with no consent banner needed. Pass
+   * window.localStorage for cross-visit persistence (your consent
+   * story), any Storage-shaped object to bring your own, or null to
+   * disable caching outright. The declared modes on the tag and the
+   * global config are "session-storage" (default), "local-storage" and
+   * "none" (no web storage: a window-shared in-memory store keeps the
+   * SDK working for the page's lifetime).
+   */
   storage?: Storage | null;
+  /**
+   * Opt-in to reading the _ga cookie for identity (see
+   * LiveVariantConfig.autoIdentify). Default false: no cookie reads.
+   */
+  autoIdentify?: boolean;
   /**
    * How long to wait for a tag-manager-loaded tag's global config when
    * no serverUrl is otherwise known. Tag managers inject the tag late,
@@ -282,8 +323,18 @@ export async function createTest(
   const publishableKey =
     options.publishableKey ?? pageGlobal?.config?.publishableKey;
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+  // Explicit Storage object first, then the mode the page's global
+  // config declared (so a tag-configured mode governs npm createTest
+  // calls too), then the default, sessionStorage.
   const storage =
-    options.storage === undefined ? win.localStorage : options.storage;
+    options.storage === undefined
+      ? resolveStorage(win, pageGlobal?.config?.storage)
+      : options.storage;
+  // Whatever store this test caches into, the page-wide reward watcher
+  // must scan it, including a caller-supplied custom Storage the watcher
+  // could never guess at. Registration is what keeps "which store" a
+  // caching choice rather than a rewards choice.
+  registerStore(win, storage);
 
   // Parsing rather than trusting normalizes the readable shorthands
   // (bare-string variants, `variants` for a single slot) into the
@@ -329,7 +380,12 @@ export async function createTest(
         testId,
         resolveExternalId({
           explicit: options.externalId,
-          cookieString: win.document.cookie,
+          // The jar itself is only touched under the opt-in: evaluating
+          // document.cookie IS the read the default promises not to make,
+          // whatever happens to the value afterwards.
+          ...((options.autoIdentify ?? pageGlobal?.config?.autoIdentify)
+            ? { cookieString: win.document.cookie, autoIdentify: true }
+            : { cookieString: "" }),
           locationSearch: win.location.search,
           storage
         })

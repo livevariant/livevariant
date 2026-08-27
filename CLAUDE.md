@@ -76,6 +76,22 @@ fields)`. Tampering derives a different test with empty state.
   injected so two sites running the same trivial test never share
   state. Explicit `scope` overrides; keyed or pre-encoded configs are
   never touched.
+- **Session-scoped storage by default.** The browser SDK writes no
+  cookies, and its client state (identity `lv:id`, assignments `lv:a:*`,
+  handoffs `lv:h:*`) defaults to sessionStorage: per-tab, expiring with
+  the session, functional A/B state only, the posture that needs no
+  consent banner. Modes (`sdk/src/page-store.ts`, `storage:` option /
+  `data-storage` / global config): `"session-storage"` (default),
+  `"local-storage"` (cross-visit persistence, the deployment's consent
+  story), `"none"` (no web storage at all: a window-shared in-memory
+  store keeps tests sticky and rewardable for the page's lifetime; also
+  the fallback when a chosen web storage throws, and what unknown future
+  modes degrade to). The window store hangs on the window because the
+  tag and an npm bundle coordinate rewards through those keys, and the
+  reward watcher scans its own store, every registered store, and both
+  web storages. The GA `_ga` cookie is read (never written) for identity
+  ONLY under the `autoIdentify` opt-in (option / `data-auto-identify` /
+  global config), so the default install reads no cookies either.
 
 ## Architecture
 
