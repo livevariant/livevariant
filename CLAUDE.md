@@ -337,6 +337,17 @@ deliberately and say why; do not nudge it to make a build green.
 
 ## Conventions
 
+- Git identity: a tool or harness identity (Claude, Codex, or whatever
+  default the coding harness ships with) is never the author or
+  committer. An agent working on behalf of a person commits as
+  that person — before committing, set `git config user.name` and
+  `user.email` to THAT person's GitHub account. An autonomous bot with
+  no human driving it commits under its own GitHub account (e.g.
+  prior-livevariant-bot). An email that maps to no GitHub account fails
+  the CLA check on every PR. No AI attribution anywhere: no
+  Co-Authored-By trailers, session links, or tool mentions in commit
+  messages, PR titles/bodies, or code (`.claude/settings.json` disables
+  the automatic ones; don't add them by hand either).
 - Tools live ONLY in the `@livevariant/tools` registry; MCP, REST,
   OpenAPI and SKILL are all generated from it. Never hand-edit
   `skills/` or `plugins/` (edit `packages/tools/src/docs.ts` +
