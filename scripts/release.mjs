@@ -7,9 +7,10 @@
  * in git, and "which versions work together" becomes a question nobody
  * should ever have to ask.
  *
- *   npm run release            interactive version prompt
- *   npm run release patch      or minor / major / an exact x.y.z
- *   npm run release:dry        walk the whole flow, write nothing
+ *   npm run release patch -- --otp=123456     or minor / major / x.y.z
+ *   npm run release -- --otp=123456           interactive version prompt
+ *   npm run release -- --continue --otp=…     resume after a failed publish
+ *   npm run release:dry                       walk the whole flow, write nothing
  *
  * Steps, and why the order matters:
  *   1. nx release version: bumps every package.json in the group and
@@ -24,9 +25,21 @@
  *      drift check green on the release commit.
  *   3. one commit, one v{version} tag.
  *   4. nx release publish, every package in the group.
+ *   5. git push --follow-tags, so the release commit and tag never sit
+ *      local-only after a successful publish.
+ *
+ * A failed publish (an expired OTP, usually) leaves the commit and tag
+ * in place and needs no re-versioning: `--continue` picks the release
+ * back up from the v{version} tag on HEAD and reruns steps 4 and 5.
+ * nx checks the registry per package and skips versions that already
+ * exist, so continuing after a partial publish only sends what is
+ * missing.
  *
  * Publishing needs `npm login` (or NPM_TOKEN in CI) with rights on the
- * @livevariant org; everything before the publish step works without it.
+ * @livevariant org, plus a fresh one-time password when the account has
+ * 2FA on writes. Both are checked before anything happens: discovering
+ * an auth problem only at the publish step would leave a commit and tag
+ * already cut. A dry run needs neither.
  */
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -39,14 +52,44 @@ import { releasePublish, releaseVersion } from "nx/release";
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const verbose = args.includes("--verbose");
+const continueRelease = args.includes("--continue");
 const specifier = args.find(a => !a.startsWith("--"));
 // npm accounts with 2FA on writes need a fresh one-time password at the
 // publish step: `npm run release patch -- --otp=123456`. Without it npm
-// answers EOTP and the retry is `npx nx release publish --otp=...`.
+// answers EOTP only after the commit and tag exist, so a real release
+// refuses to start without one (NPM_TOKEN covers CI, where automation
+// tokens bypass 2FA).
 const otp = args.find(a => a.startsWith("--otp="))?.slice("--otp=".length);
 
 const run = cmd => execSync(cmd, { stdio: "inherit" });
 const out = cmd => execSync(cmd, { encoding: "utf8" }).trim();
+
+/**
+ * Fails before the version bump on anything that would otherwise only
+ * fail at the publish step, where the commit and tag have already been
+ * cut and the failure leaves the release half-done.
+ */
+function assertReadyToPublish() {
+  if (!otp && !process.env.NPM_TOKEN) {
+    console.error(
+      "release: --otp is required (npm 2FA on writes rejects the publish " +
+        "without it, after the commit and tag already exist):\n" +
+        "  npm run release patch -- --otp=123456"
+    );
+    process.exit(1);
+  }
+  let user;
+  try {
+    user = execSync("npm whoami", { encoding: "utf8", stdio: "pipe" }).trim();
+  } catch {
+    console.error(
+      "release: not logged in to npm (`npm whoami` failed); run `npm login` " +
+        "first"
+    );
+    process.exit(1);
+  }
+  console.log(`release: publishing as npm user ${user}`);
+}
 
 /**
  * Every publishable package must be in the release group, and nothing
@@ -248,6 +291,50 @@ function syncServerJsonVersion(version) {
   writeFileSync("server.json", `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+/**
+ * Publishes the group and pushes the release commit + tag: the last two
+ * steps of a release, shared by the normal flow and --continue. nx skips
+ * any package whose version already exists on the registry, so rerunning
+ * this after a partial publish only sends what is missing.
+ */
+async function publishAndPush(version, firstRelease) {
+  const results = await releasePublish({ dryRun, verbose, firstRelease, otp });
+  const failed = Object.values(results).filter(r => r.code !== 0).length;
+  if (failed > 0) {
+    console.error(
+      `release: ${failed} package(s) failed to publish. The commit and tag ` +
+        "exist and were NOT pushed; nothing needs re-versioning. Fix the " +
+        "npm problem (an expired OTP is the usual one) and continue with a " +
+        "fresh OTP:\n" +
+        "  npm run release -- --continue --otp=123456\n" +
+        "It publishes only the packages still missing from npm, then pushes " +
+        "the commit and tag."
+    );
+    process.exit(1);
+  }
+
+  // The packages are live on npm at this point, so the commit and tag must
+  // not stay local: --follow-tags pushes both (the tag is annotated for
+  // exactly this reason). Explicit refspec, so a stray push.default or
+  // upstream config cannot fail the last step of a successful release.
+  try {
+    run("git push --follow-tags origin main");
+  } catch {
+    console.error(
+      `release: v${version} is PUBLISHED on npm but the push failed; run ` +
+        "`git push --follow-tags origin main` yourself so the release " +
+        "commit and tag reach the remote."
+    );
+    process.exit(1);
+  }
+  console.log(`release: v${version} published and pushed.`);
+}
+
+// A dry run stops before the publish step, so it alone runs without npm
+// auth or an OTP.
+if (!dryRun) {
+  assertReadyToPublish();
+}
 assertReleaseGroupComplete();
 assertLockIsCrossPlatform();
 
@@ -258,6 +345,37 @@ if (out("git status --porcelain") !== "") {
 if (out("git branch --show-current") !== "main" && !dryRun) {
   console.error("release: releases are cut from main");
   process.exit(1);
+}
+
+// Resumes a release whose publish (or push) failed: the version bump,
+// commit and tag already happened, so the only work left is publish +
+// push, keyed off the v{version} tag the failed run left on HEAD.
+if (continueRelease) {
+  if (dryRun || specifier) {
+    console.error(
+      "release: --continue takes no version specifier and no --dry-run; it " +
+        "republishes exactly what the tag on HEAD says"
+    );
+    process.exit(1);
+  }
+  const tags = out("git tag --points-at HEAD --list 'v*'")
+    .split("\n")
+    .filter(Boolean);
+  if (tags.length !== 1) {
+    console.error(
+      tags.length === 0
+        ? "release: --continue expects HEAD to be a release commit, but it " +
+            "carries no v* tag; run a normal release instead"
+        : `release: HEAD carries ${tags.length} v* tags (${tags.join(", ")}); ` +
+            "cannot tell which release to continue"
+    );
+    process.exit(1);
+  }
+  const version = tags[0].slice(1);
+  // firstRelease matters to nx's registry lookup; "the tag on HEAD is the
+  // only v* tag" means the failed run was itself a first release.
+  await publishAndPush(version, out("git tag --list 'v*'") === tags[0]);
+  process.exit(0);
 }
 
 // No v* tag yet means nx has no previous release to diff against.
@@ -308,16 +426,4 @@ run(`git commit -m "release: v${workspaceVersion}"`);
 // annotated tags, and a tag that stays local defeats its purpose.
 run(`git tag -a v${workspaceVersion} -m "v${workspaceVersion}"`);
 
-const results = await releasePublish({ dryRun, verbose, firstRelease, otp });
-const failed = Object.values(results).filter(r => r.code !== 0).length;
-if (failed > 0) {
-  console.error(
-    `release: ${failed} package(s) failed to publish. The commit and tag ` +
-      "exist; fix the npm problem (usually auth: npm login) and run " +
-      "`npx nx release publish` to retry publishing without re-versioning."
-  );
-  process.exit(1);
-}
-console.log(
-  `release: v${workspaceVersion} published. Push it: git push --follow-tags`
-);
+await publishAndPush(workspaceVersion, firstRelease);
