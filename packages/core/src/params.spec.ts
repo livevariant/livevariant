@@ -159,6 +159,14 @@ describe("configToParams", () => {
       variants: [{ url: A, name: "hero" }, { url: B }]
     });
     expect(configToParams(partialNames)).toBeNull();
+    // Image variants too: the form's v= parses back as url, a different
+    // config and therefore a different test, and this spelling promises
+    // the SAME test. Their template spelling lives in
+    // configToTemplateQuery, which makes no such promise.
+    const images = parseTestConfig({
+      variants: [{ image: A }, { image: B }]
+    });
+    expect(configToParams(images)).toBeNull();
   });
 });
 
@@ -283,6 +291,62 @@ describe("configToTemplateQuery", () => {
       variants: ["warm copy", "cool copy"]
     });
     expect(configToTemplateQuery(inline)).toBeNull();
+    // A variant that carries its own redirectUrl stays inexpressible:
+    // the form has no per-variant destination grammar.
+    const perVariant = parseTestConfig({
+      variants: [
+        { image: A, redirectUrl: "https://example.com/a" },
+        { image: B }
+      ]
+    });
+    expect(configToTemplateQuery(perVariant)).toBeNull();
+  });
+
+  it("spells image variants: the canonical email case gets a template", async () => {
+    // Image variants + a shared landing page is exactly the test an ESP
+    // template is FOR. configToParams refuses it (no identity-preserving
+    // spelling exists), but the template replaces every variant URL with
+    // a merge placeholder anyway, so nothing of the image/url
+    // distinction could have survived into it.
+    const { configToTemplateQuery } = await import("./params.js");
+    const { parseTestConfig } = await import("./schema.js");
+    const config = parseTestConfig({
+      redirectUrl: "https://example.com/offer",
+      variants: [{ image: A }, { image: B }]
+    });
+    const template = configToTemplateQuery(config) as string;
+    expect(template).not.toBeNull();
+    expect(template).toContain("v={{variant_1_url}}");
+    expect(template).toContain("v={{variant_2_url}}");
+    expect(template).toContain(
+      `r=${encodeURIComponent("https://example.com/offer")}`
+    );
+    expect(template).not.toContain("{{landing_url}}");
+    // Filled in, serve and click still spell one identical test.
+    const filled = template
+      .replace("{{variant_1_url}}", encodeURIComponent(A))
+      .replace("{{variant_2_url}}", encodeURIComponent(B));
+    const serve = await configFromParams(query(`${filled}&auto=0&id=r1`));
+    const click = await configFromParams(query(`${filled}&id=r1`));
+    expect(click.testId).toBe(serve.testId);
+  });
+
+  it("spells a variant carrying both image and url: still a template", async () => {
+    // Both are content fields the schema accepts together, and both are
+    // replaced by the same merge placeholder — so the pair flattens to
+    // the url spelling rather than losing the template. (A per-variant
+    // redirectUrl is different grammar, not a different spelling, and
+    // still returns null — covered above.)
+    const { configToTemplateQuery } = await import("./params.js");
+    const { parseTestConfig } = await import("./schema.js");
+    const config = parseTestConfig({
+      redirectUrl: "https://example.com/offer",
+      variants: [{ image: A, url: "https://example.com/hero-a" }, { image: B }]
+    });
+    const template = configToTemplateQuery(config) as string;
+    expect(template).not.toBeNull();
+    expect(template).toContain("v={{variant_1_url}}");
+    expect(template).toContain("v={{variant_2_url}}");
   });
 });
 

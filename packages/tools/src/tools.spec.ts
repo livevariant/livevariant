@@ -231,6 +231,27 @@ describe("build_test", () => {
         .replace(/\?(auto|id|slot)=[^&]*&?/, "?");
     expect(configOf(linkHref)).toBe(configOf(imageSrc));
   });
+
+  it("returns the template for image variants: the case email exists for", async () => {
+    // Image variants with a shared redirectUrl is the canonical email
+    // shape (hosted uploads land as `image`), and for a while it was the
+    // one shape that came back with no emailTemplate at all (#60).
+    const out = await buildTest.handler(
+      {
+        redirectUrl: "https://example.com/offer",
+        variants: [{ image: A }, { image: B }]
+      },
+      ctx
+    );
+    const { imageSrc, linkHref } = out.emailTemplate.main;
+    expect(imageSrc).toContain("v={{variant_1_url}}");
+    expect(imageSrc).toContain(
+      `r=${encodeURIComponent("https://example.com/offer")}`
+    );
+    expect(linkHref).toContain(
+      `r=${encodeURIComponent("https://example.com/offer")}`
+    );
+  });
 });
 
 describe("inspect_test", () => {
@@ -245,6 +266,28 @@ describe("inspect_test", () => {
       const out = await inspectTest.handler({ test: ref }, ctx);
       expect(out.testId).toBe(built.testId);
     }
+  });
+
+  it("accepts the test under the name build_test returned it: config", async () => {
+    // The obvious agent move is to feed a response field forward under
+    // its own name; that must not cost a failed round-trip (#62).
+    const built = await twoVariantTest();
+    const out = await inspectTest.handler({ config: built.config }, ctx);
+    expect(out.testId).toBe(built.testId);
+    // Both names with the same value is redundancy, not a conflict.
+    const both = await inspectTest.handler(
+      { test: built.config, config: built.config },
+      ctx
+    );
+    expect(both.testId).toBe(built.testId);
+  });
+
+  it("rejects a call with no test, or two tests that disagree", async () => {
+    const built = await twoVariantTest();
+    await expect(inspectTest.handler({}, ctx)).rejects.toThrow(ToolInputError);
+    await expect(
+      inspectTest.handler({ test: built.config, config: "not-the-same" }, ctx)
+    ).rejects.toThrow(ToolInputError);
   });
 
   it("reads the query-parameter spelling too", async () => {
