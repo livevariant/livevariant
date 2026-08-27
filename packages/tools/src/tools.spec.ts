@@ -268,6 +268,28 @@ describe("inspect_test", () => {
     }
   });
 
+  it("accepts the test under the name build_test returned it: config", async () => {
+    // The obvious agent move is to feed a response field forward under
+    // its own name; that must not cost a failed round-trip (#62).
+    const built = await twoVariantTest();
+    const out = await inspectTest.handler({ config: built.config }, ctx);
+    expect(out.testId).toBe(built.testId);
+    // Both names with the same value is redundancy, not a conflict.
+    const both = await inspectTest.handler(
+      { test: built.config, config: built.config },
+      ctx
+    );
+    expect(both.testId).toBe(built.testId);
+  });
+
+  it("rejects a call with no test, or two tests that disagree", async () => {
+    const built = await twoVariantTest();
+    await expect(inspectTest.handler({}, ctx)).rejects.toThrow(ToolInputError);
+    await expect(
+      inspectTest.handler({ test: built.config, config: "not-the-same" }, ctx)
+    ).rejects.toThrow(ToolInputError);
+  });
+
   it("reads the query-parameter spelling too", async () => {
     const out = await inspectTest.handler(
       { test: `https://livevariant.link/s?v=${A}&v=${B}&id=x` },
