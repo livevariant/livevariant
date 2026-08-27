@@ -337,13 +337,15 @@ deliberately and say why; do not nudge it to make a build green.
 
 ## Conventions
 
-- Git identity: before committing, set the repo git author to the
-  maintainer — `git config user.name "Michaël Krens" && git config
-user.email mkrens@gmail.com`. No AI attribution anywhere: no
-  Co-Authored-By trailers, session links, or tool mentions in commit
-  messages, PR titles/bodies, or code (`.claude/settings.json` disables
-  the automatic ones; don't add them by hand either). Commits authored
-  by an unknown identity fail the CLA check on every PR.
+- Git identity: commits are authored by the person driving the session,
+  never by a tool identity — before committing, `git config user.name`
+  and `user.email` must match YOUR GitHub account (each contributor
+  their own; a session run by the maintainer uses the maintainer's). An
+  email that maps to no GitHub account fails the CLA check on every PR.
+  No AI attribution anywhere: no Co-Authored-By trailers, session links,
+  or tool mentions in commit messages, PR titles/bodies, or code
+  (`.claude/settings.json` disables the automatic ones; don't add them
+  by hand either).
 - Tools live ONLY in the `@livevariant/tools` registry; MCP, REST,
   OpenAPI and SKILL are all generated from it. Never hand-edit
   `skills/` or `plugins/` (edit `packages/tools/src/docs.ts` +
