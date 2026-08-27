@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/tools",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "LiveVariant's tool definitions: one registry describing every operation an assistant can perform, from which the MCP server, the REST API, the OpenAPI document and the agent SKILL are all generated",
   "license": "AGPL-3.0",
   "repository": {
@@ -30,7 +30,7 @@
     }
   },
   "dependencies": {
-    "@livevariant/core": "0.1.3",
+    "@livevariant/core": "0.1.4",
     "zod": "^4.4.3"
   },
   "files": [

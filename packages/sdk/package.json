@@ -1,6 +1,6 @@
 {
   "name": "@livevariant/sdk",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "SDK for LiveVariant, browser and headless (node, agents): sticky variant assignment with client-side hashing (raw ids and context never leave the client), session/local/in-memory storage modes, and zero-setup conversion tracking via Google Analytics dataLayer interception",
   "license": "AGPL-3.0",
   "repository": {
@@ -33,7 +33,7 @@
     }
   },
   "dependencies": {
-    "@livevariant/core": "0.1.3"
+    "@livevariant/core": "0.1.4"
   },
   "files": [
     "dist",
