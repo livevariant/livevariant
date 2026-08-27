@@ -337,6 +337,13 @@ deliberately and say why; do not nudge it to make a build green.
 
 ## Conventions
 
+- Git identity: before committing, set the repo git author to the
+  maintainer — `git config user.name "Michaël Krens" && git config
+user.email mkrens@gmail.com`. No AI attribution anywhere: no
+  Co-Authored-By trailers, session links, or tool mentions in commit
+  messages, PR titles/bodies, or code (`.claude/settings.json` disables
+  the automatic ones; don't add them by hand either). Commits authored
+  by an unknown identity fail the CLA check on every PR.
 - Tools live ONLY in the `@livevariant/tools` registry; MCP, REST,
   OpenAPI and SKILL are all generated from it. Never hand-edit
   `skills/` or `plugins/` (edit `packages/tools/src/docs.ts` +
