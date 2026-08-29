@@ -449,7 +449,9 @@ const LIMITS_SECTION = `## Limits worth knowing
 - **Only identified pulls are counted.** A redirect serve (\`/s\`, \`/c\`)
   records an assignment when the request carries \`?id=\` (or a prehashed
   \`?_lvid=\`), or is a browser page navigation, which gets a first-party
-  cookie. Anything else — curl, a plain HTTP client library, a link
+  cookie — except on \`auto=0\` links, which declare themselves email and
+  never mint one, so an id-less \`auto=0\` navigation is not counted
+  either. Anything else — curl, a plain HTTP client library, a link
   scanner — still gets its 302 and a genuinely served variant, but no
   assignment is recorded: an anonymous pull can never be rewarded, so
   counting it would only dilute the estimates. Driving the loop from a
