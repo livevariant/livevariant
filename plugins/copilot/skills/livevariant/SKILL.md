@@ -120,7 +120,8 @@ Config parameters (these define the test, and therefore its identity):
 Runtime parameters (consumed per request, never part of identity): `id` (the
 visitor/recipient identifier, hashed per test server-side), `auto=0` (drop
 network-derived context; always use on email links), `to` (explicit click
-destination), `slot`.
+destination), `slot`. The `id` is also what makes a pull COUNT: see
+"Only identified pulls are counted" under limits.
 
 Why this matters for email templates: wire the fixed parts (`kh`, `auto=0`,
 `id={{merge_tag}}`) into an ESP template once, and campaign managers fill in
@@ -225,8 +226,8 @@ Email is where this is most useful and most easily got wrong.
 
 - **Give every recipient a distinct `?id=`** using your platform's merge tag.
   Without it every recipient shares one URL, the provider caches a single
-  fetch, everyone sees the same variant, and the campaign records one
-  assignment.
+  fetch, everyone sees the same variant, and the campaign records nothing
+  (an id-less proxy fetch is served but never counted).
 - **Use the `auto=0` links.** Anything reaching an inbox is fetched by the
   mail provider or a link scanner, not the reader, so location and device
   derived from the connection describe a datacenter. `build_test` returns
@@ -417,6 +418,15 @@ https://github.com/livevariant/livevariant.
 
 ## Limits worth knowing
 
+- **Only identified pulls are counted.** A redirect serve (`/s`, `/c`)
+  records an assignment when the request carries `?id=` (or a prehashed
+  `?_lvid=`), or is a browser page navigation, which gets a first-party
+  cookie. Anything else — curl, a plain HTTP client library, a link
+  scanner — still gets its 302 and a genuinely served variant, but no
+  assignment is recorded: an anonymous pull can never be rewarded, so
+  counting it would only dilute the estimates. Driving the loop from a
+  script, a CI job or a walkthrough? Pass a distinct `?id=` per
+  simulated visitor and every pull counts like any other.
 - Variants must be publicly reachable URLs, or short inline text/HTML.
   Deployments with asset hosting accept images via `upload_image`; anything
   else you host yourself.
