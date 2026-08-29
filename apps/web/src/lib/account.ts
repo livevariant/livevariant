@@ -189,15 +189,23 @@ export async function signInWithPassword(input: {
  * Re-sends the verification email for an unverified account, which is
  * the recovery path for an expired link. Better Auth answers success
  * regardless of whether the address exists, so exposing this on the
- * sign-in error path leaks nothing.
+ * sign-in error path leaks nothing. `next` rides along as the
+ * verification callback (like the magic link's), so the eventual
+ * auto-sign-in still lands on the page the user was headed for.
  */
-export async function resendVerificationEmail(email: string): Promise<void> {
+export async function resendVerificationEmail(
+  email: string,
+  next: string
+): Promise<void> {
   await json(
     await fetch("/auth/send-verification-email", {
       method: "POST",
       credentials: "include",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email })
+      body: JSON.stringify({
+        email,
+        callbackURL: new URL(next, window.location.origin).toString()
+      })
     })
   );
 }

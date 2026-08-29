@@ -36,6 +36,11 @@ export function Login() {
   // livevariant.com's policies; without them there is nothing to tick.
   const policies = hostedPoliciesApply();
   const [agreed, setAgreed] = useState(false);
+  // The address a verification mail actually went to: captured at the
+  // moment of the request, because the input stays editable while the
+  // request is in flight and the confirmation must not name an inbox
+  // that never received anything.
+  const [sentTo, setSentTo] = useState("");
   const [verifySent, setVerifySent] = useState(false);
   // Sign-in refused because the address is unverified: the original
   // link may long since have expired, so the page must offer a fresh
@@ -52,8 +57,12 @@ export function Login() {
       // Registration is not done until the address is verified, so
       // there is no session to redirect with yet: the next step is the
       // inbox.
-      registerWithPassword({ email, password })
-        .then(() => setVerifySent(true))
+      const to = email;
+      registerWithPassword({ email: to, password })
+        .then(() => {
+          setSentTo(to);
+          setVerifySent(true);
+        })
         .catch(err => {
           setError(err instanceof Error ? err.message : String(err));
         })
@@ -96,7 +105,7 @@ export function Login() {
           {verifySent ? (
             <p className="text-sm">
               <Mail className="mr-1 inline size-4" /> Almost there: we sent a
-              verification link to {email}. Click it, then sign in.
+              verification link to {sentTo}. Click it, then sign in.
             </p>
           ) : (
             <>
@@ -238,8 +247,10 @@ export function Login() {
                 onClick={() => {
                   setBusy(true);
                   setError(null);
-                  resendVerificationEmail(email)
+                  const to = email;
+                  resendVerificationEmail(to, next)
                     .then(() => {
+                      setSentTo(to);
                       setNeedsVerify(false);
                       setVerifySent(true);
                     })
