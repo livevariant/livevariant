@@ -12,8 +12,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  ApiError,
   registerWithPassword,
   requestMagicLink,
+  resendVerificationEmail,
   signInWithPassword
 } from "@/lib/account";
 import { hostedPoliciesApply } from "@/lib/policies";
@@ -35,12 +37,17 @@ export function Login() {
   const policies = hostedPoliciesApply();
   const [agreed, setAgreed] = useState(false);
   const [verifySent, setVerifySent] = useState(false);
+  // Sign-in refused because the address is unverified: the original
+  // link may long since have expired, so the page must offer a fresh
+  // one or the account is simply stuck.
+  const [needsVerify, setNeedsVerify] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = () => {
     setBusy(true);
     setError(null);
+    setNeedsVerify(false);
     if (mode === "register") {
       // Registration is not done until the address is verified, so
       // there is no session to redirect with yet: the next step is the
@@ -60,7 +67,11 @@ export function Login() {
         window.location.href = next;
       })
       .catch(err => {
-        setError(err instanceof Error ? err.message : String(err));
+        if (err instanceof ApiError && err.code === "EMAIL_NOT_VERIFIED") {
+          setNeedsVerify(true);
+        } else {
+          setError(err instanceof Error ? err.message : String(err));
+        }
         setBusy(false);
       });
   };
@@ -160,6 +171,7 @@ export function Login() {
                 onClick={() => {
                   setMode(mode === "register" ? "signin" : "register");
                   setError(null);
+                  setNeedsVerify(false);
                 }}
               >
                 {mode === "register"
@@ -213,6 +225,36 @@ export function Login() {
               </p>
             )}
           </div>
+          {needsVerify && (
+            <div className="space-y-2 text-sm">
+              <p>
+                <Mail className="mr-1 inline size-4" /> This address still needs
+                verifying, and the original link may have expired.
+              </p>
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  setError(null);
+                  resendVerificationEmail(email)
+                    .then(() => {
+                      setNeedsVerify(false);
+                      setVerifySent(true);
+                    })
+                    .catch(err => {
+                      setError(
+                        err instanceof Error ? err.message : String(err)
+                      );
+                    })
+                    .finally(() => setBusy(false));
+                }}
+              >
+                <Mail /> Send a fresh verification link
+              </Button>
+            </div>
+          )}
           {error && <p className="text-destructive text-sm">{error}</p>}
         </CardContent>
       </Card>

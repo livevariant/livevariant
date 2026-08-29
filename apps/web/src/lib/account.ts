@@ -35,16 +35,30 @@ export interface ServerTest {
   addedAt: number;
 }
 
+/** A failed /auth or /account response, keeping Better Auth's machine code. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string
+  ) {
+    super(message);
+  }
+}
+
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     // Two error shapes reach here: ours ({error}) and Better Auth's
-    // ({message}). Surfacing either beats a bare status code.
+    // ({message}, plus a stable code). Surfacing either beats a bare
+    // status code; the code lets callers react to a specific failure
+    // (EMAIL_NOT_VERIFIED) without matching prose.
     const body = (await res.json().catch(() => null)) as {
       error?: string;
       message?: string;
+      code?: string;
     } | null;
-    throw new Error(
-      body?.error ?? body?.message ?? `request failed (${res.status})`
+    throw new ApiError(
+      body?.error ?? body?.message ?? `request failed (${res.status})`,
+      body?.code
     );
   }
   return (await res.json()) as T;
@@ -167,6 +181,23 @@ export async function signInWithPassword(input: {
       credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ email: input.email, password: input.password })
+    })
+  );
+}
+
+/**
+ * Re-sends the verification email for an unverified account, which is
+ * the recovery path for an expired link. Better Auth answers success
+ * regardless of whether the address exists, so exposing this on the
+ * sign-in error path leaks nothing.
+ */
+export async function resendVerificationEmail(email: string): Promise<void> {
+  await json(
+    await fetch("/auth/send-verification-email", {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email })
     })
   );
 }

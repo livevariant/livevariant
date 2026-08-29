@@ -78,6 +78,12 @@ export function createAuth(config: AccountsConfig, db: Db) {
     emailVerification: {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
+      // Better Auth's default TTL is one hour, which turns any overnight
+      // gap between signing up and reading mail into TOKEN_EXPIRED as
+      // the first impression — and strands agents whose mailboxes
+      // deliver in batches. The link is single-purpose and single-use;
+      // a day is the ordinary production window.
+      expiresIn: 60 * 60 * 24,
       sendVerificationEmail: async ({ user, url }) => {
         await config.sendEmail(verificationEmail(user.email, url));
       }
