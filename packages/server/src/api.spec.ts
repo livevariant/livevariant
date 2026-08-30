@@ -49,6 +49,22 @@ describe("the tool API", () => {
     }
   });
 
+  it("answers on the underscore spelling of every tool's path", async () => {
+    // The MCP tool list and the docs name tools with underscores; an agent
+    // substituting that name into the path template verbatim must not 404.
+    for (const tool of TOOLS) {
+      if (tool.scope === "account") continue;
+      const res = await post(`/api/v1/${tool.name}`, {});
+      expect(res.status, tool.name).not.toBe(404);
+    }
+    const built = await post("/api/v1/build_test", {
+      variants: [{ url: A }, { url: B }]
+    });
+    expect(built.status).toBe(200);
+    const out = (await built.json()) as Record<string, any>;
+    expect(out.testId).toMatch(/^[0-9a-f]{64}$/);
+  });
+
   it("builds a test over plain HTTP", async () => {
     const res = await post(toolPath("build_test"), {
       variants: [{ url: A }, { url: B }]
