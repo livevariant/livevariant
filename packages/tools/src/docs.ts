@@ -552,7 +552,9 @@ test's stats secret.
 - [MCP server](${base}/mcp): streamable HTTP, no auth. Or install the skill:
   \`npx skills add livevariant/livevariant\`.
 - [OpenAPI](${base}/openapi.json) and [interactive docs](${base}/docs): every
-  tool as \`POST ${base}/api/v1/<tool-name>\`, plain JSON.
+  tool as \`POST ${base}/api/v1/<tool-name>\`, plain JSON. The canonical
+  paths hyphenate the tool names (\`/api/v1/build-test\`), but the
+  underscore spelling (\`/api/v1/build_test\`) is accepted too.
 - Source (AGPL, self-hostable): https://github.com/livevariant/livevariant
 
 ## The capability ladder
@@ -631,7 +633,8 @@ export function renderAuthMd(origin: string): string {
   return `# Auth.md: agent access to LiveVariant
 
 There is no agent registration, API key, or OAuth flow for creating tests.
-Every tool is open at \`POST ${base}/api/v1/<tool-name>\` and over MCP at
+Every tool is open at \`POST ${base}/api/v1/<tool-name>\` (hyphenated or
+underscore spelling, e.g. \`build-test\` or \`build_test\`) and over MCP at
 \`${base}/mcp\`. Access is scoped by the data supplied to each call:
 
 - A test IS its config, encoded in its own URLs. Whoever holds the
