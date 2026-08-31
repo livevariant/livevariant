@@ -386,6 +386,14 @@ describe("agent discovery routes", () => {
     expect(txt).toContain("https://serve.example/s?v=");
     expect(txt).toContain("https://serve.example/sdk.js");
     expect(txt).not.toContain("https://serve.example/mcp");
+    // The combined document keeps the same split all the way through the
+    // embedded skill: no campaign link falls back to the docs origin.
+    const full = await (
+      await twoDomain.request("https://main.example/llms-full.txt")
+    ).text();
+    expect(full).toContain("https://main.example/api/v1/");
+    expect(full).toContain("https://serve.example/sdk.js");
+    expect(full).not.toContain("https://main.example/sdk.js");
   });
 
   it("serves llms.txt and the skill, rendered for this origin", async () => {

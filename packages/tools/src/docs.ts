@@ -470,7 +470,7 @@ const LIMITS_SECTION = `## Limits worth knowing
 /* ------------------------------------------------------------------ */
 /* Renderers.                                                          */
 
-function skillBody(origin: string): string {
+function skillBody(origin: string, serveOrigin = origin): string {
   return [
     `# LiveVariant`,
     ``,
@@ -492,7 +492,7 @@ function skillBody(origin: string): string {
     ``,
     PARAMS_SECTION,
     ``,
-    URL_FORM_SECTION.replaceAll("{origin}", origin),
+    URL_FORM_SECTION.replaceAll("{origin}", serveOrigin),
     ``,
     FLOW_SECTION,
     ``,
@@ -502,7 +502,7 @@ function skillBody(origin: string): string {
     ``,
     EMAIL_SECTION,
     ``,
-    WEBSITE_SECTION.replaceAll("{origin}", origin),
+    WEBSITE_SECTION.replaceAll("{origin}", serveOrigin),
     ``,
     IMAGES_SECTION,
     ``,
@@ -599,7 +599,8 @@ Hosted service terms: ${base}/terms · privacy: ${base}/privacy
  */
 export function renderLlmsFullTxt(origin: string, serveUrl?: string): string {
   const base = origin.replace(/\/+$/, "");
-  return `${renderLlmsTxt(origin, serveUrl)}\n---\n\n${skillBody(base)}`;
+  const serve = (serveUrl ?? origin).replace(/\/+$/, "");
+  return `${renderLlmsTxt(origin, serveUrl)}\n---\n\n${skillBody(base, serve)}`;
 }
 
 /**

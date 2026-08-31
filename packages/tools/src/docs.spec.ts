@@ -73,6 +73,10 @@ describe("the agent docs source", () => {
     expect(full).toContain("https://main.example/skills/livevariant/SKILL.md");
     expect(full).toContain("https://serve.example/sdk.js");
     expect(full).not.toContain("https://serve.example/mcp");
+    // …and the skill body's campaign-carried examples went to the serve
+    // domain too, not the docs origin it renders against standalone.
+    expect(full).not.toContain("https://main.example/sdk.js");
+    expect(full).not.toContain("https://main.example/s?v=");
     // …and so did the complete skill body, minus its frontmatter.
     for (const heading of [
       "## The three shapes of a test",
