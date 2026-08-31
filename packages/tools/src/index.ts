@@ -11,6 +11,7 @@ export {
 } from "./tools.js";
 export {
   renderAuthMd,
+  renderLlmsFullTxt,
   renderLlmsTxt,
   renderMcpInstructions,
   renderRobotsTxt,

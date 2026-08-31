@@ -402,6 +402,16 @@ describe("agent discovery routes", () => {
     expect(body).toContain("# LiveVariant");
     expect(body).toContain("https://self.example/api/v1/");
   });
+
+  it("serves llms-full.txt: the index plus the whole skill in one fetch", async () => {
+    const res = await app.request("https://self.example/llms-full.txt");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("markdown");
+    const full = await res.text();
+    expect(full).toContain("/skills/livevariant/SKILL.md");
+    expect(full).toContain("## Every config parameter");
+    expect(full).toContain("https://self.example/api/v1/");
+  });
 });
 
 describe("the ESP template flow, end to end", () => {
