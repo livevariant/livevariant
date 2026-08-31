@@ -65,7 +65,10 @@ describe("the agent docs source", () => {
   });
 
   it("renders llms-full.txt as the index plus the whole skill, one origin", () => {
-    const full = renderLlmsFullTxt("https://main.example", "https://serve.example");
+    const full = renderLlmsFullTxt(
+      "https://main.example",
+      "https://serve.example"
+    );
     // The index came through with its domain split intact…
     expect(full).toContain("https://main.example/skills/livevariant/SKILL.md");
     expect(full).toContain("https://serve.example/sdk.js");
