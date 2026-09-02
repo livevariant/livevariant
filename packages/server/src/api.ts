@@ -224,26 +224,34 @@ export function createApi(options: ApiOptions): Hono {
     tool => tool.scope !== "account" || provider !== undefined
   );
   for (const tool of availableTools) {
-    app.post(toolPath(tool.name), async c => {
-      const body: unknown = await c.req.json().catch(() => undefined);
-      const parsed = tool.input.safeParse(body ?? {});
-      if (!parsed.success) {
-        return c.json(
-          { error: "invalid request", details: parsed.error.issues },
-          400
-        );
-      }
-      try {
-        return c.json(
-          await tool.handler(parsed.data, contextFor(c.req.url, c.req.raw))
-        );
-      } catch (err) {
-        if (err instanceof ToolInputError) {
-          return c.json({ error: err.message }, err.status);
+    // Tool names are spelled with underscores (build_test) but the
+    // canonical REST path hyphenates them (/api/v1/build-test). The docs
+    // invite substituting a tool's name into the path template, so the
+    // literal substitution must work too: mount every tool on both
+    // spellings rather than letting the honest reading of the docs 404.
+    const paths = new Set([toolPath(tool.name), `/api/v1/${tool.name}`]);
+    for (const path of paths) {
+      app.post(path, async c => {
+        const body: unknown = await c.req.json().catch(() => undefined);
+        const parsed = tool.input.safeParse(body ?? {});
+        if (!parsed.success) {
+          return c.json(
+            { error: "invalid request", details: parsed.error.issues },
+            400
+          );
         }
-        throw err;
-      }
-    });
+        try {
+          return c.json(
+            await tool.handler(parsed.data, contextFor(c.req.url, c.req.raw))
+          );
+        } catch (err) {
+          if (err instanceof ToolInputError) {
+            return c.json({ error: err.message }, err.status);
+          }
+          throw err;
+        }
+      });
+    }
   }
 
   // The dashboard is a static build, so it cannot read the deployment's

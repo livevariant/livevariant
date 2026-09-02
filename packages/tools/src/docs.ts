@@ -146,7 +146,8 @@ Config parameters (these define the test, and therefore its identity):
 Runtime parameters (consumed per request, never part of identity): \`id\` (the
 visitor/recipient identifier, hashed per test server-side), \`auto=0\` (drop
 network-derived context; always use on email links), \`to\` (explicit click
-destination), \`slot\`.
+destination), \`slot\`. The \`id\` is also what makes a pull COUNT: see
+"Only identified pulls are counted" under limits.
 
 Why this matters for email templates: wire the fixed parts (\`kh\`, \`auto=0\`,
 \`id={{merge_tag}}\`) into an ESP template once, and campaign managers fill in
@@ -273,8 +274,8 @@ Email is where this is most useful and most easily got wrong.
 
 - **Give every recipient a distinct \`?id=\`** using your platform's merge tag.
   Without it every recipient shares one URL, the provider caches a single
-  fetch, everyone sees the same variant, and the campaign records one
-  assignment.
+  fetch, everyone sees the same variant, and the campaign records nothing
+  (an id-less proxy fetch is served but never counted).
 - **Use the \`auto=0\` links.** Anything reaching an inbox is fetched by the
   mail provider or a link scanner, not the reader, so location and device
   derived from the connection describe a datacenter. \`build_test\` returns
@@ -445,6 +446,17 @@ https://github.com/livevariant/livevariant.`;
 
 const LIMITS_SECTION = `## Limits worth knowing
 
+- **Only identified pulls are counted.** A redirect serve (\`/s\`, \`/c\`)
+  records an assignment when the request carries \`?id=\` (or a prehashed
+  \`?_lvid=\`), or is a browser page navigation, which gets a first-party
+  cookie — except on \`auto=0\` links, which declare themselves email and
+  never mint one, so an id-less \`auto=0\` navigation is not counted
+  either. Anything else — curl, a plain HTTP client library, a link
+  scanner — still gets its 302 and a genuinely served variant, but no
+  assignment is recorded: an anonymous pull can never be rewarded, so
+  counting it would only dilute the estimates. Driving the loop from a
+  script, a CI job or a walkthrough? Pass a distinct \`?id=\` per
+  simulated visitor and every pull counts like any other.
 - Variants must be publicly reachable URLs, or short inline text/HTML.
   Deployments with asset hosting accept images via \`upload_image\`; anything
   else you host yourself.
@@ -540,7 +552,9 @@ test's stats secret.
 - [MCP server](${base}/mcp): streamable HTTP, no auth. Or install the skill:
   \`npx skills add livevariant/livevariant\`.
 - [OpenAPI](${base}/openapi.json) and [interactive docs](${base}/docs): every
-  tool as \`POST ${base}/api/v1/<tool-name>\`, plain JSON.
+  tool as \`POST ${base}/api/v1/<tool-name>\`, plain JSON. The canonical
+  paths hyphenate the tool names (\`/api/v1/build-test\`), but the
+  underscore spelling (\`/api/v1/build_test\`) is accepted too.
 - Source (AGPL, self-hostable): https://github.com/livevariant/livevariant
 
 ## The capability ladder
@@ -619,7 +633,8 @@ export function renderAuthMd(origin: string): string {
   return `# Auth.md: agent access to LiveVariant
 
 There is no agent registration, API key, or OAuth flow for creating tests.
-Every tool is open at \`POST ${base}/api/v1/<tool-name>\` and over MCP at
+Every tool is open at \`POST ${base}/api/v1/<tool-name>\` (hyphenated or
+underscore spelling, e.g. \`build-test\` or \`build_test\`) and over MCP at
 \`${base}/mcp\`. Access is scoped by the data supplied to each call:
 
 - A test IS its config, encoded in its own URLs. Whoever holds the
