@@ -440,6 +440,24 @@ export function createApi(options: ApiOptions): Hono {
   // secret checked against the hash inside that config, so authority
   // travels in the arguments and there is nothing to log in to.
   app.all("/mcp", async c => {
+    // The standalone GET stream is where a server pushes messages it
+    // originates; this one never does. The spec's answer for that is 405,
+    // which clients treat as "no stream here" and leave alone. Opening a
+    // stream and then closing it with the per-request server below reads
+    // as a dropped connection instead, and a well-behaved client
+    // reconnects every second for as long as its session lives (one did,
+    // at ~56k requests a day).
+    if (c.req.method === "GET") {
+      return c.json(
+        {
+          jsonrpc: "2.0",
+          error: { code: -32000, message: "Method not allowed" },
+          id: null
+        },
+        405,
+        { allow: "POST, DELETE" }
+      );
+    }
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       // Plain JSON rather than an SSE stream: nothing here ever pushes a
