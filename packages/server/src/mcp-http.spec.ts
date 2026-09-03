@@ -192,4 +192,49 @@ describe("MCP over HTTP", () => {
       TOOLS.map(t => t.name).sort()
     );
   });
+
+  it("declines the standalone GET stream with 405, as the spec prescribes", async () => {
+    // A server that never pushes server-initiated messages must answer
+    // the GET with 405 rather than open a stream it will not keep.
+    const res = await app.request("https://livevariant.com/mcp", {
+      method: "GET",
+      headers: {
+        accept: "text/event-stream",
+        "mcp-protocol-version": "2025-11-25"
+      }
+    });
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toContain("POST");
+    expect(await res.json()).toMatchObject({
+      jsonrpc: "2.0",
+      error: { code: -32000 }
+    });
+  });
+
+  it("does not send a real client into a reconnect loop", async () => {
+    // The SDK client opens the GET stream once initialization completes
+    // and, on a stream that opens and then closes, reconnects after its
+    // 1s initial delay for as long as the session lives. A 405 is the
+    // one answer it treats as final.
+    const gets: number[] = [];
+    const client = new Client({ name: "test", version: "0" });
+    await client.connect(
+      new StreamableHTTPClientTransport(
+        new URL("https://livevariant.com/mcp"),
+        {
+          fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+            const res = await app.request(String(input), init);
+            if ((init?.method ?? "GET") === "GET") gets.push(res.status);
+            return res;
+          }) as unknown as typeof globalThis.fetch
+        }
+      )
+    );
+    await client.listTools();
+    // Past the client's initial reconnection delay: a second GET here
+    // would be the loop starting.
+    await new Promise(resolve => setTimeout(resolve, 1300));
+    expect(gets).toEqual([405]);
+    await client.close();
+  });
 });
