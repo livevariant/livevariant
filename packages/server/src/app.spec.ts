@@ -103,6 +103,19 @@ function sumRewards(s: any): number {
   return s.combinations.reduce((sum: number, c: any) => sum + c.rewardTotal, 0);
 }
 
+describe("the Public Agents ownership file", () => {
+  it("names the listing and its maintainers", async () => {
+    const res = await app.request("/.well-known/public-agents.json");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      version: 1,
+      agents: [],
+      tools: ["livevariant"],
+      maintainers: ["mkrens"]
+    });
+  });
+});
+
 describe("redirect serving", () => {
   it("302s to a variant url with handoff decoration for id'd traffic", async () => {
     const { encoded, testId } = await makeTest();
