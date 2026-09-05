@@ -359,6 +359,17 @@ export function createApi(options: ApiOptions): Hono {
       documentation: `${base}/skills/livevariant/SKILL.md`
     };
   };
+  // The Public Agents registry's ownership file: whoever controls this
+  // domain acknowledges the listing and names who may maintain it. The
+  // registry reads it before it accepts a pull request about us.
+  app.get("/.well-known/public-agents.json", c =>
+    c.json({
+      version: 1,
+      agents: [],
+      tools: ["livevariant"],
+      maintainers: ["mkrens"]
+    })
+  );
   app.get("/.well-known/mcp/server-card.json", c => c.json(mcpServerCard(c)));
   app.get("/.well-known/mcp.json", c => c.json(mcpServerCard(c)));
 
