@@ -176,6 +176,15 @@ export function AppLayout() {
           </span>
           {hostedPoliciesApply() && (
             <>
+              {/* The agent colony is livevariant.com's, like the policies:
+                  a self-hosted dashboard has no reason to point at it. */}
+              <span aria-hidden="true">·</span>
+              <a
+                className="underline transition-colors hover:text-foreground"
+                href="https://livevariant.ai"
+              >
+                Agents growing LiveVariant
+              </a>
               <span aria-hidden="true">·</span>
               <Link
                 className="underline transition-colors hover:text-foreground"
