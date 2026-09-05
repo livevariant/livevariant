@@ -111,7 +111,7 @@ describe("the Public Agents ownership file", () => {
       version: 1,
       agents: [],
       tools: ["livevariant"],
-      maintainers: ["mkrens"]
+      maintainers: ["michi88"]
     });
   });
 });

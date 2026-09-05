@@ -367,7 +367,7 @@ export function createApi(options: ApiOptions): Hono {
       version: 1,
       agents: [],
       tools: ["livevariant"],
-      maintainers: ["mkrens"]
+      maintainers: ["michi88"]
     })
   );
   app.get("/.well-known/mcp/server-card.json", c => c.json(mcpServerCard(c)));
