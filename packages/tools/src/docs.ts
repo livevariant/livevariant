@@ -470,9 +470,8 @@ const LIMITS_SECTION = `## Limits worth knowing
 /* ------------------------------------------------------------------ */
 /* Renderers.                                                          */
 
-export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
-  const origin = apiUrl.replace(/\/+$/, "");
-  const body = [
+function skillBody(origin: string, serveOrigin = origin): string {
+  return [
     `# LiveVariant`,
     ``,
     `LiveVariant serves A/B test variants with one adaptive model (joint linear`,
@@ -493,7 +492,7 @@ export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
     ``,
     PARAMS_SECTION,
     ``,
-    URL_FORM_SECTION.replaceAll("{origin}", origin),
+    URL_FORM_SECTION.replaceAll("{origin}", serveOrigin),
     ``,
     FLOW_SECTION,
     ``,
@@ -503,7 +502,7 @@ export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
     ``,
     EMAIL_SECTION,
     ``,
-    WEBSITE_SECTION.replaceAll("{origin}", origin),
+    WEBSITE_SECTION.replaceAll("{origin}", serveOrigin),
     ``,
     IMAGES_SECTION,
     ``,
@@ -516,6 +515,10 @@ export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
     LIMITS_SECTION,
     ``
   ].join("\n");
+}
+
+export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
+  const origin = apiUrl.replace(/\/+$/, "");
   const frontmatter = [
     `---`,
     `name: livevariant`,
@@ -524,7 +527,7 @@ export function renderSkillMd(apiUrl = "https://livevariant.com"): string {
     `---`,
     ``
   ].join("\n");
-  return frontmatter + body;
+  return frontmatter + skillBody(origin);
 }
 
 /**
@@ -555,6 +558,8 @@ test's stats secret.
   tool as \`POST ${base}/api/v1/<tool-name>\`, plain JSON. The canonical
   paths hyphenate the tool names (\`/api/v1/build-test\`), but the
   underscore spelling (\`/api/v1/build_test\`) is accepted too.
+- [Everything in one file](${base}/llms-full.txt): this index and the full
+  skill document in one fetch.
 - Source (AGPL, self-hostable): https://github.com/livevariant/livevariant
 
 ## The capability ladder
@@ -583,6 +588,19 @@ show visitors a continue screen until the domain is verified under Settings.
 
 Hosted service terms: ${base}/terms · privacy: ${base}/privacy
 `;
+}
+
+/**
+ * llms-full.txt (the llmstxt.org companion convention): the llms.txt
+ * index followed by the complete skill document, for a reader that
+ * takes one file instead of following links. Same origin split as
+ * renderLlmsTxt; the skill body renders without its frontmatter, which
+ * describes an installable skill and would be wrong mid-document.
+ */
+export function renderLlmsFullTxt(origin: string, serveUrl?: string): string {
+  const base = origin.replace(/\/+$/, "");
+  const serve = (serveUrl ?? origin).replace(/\/+$/, "");
+  return `${renderLlmsTxt(origin, serveUrl)}\n---\n\n${skillBody(base, serve)}`;
 }
 
 /**

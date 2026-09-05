@@ -386,6 +386,14 @@ describe("agent discovery routes", () => {
     expect(txt).toContain("https://serve.example/s?v=");
     expect(txt).toContain("https://serve.example/sdk.js");
     expect(txt).not.toContain("https://serve.example/mcp");
+    // The combined document keeps the same split all the way through the
+    // embedded skill: no campaign link falls back to the docs origin.
+    const full = await (
+      await twoDomain.request("https://main.example/llms-full.txt")
+    ).text();
+    expect(full).toContain("https://main.example/api/v1/");
+    expect(full).toContain("https://serve.example/sdk.js");
+    expect(full).not.toContain("https://main.example/sdk.js");
   });
 
   it("serves llms.txt and the skill, rendered for this origin", async () => {
@@ -401,6 +409,16 @@ describe("agent discovery routes", () => {
     const body = await skill.text();
     expect(body).toContain("# LiveVariant");
     expect(body).toContain("https://self.example/api/v1/");
+  });
+
+  it("serves llms-full.txt: the index plus the whole skill in one fetch", async () => {
+    const res = await app.request("https://self.example/llms-full.txt");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("markdown");
+    const full = await res.text();
+    expect(full).toContain("/skills/livevariant/SKILL.md");
+    expect(full).toContain("## Every config parameter");
+    expect(full).toContain("https://self.example/api/v1/");
   });
 });
 

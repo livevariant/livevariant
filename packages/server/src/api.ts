@@ -11,6 +11,7 @@ import {
 import { SERVER_VERSION } from "./version.js";
 import {
   renderAuthMd,
+  renderLlmsFullTxt,
   renderLlmsTxt,
   renderRobotsTxt,
   renderSkillMd,
@@ -277,6 +278,11 @@ export function createApi(options: ApiOptions): Hono {
   // domain when one is configured.
   app.get("/llms.txt", c =>
     c.text(renderLlmsTxt(baseOf(c.req.url), serveUrl), 200, {
+      "content-type": "text/markdown; charset=utf-8"
+    })
+  );
+  app.get("/llms-full.txt", c =>
+    c.text(renderLlmsFullTxt(baseOf(c.req.url), serveUrl), 200, {
       "content-type": "text/markdown; charset=utf-8"
     })
   );

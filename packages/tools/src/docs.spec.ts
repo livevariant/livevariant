@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { renderLlmsTxt, renderMcpInstructions, renderSkillMd } from "./docs.js";
+import {
+  renderLlmsFullTxt,
+  renderLlmsTxt,
+  renderMcpInstructions,
+  renderSkillMd
+} from "./docs.js";
 import { TOOLS } from "./tools.js";
 import { IDENTITY_EXCLUDED } from "@livevariant/core";
 
@@ -57,6 +62,32 @@ describe("the agent docs source", () => {
     // Nothing readable leaked onto the serve domain.
     expect(txt).not.toContain("https://serve.example/mcp");
     expect(txt).not.toContain("https://serve.example/skills");
+  });
+
+  it("renders llms-full.txt as the index plus the whole skill, one origin", () => {
+    const full = renderLlmsFullTxt(
+      "https://main.example",
+      "https://serve.example"
+    );
+    // The index came through with its domain split intact…
+    expect(full).toContain("https://main.example/skills/livevariant/SKILL.md");
+    expect(full).toContain("https://serve.example/sdk.js");
+    expect(full).not.toContain("https://serve.example/mcp");
+    // …and the skill body's campaign-carried examples went to the serve
+    // domain too, not the docs origin it renders against standalone.
+    expect(full).not.toContain("https://main.example/sdk.js");
+    expect(full).not.toContain("https://main.example/s?v=");
+    // …and so did the complete skill body, minus its frontmatter.
+    for (const heading of [
+      "## The three shapes of a test",
+      "## Every config parameter",
+      "## Saving a test to an account"
+    ]) {
+      expect(full).toContain(heading);
+    }
+    expect(full).toContain("https://main.example/api/v1/");
+    expect(full).not.toContain("{origin}");
+    expect(full).not.toContain("name: livevariant");
   });
 
   it("keeps the MCP instructions aligned with the skill's core claims", () => {
