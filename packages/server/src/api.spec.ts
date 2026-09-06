@@ -760,4 +760,97 @@ describe("agent discovery well-knowns", () => {
     );
     expect(markdown.headers.get("link")).toContain("api-catalog");
   });
+
+  /**
+   * The hosted service answers on livevariant.com AND livevariant.link
+   * (the serving domain), same shell on both, and search engines indexed
+   * the product under .link. appUrl names the real address: the shell
+   * carries a canonical link to it and the crawl documents point there,
+   * whichever hostname the crawler arrived on.
+   */
+  it("names the canonical origin on every hostname when appUrl is set", async () => {
+    const withCanonical = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      appUrl: "https://dashboard.example/",
+      spaFetch: async () =>
+        new Response(
+          "<html><head><title>x</title></head><body></body></html>",
+          {
+            headers: { "content-type": "text/html", "content-length": "63" }
+          }
+        )
+    });
+    const html = await withCanonical.request("https://serve.example/", {
+      headers: { accept: "text/html" }
+    });
+    expect(html.status).toBe(200);
+    const body = await html.text();
+    expect(body).toContain(
+      '<link rel="canonical" href="https://dashboard.example/" /></head>'
+    );
+    expect(html.headers.get("content-length")).not.toBe("63");
+    // Still the agent affordances of the homepage.
+    expect(html.headers.get("link")).toContain("api-catalog");
+
+    const xml = await (
+      await withCanonical.request("https://serve.example/sitemap.xml")
+    ).text();
+    expect(xml).toContain("<loc>https://dashboard.example/</loc>");
+    expect(xml).toContain("<loc>https://dashboard.example/builder</loc>");
+    expect(xml).not.toContain("serve.example");
+
+    const robots = await (
+      await withCanonical.request("https://serve.example/robots.txt")
+    ).text();
+    expect(robots).toContain("Sitemap: https://dashboard.example/sitemap.xml");
+
+    // Markdown negotiation is unaffected: agents get the document, not
+    // the shell.
+    const markdown = await withCanonical.request("https://serve.example/", {
+      headers: { accept: "text/markdown" }
+    });
+    expect(markdown.headers.get("content-type")).toContain("text/markdown");
+  });
+
+  it("keeps a mounted deployment's prefix once in its canonical addresses", async () => {
+    const mounted = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      appUrl: "https://dashboard.example",
+      basePath: "/lv",
+      spaFetch: async () =>
+        new Response("<html><head></head><body>shell</body></html>", {
+          headers: { "content-type": "text/html" }
+        })
+    });
+    const html = await mounted.request("https://serve.example/lv/", {
+      headers: { accept: "text/html" }
+    });
+    expect(html.status).toBe(200);
+    expect(await html.text()).toContain(
+      '<link rel="canonical" href="https://dashboard.example/lv/" />'
+    );
+    const xml = await (
+      await mounted.request("https://serve.example/lv/sitemap.xml")
+    ).text();
+    expect(xml).toContain("<loc>https://dashboard.example/lv/</loc>");
+    expect(xml).toContain("<loc>https://dashboard.example/lv/builder</loc>");
+    expect(xml).not.toContain("/lv/lv");
+  });
+
+  it("leaves the shell alone when no appUrl is configured", async () => {
+    const oneDomain = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(7),
+      spaFetch: async () =>
+        new Response("<html><head></head><body>shell</body></html>", {
+          headers: { "content-type": "text/html" }
+        })
+    });
+    const html = await oneDomain.request("https://self.example/", {
+      headers: { accept: "text/html" }
+    });
+    expect(await html.text()).not.toContain("canonical");
+  });
 });

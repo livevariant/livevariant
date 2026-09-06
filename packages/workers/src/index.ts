@@ -231,6 +231,14 @@ export interface Env {
    */
   LV_SERVE_URL?: string;
   /**
+   * The dashboard's canonical origin, e.g. https://livevariant.com. Set
+   * it when the deployment answers on more than one hostname (the hosted
+   * service also answers on its serving domain), so the shell's pages
+   * carry a canonical link and the crawl documents name one address.
+   * Unset is the one-domain deployment: nothing changes.
+   */
+  LV_APP_URL?: string;
+  /**
    * Image hosting, on only when BOTH are present: the bucket holds the
    * bytes, the secret keys the signed URLs that are the only way to fetch
    * them. Set the secret with `wrangler secret put LV_ASSET_SECRET`
@@ -368,6 +376,7 @@ export function baseAppOptions(env: Env): AppOptions {
     allowedOrigins: listVar(env.LV_ALLOWED_ORIGINS),
     unlistedDestinations: unlistedDestinationMode(env.LV_UNLISTED_DESTINATIONS),
     serveUrl: env.LV_SERVE_URL,
+    appUrl: env.LV_APP_URL,
     apiToken: env.LV_API_TOKEN,
     gtmId: env.LV_GOOGLE_TAG_MANAGER,
     publishableKey: env.LV_PUBLISHABLE_KEY,

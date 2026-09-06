@@ -2213,6 +2213,54 @@ describe("misses: the app for people, the truth for machines", () => {
     expect(res.status).toBe(404);
   });
 
+  it("gives each fallback route its canonical address when appUrl is set", async () => {
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(3),
+      appUrl: "https://dashboard.example",
+      spaFetch: async () =>
+        new Response(
+          '<!doctype html><html><head></head><div id="root"></div>',
+          {
+            headers: { "content-type": "text/html" }
+          }
+        )
+    });
+    const res = await app.request("https://serve.example/terms?utm=x", {
+      headers: { "sec-fetch-dest": "document", accept: "text/html" }
+    });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('id="root"');
+    // The route's own path, on the canonical origin, query dropped.
+    expect(body).toContain(
+      '<link rel="canonical" href="https://dashboard.example/terms" />'
+    );
+  });
+
+  it("carries a base path once in the canonical address, not twice", async () => {
+    // A mounted deployment: the request path already has the prefix
+    // (Hono's basePath routing), so the canonical address is that path
+    // on the canonical origin, and never `/lv/lv/terms`.
+    const app = createApp({
+      store: new MemoryStore(),
+      rng: mulberry32(3),
+      appUrl: "https://dashboard.example",
+      basePath: "/lv",
+      spaFetch: async () =>
+        new Response("<html><head></head><body>shell</body></html>", {
+          headers: { "content-type": "text/html" }
+        })
+    });
+    const res = await app.request("https://serve.example/lv/terms", {
+      headers: { "sec-fetch-dest": "document", accept: "text/html" }
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain(
+      '<link rel="canonical" href="https://dashboard.example/lv/terms" />'
+    );
+  });
+
   it("404s rather than inventing a shell when the host serves no assets", async () => {
     const res = await createApp({
       store: new MemoryStore(),

@@ -65,6 +65,11 @@ import {
   type TestBackend
 } from "./service.js";
 import type { AccountsProvider } from "./accounts-port.js";
+import {
+  canonicalOriginOf,
+  canonicalUrlFor,
+  withCanonical
+} from "./canonical.js";
 import { SERVER_VERSION } from "./version.js";
 import type { StateStore } from "./store/types.js";
 import { bindCtxResolvers, type CtxResolvers } from "./ctx-resolver.js";
@@ -159,6 +164,17 @@ export interface AppOptions {
   statsStreamIntervalMs?: number;
   /** Static app-shell fetcher for the homepage. See ApiOptions.spaFetch. */
   spaFetch?: (request: Request) => Promise<Response>;
+  /**
+   * The dashboard's canonical origin (LV_APP_URL), e.g.
+   * https://livevariant.com. Matters only when the same deployment
+   * answers on more than one hostname, as the hosted service does on
+   * livevariant.link, which exists for experiment links: every page of
+   * the shell then carries `<link rel="canonical">` pointing at the same
+   * path here, and robots.txt / sitemap.xml name this origin, so search
+   * engines index the product once, at its real address. Unset (the
+   * one-domain self-host) changes nothing.
+   */
+  appUrl?: string;
   /**
    * Path prefix this app is mounted under, for deployments that do not own
    * the root of their origin: behind a reverse proxy, or embedded in a
@@ -852,6 +868,7 @@ export function createApp(options: AppOptions): Hono {
         publishableKey: options.publishableKey,
         openaiAppsChallengeToken: options.openaiAppsChallengeToken,
         spaFetch: options.spaFetch,
+        appUrl: options.appUrl,
         geo: resolveGeo,
         fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
           app.fetch(new Request(input as RequestInfo, init))) as typeof fetch
@@ -1424,7 +1441,14 @@ export function createApp(options: AppOptions): Hono {
     const shell = new URL(c.req.url);
     shell.pathname = "/";
     shell.search = "";
-    return options.spaFetch(new Request(shell, { headers: c.req.raw.headers }));
+    const page = await options.spaFetch(
+      new Request(shell, { headers: c.req.raw.headers })
+    );
+    // Same shell, one address per route: see canonical.ts.
+    const canonicalOrigin = canonicalOriginOf(options.appUrl);
+    return canonicalOrigin
+      ? withCanonical(page, canonicalUrlFor(canonicalOrigin, c.req.url))
+      : page;
   });
 
   return app;
