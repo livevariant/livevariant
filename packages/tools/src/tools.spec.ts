@@ -205,12 +205,223 @@ describe("build_test", () => {
 
   it("warns when a variant cannot be served by redirect", async () => {
     // The trap: mixing inline and redirect variants makes the serve URL
-    // 400 for EVERYONE, not just for that variant.
+    // 400 for EVERYONE, not just for that variant. The URLs still come
+    // back: the fix is a url on that variant, and the links then work.
     const out = await buildTest.handler(
       { variants: [{ url: A }, { text: "Buy now" }] },
       ctx
     );
     expect(out.warnings.join(" ")).toMatch(/cannot be served by redirect/i);
+    expect(out.urls.serve).toBe(`https://livevariant.link/s/${out.config}`);
+    expect(out.sdkSnippet).toBeUndefined();
+  });
+
+  it("hands a content-only test its SDK snippet instead of serve links", async () => {
+    // Inline variants have no redirect target, so /s can never succeed
+    // for them: returning that URL in the same shape as a redirect
+    // test's was a trap (#64). The SDK is the serving path, so the
+    // response carries that install instead, encoded config inlined.
+    const out = await buildTest.handler(
+      {
+        slots: {
+          headline: [{ text: "Ship faster" }, { text: "Ship safer" }],
+          body: [{ html: "<p>A</p>" }, { html: "<p>B</p>" }]
+        },
+        publishableKey: "pk_abcdefghijklmnopqrstuvwx"
+      },
+      ctx
+    );
+    expect(out.urls.serve).toBeUndefined();
+    expect(out.urls.serveNoAutoContext).toBeUndefined();
+    expect(out.slotLinks).toBeUndefined();
+    expect(out.emailTemplate).toBeUndefined();
+    // Click and pixel never look at url/image; manage is always there.
+    expect(out.urls.click).toBe(`https://livevariant.link/c/${out.config}`);
+    expect(out.urls.pixel).toBe(`https://livevariant.link/px/${out.config}`);
+    expect(out.urls.manage).toContain(`#${out.statsSecret}`);
+    // Nothing broken is being advertised, so nothing to warn about.
+    expect(out.warnings.join(" ")).not.toMatch(/400|cannot be served/i);
+    expect(out.sdkSnippet).toContain(
+      '<script defer src="https://livevariant.link/sdk.js" ' +
+        'data-publishable-key="pk_abcdefghijklmnopqrstuvwx"></script>'
+    );
+    expect(out.sdkSnippet).toContain(
+      `window.livevariant.sdk.createTest("${out.config}")`
+    );
+    expect(out.sdkSnippet).toContain(
+      'document.querySelector("#headline").textContent = test.slots.headline.text;'
+    );
+    expect(out.sdkSnippet).toContain(
+      'document.querySelector("#body").innerHTML = test.slots.body.html;'
+    );
+  });
+
+  it("places every inline format a mixed slot carries, not just the first", async () => {
+    // One variant is text, the other html: the SDK hands back whichever
+    // variant it chose, so a snippet that reads `.text` from both would
+    // render nothing for the html visitor.
+    const out = await buildTest.handler(
+      {
+        slots: {
+          hero: [{ text: "Plain" }, { html: "<em>Rich</em>" }],
+          "aside-note": [{ markdown: "*a*" }, { text: "b" }]
+        }
+      },
+      ctx
+    );
+    const lines = (out.sdkSnippet ?? "").split("\n").map(l => l.trim());
+    expect(lines).toContain(
+      'if (test.slots.hero.html !== undefined) document.querySelector("#hero").innerHTML = test.slots.hero.html;'
+    );
+    expect(lines).toContain(
+      'else if (test.slots.hero.text !== undefined) document.querySelector("#hero").textContent = test.slots.hero.text;'
+    );
+    // A slot name that is not an identifier is still addressed, and the
+    // markdown branch goes through the renderer the page has to supply.
+    expect(lines).toContain(
+      'if (test.slots["aside-note"].md !== undefined) document.querySelector("#aside-note").innerHTML = renderMarkdown(test.slots["aside-note"].md);'
+    );
+    expect(lines).toContain(
+      'else if (test.slots["aside-note"].text !== undefined) document.querySelector("#aside-note").textContent = test.slots["aside-note"].text;'
+    );
+    // The whole thing parses as a script body, so no branch can have
+    // swallowed the next slot's line.
+    const body = lines.slice(lines.indexOf("") + 1).join("\n");
+    expect(() => new Function(`(async () => {${body}})`)).not.toThrow();
+    // A uniform slot keeps the one-line form.
+    const uniform = await buildTest.handler(
+      { variants: [{ text: "A" }, { text: "B" }] },
+      ctx
+    );
+    expect(uniform.sdkSnippet).toContain(
+      'document.querySelector("#main").textContent = test.slots.main.text;'
+    );
+    expect(uniform.sdkSnippet).not.toContain("if (");
+    // No markdown anywhere, no renderer to point at.
+    expect(uniform.sdkSnippet).not.toContain("renderMarkdown");
+  });
+
+  it("places a markdown variant, as its source until the page supplies a renderer", async () => {
+    // The SDK hands markdown back unrendered and the page's renderer is
+    // not ours to know. A branch that did nothing left the default in
+    // place for every markdown visitor, so the placeholder shows the
+    // source instead, and the agent points it at the real renderer.
+    const out = await buildTest.handler(
+      {
+        slots: {
+          headline: [{ markdown: "# A" }, { markdown: "# B & <C>" }],
+          "aside-note": [{ text: "a" }, { markdown: "*b*" }]
+        }
+      },
+      ctx
+    );
+    const lines = (out.sdkSnippet ?? "").split("\n").map(l => l.trim());
+    expect(lines).toContain(
+      'document.querySelector("#headline").innerHTML = renderMarkdown(test.slots.headline.md);'
+    );
+    const body = lines.slice(lines.indexOf("") + 1).join("\n");
+    const run = async (slots: Record<string, unknown>) => {
+      const els: Record<string, { textContent?: string; innerHTML?: string }> =
+        { "#headline": {}, "#aside-note": {} };
+      const document = {
+        documentElement: { classList: { remove: () => undefined } },
+        querySelector: (sel: string) => els[sel]
+      };
+      const window = {
+        livevariant: { sdk: { createTest: async () => ({ slots }) } }
+      };
+      const fn = new Function(
+        "window",
+        "document",
+        `return (async () => {${body}})();`
+      );
+      await fn(window, document);
+      return els;
+    };
+    // Both visitors get their variant: the markdown one as escaped
+    // source, the text one as text.
+    const md = await run({
+      headline: { md: "# B & <C>" },
+      "aside-note": { md: "*b*" }
+    });
+    expect(md["#headline"].innerHTML).toBe("# B &amp; &lt;C&gt;");
+    expect(md["#aside-note"].innerHTML).toBe("*b*");
+    expect(md["#aside-note"].textContent).toBeUndefined();
+    const text = await run({
+      headline: { md: "# A" },
+      "aside-note": { text: "a" }
+    });
+    expect(text["#aside-note"].textContent).toBe("a");
+    expect(text["#aside-note"].innerHTML).toBeUndefined();
+  });
+
+  it("cloaks the tested elements until the swap, and never past a failure", async () => {
+    // The naive install paints the default, then flips it for every
+    // visitor assigned another variant (#84). The snippet hides only
+    // the tested selectors, from before first paint until createTest
+    // has answered, or failed, or run out of time.
+    const out = await buildTest.handler(
+      {
+        slots: {
+          headline: [{ text: "A" }, { text: "B" }],
+          "aside-note": [{ html: "<p>a</p>" }, { html: "<p>b</p>" }]
+        }
+      },
+      ctx
+    );
+    const [head, body] = (out.sdkSnippet ?? "").split("\n\n");
+    expect(head).toContain(
+      "<style>html.lv-pending #aside-note, html.lv-pending #headline { visibility: hidden; }</style>"
+    );
+    expect(head).toContain(
+      '<script>document.documentElement.classList.add("lv-pending"); ' +
+        'setTimeout(function () { document.documentElement.classList.remove("lv-pending"); }, 2000);</script>'
+    );
+    // Style and inline script precede the tag: the class is on <html>
+    // before the SDK, let alone the swap, can run.
+    expect(head.indexOf("<style>")).toBeLessThan(head.indexOf("<script>"));
+    expect(head.indexOf("<script>")).toBeLessThan(
+      head.indexOf("<script defer")
+    );
+
+    // Run the body against a stub page, once with createTest resolving
+    // and once with it rejecting: the swap lands in the first case, and
+    // the cloak comes off in both.
+    const run = async (createTest: () => Promise<unknown>) => {
+      const classes = new Set(["lv-pending"]);
+      const els: Record<string, { textContent?: string; innerHTML?: string }> =
+        { "#headline": {}, "#aside-note": {} };
+      const document = {
+        documentElement: {
+          classList: { remove: (c: string) => classes.delete(c) }
+        },
+        querySelector: (sel: string) => els[sel]
+      };
+      const window = { livevariant: { sdk: { createTest } } };
+      const fn = new Function(
+        "window",
+        "document",
+        `return (async () => {${body}})();`
+      );
+      const outcome = await fn(window, document).then(
+        () => "resolved",
+        () => "rejected"
+      );
+      return { outcome, classes, els };
+    };
+    const ok = await run(async () => ({
+      slots: { headline: { text: "B" }, "aside-note": { html: "<p>b</p>" } }
+    }));
+    expect(ok.outcome).toBe("resolved");
+    expect(ok.els["#headline"].textContent).toBe("B");
+    expect(ok.els["#aside-note"].innerHTML).toBe("<p>b</p>");
+    expect(ok.classes.has("lv-pending")).toBe(false);
+    const failed = await run(async () => {
+      throw new Error("offline");
+    });
+    expect(failed.outcome).toBe("rejected");
+    expect(failed.els["#headline"].textContent).toBeUndefined();
+    expect(failed.classes.has("lv-pending")).toBe(false);
   });
 
   it("builds an ESP template from one shared config string", async () => {
@@ -307,6 +518,33 @@ describe("inspect_test", () => {
     expect(
       out.findings.some(
         f => f.level === "error" && /never be read/.test(f.message)
+      )
+    ).toBe(true);
+  });
+
+  it("tells an SDK-served slot apart from a broken redirect slot", async () => {
+    // All-inline is a shape the SDK serves; calling its missing serve
+    // link an error was misleading (#90). Mixed really is broken.
+    const content = await buildTest.handler(
+      { variants: [{ text: "Ship faster" }, { text: "Ship safer" }] },
+      ctx
+    );
+    const served = await inspectTest.handler({ test: content.config }, ctx);
+    expect(served.findings.some(f => f.level === "error")).toBe(false);
+    expect(
+      served.findings.some(
+        f => f.level === "note" && /served by the SDK/.test(f.message)
+      )
+    ).toBe(true);
+
+    const mixed = await buildTest.handler(
+      { variants: [{ url: A }, { text: "Buy now" }] },
+      ctx
+    );
+    const broken = await inspectTest.handler({ test: mixed.config }, ctx);
+    expect(
+      broken.findings.some(
+        f => f.level === "error" && /return 400/.test(f.message)
       )
     ).toBe(true);
   });
