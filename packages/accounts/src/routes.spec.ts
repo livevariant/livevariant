@@ -935,4 +935,105 @@ describe("test status endpoint", () => {
     };
     expect(anon.org?.mine).toBe(false);
   });
+
+  it("invites a teammate on a session whose active org was never set", async () => {
+    // The production bug: a signed-in owner whose session carries no
+    // activeOrganizationId (nothing switched it) saw "Organization not
+    // found" on Invite, because Better Auth's invite-member resolves the
+    // ACTIVE org only, while our own routes fall back to the first
+    // membership. The fix passes the org explicitly, so invite acts on
+    // the org the client already resolved, no active-org required.
+    const d1 = (proxy.env as { LV_ACCOUNTS_DB: D1Database }).LV_ACCOUNTS_DB;
+    const emails: Array<{ to: string; subject: string; text: string }> = [];
+    const flow = createAccounts({
+      db: d1,
+      baseUrl: DASHBOARD,
+      secret: "e".repeat(48),
+      sendEmail: async email => {
+        emails.push(email);
+      }
+    });
+    const post = (path: string, body: unknown, cookie?: string) =>
+      flow.routes.request(`${DASHBOARD}${path}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: DASHBOARD,
+          ...(cookie ? { cookie } : {})
+        },
+        body: JSON.stringify(body)
+      });
+    const cookieOf = (res: Response, previous = "") => {
+      const set = res.headers.get("set-cookie");
+      if (!set) return previous;
+      const jar = new Map<string, string>(
+        previous
+          .split("; ")
+          .filter(Boolean)
+          .map(pair => [pair.split("=")[0], pair] as [string, string])
+      );
+      for (const part of set.split(",")) {
+        const pair = part.split(";")[0].trim();
+        if (pair.includes("=")) jar.set(pair.split("=")[0], pair);
+      }
+      return [...jar.values()].join("; ");
+    };
+
+    await post("/auth/sign-up/email", {
+      name: "solo",
+      email: "solo@example.com",
+      password: "solo-password-long"
+    });
+    const verify = emails
+      .map(e => e.text.match(/https?:\/\/\S+/)?.[0])
+      .find(Boolean)!;
+    const parsed = new URL(verify);
+    await flow.routes.request(
+      `${DASHBOARD}${parsed.pathname}${parsed.search}`,
+      {
+        headers: { origin: DASHBOARD }
+      }
+    );
+    const signIn = await post("/auth/sign-in/email", {
+      email: "solo@example.com",
+      password: "solo-password-long"
+    });
+    const cookie = cookieOf(signIn);
+
+    // First write mints the personal org. The SESSION's active org stays
+    // null (no set-active call), yet /account/me reports the org via the
+    // first-membership fallback, exactly the client's view in the bug.
+    const claim = await post(
+      "/account/keys",
+      { statsSecret: "solo-secret", label: "solo" },
+      cookie
+    );
+    expect(claim.status).toBe(201);
+    const me = await flow.routes.request(`${DASHBOARD}/account/me`, {
+      headers: { cookie }
+    });
+    const orgId = ((await me.json()) as { activeOrgId: string | null })
+      .activeOrgId;
+    expect(orgId).toBeTruthy();
+
+    // The bug: invite with no organizationId resolves the (null) active
+    // org and fails.
+    const blind = await post(
+      "/auth/organization/invite-member",
+      { email: "mate@example.com", role: "member" },
+      cookie
+    );
+    expect(blind.status).not.toBe(200);
+
+    // The fix: with the org the client already resolved, invite succeeds
+    // and the invitation email goes out.
+    emails.length = 0;
+    const invite = await post(
+      "/auth/organization/invite-member",
+      { email: "mate@example.com", role: "member", organizationId: orgId },
+      cookie
+    );
+    expect(invite.status).toBe(200);
+    expect(emails.map(e => e.subject).join()).toContain("invited you");
+  });
 });

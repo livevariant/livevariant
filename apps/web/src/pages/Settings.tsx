@@ -469,7 +469,15 @@ function OrganizationCard({ account }: { account: AccountState }) {
               onSubmit={event => {
                 event.preventDefault();
                 setNotice(null);
-                void inviteMember({ email: inviteEmail, role: inviteRole })
+                if (!activeOrgId) {
+                  surface(new Error("no active organization"));
+                  return;
+                }
+                void inviteMember({
+                  email: inviteEmail,
+                  role: inviteRole,
+                  organizationId: activeOrgId
+                })
                   .then(() => {
                     setInviteEmail("");
                     reload();
