@@ -338,7 +338,9 @@ loop yourself instead of handing snippets to a human:
    (\`createTest("<encoded>")\`); with the tag on the page no options are
    needed, and without it pass \`{ serverUrl }\`. \`createTest\` waits briefly
    for a tag-manager-loaded tag on its own, so load order is not your
-   problem.
+   problem. That swap lands after the assignment does, so the visitor sees
+   the original content first unless you handle it — read the next section
+   BEFORE you paste this onto a page whose hero you are testing.
 4. Image tests on a page: prefer
    \`<img data-lv-src="{origin}/s/<config>">\` (the tag fills src with the
    identity attached: one fetch, no flicker); a bare \`src\` also works and is
@@ -346,6 +348,50 @@ loop yourself instead of handing snippets to a human:
 5. Conversions: GA events matching \`rewardEvents\` count automatically; call
    \`test.trackConversion()\` (or \`window.livevariant.sdk.trackConversion()\`)
    at conversion points you wire yourself.`;
+
+const PAINT_SECTION = `## Swapping content without paying for it in LCP
+
+An in-page test decides in the browser, so the tested element cannot hold
+its final content until the decision lands. That cost is real and the only
+thing you choose is where to put it: in a visible flicker, or in Largest
+Contentful Paint. While the assignment happens in the page there is no
+third option, and the docs above will happily sell you the first one.
+
+Know what the chain costs before you design around a guess. The tag is a
+deferred script and \`/choose\` cannot start until that bundle has been
+fetched AND parsed, so the two latencies add rather than overlap; on a
+deliberately slow client the whole path has been measured at ~2.5 s. Three
+rules follow:
+
+1. **Never hide the tested element without a deadline.** Hiding it until
+   the variant lands means it does not paint until the variant lands, and
+   if it is your hero then your LCP simply *is* the assignment latency plus
+   a frame — measured on a synthetic page, 472 ms of LCP at 400 ms of
+   assignment latency and 1272 ms at 1200 ms. How fast your HTML is stops
+   mattering.
+2. **Size the failsafe reveal from a measurement, then re-measure it.** A
+   failsafe shorter than your real assignment latency is the flicker bug on
+   a timer: it reveals, the original paints, the variant arrives and swaps
+   in front of the visitor. \`setTimeout\` counts from when your head script
+   runs and not from navigation start, so the margin is smaller than it
+   reads, and a margin that held last month is not a margin that holds on a
+   bad connection. State the cost you accepted: a visitor whose SDK never
+   answers waits the whole failsafe for that element.
+3. **Reserve the TALLEST variant's height, not a plausible one.** A
+   \`min-height\` any variant can exceed buys no CLS at all, and it reads in
+   a diff as though it bought something.
+
+\`preconnect\` to the tag's origin does not fix this: the assignment goes to
+the origin the bundle already came down, so there is no handshake left to
+remove and the fetch-then-parse chain is untouched.
+
+**The way out is to not decide in the browser.** A redirect serve
+(\`/s\`, \`/c\`) assigns during the navigation, so the document that paints is
+already the assigned one: no flicker, no cloak, no failsafe, at the cost of
+one hop before the page starts. Email tests and \`data-lv-src\` images work
+the same way. Reach for the in-page swap when you are testing a component
+*inside* a page the visitor is already on; reach for a redirect when the
+thing you are testing is the page.`;
 
 const IMAGES_SECTION = `## No image variants yet? Make them
 
@@ -503,6 +549,8 @@ function skillBody(origin: string, serveOrigin = origin): string {
     EMAIL_SECTION,
     ``,
     WEBSITE_SECTION.replaceAll("{origin}", serveOrigin),
+    ``,
+    PAINT_SECTION,
     ``,
     IMAGES_SECTION,
     ``,
