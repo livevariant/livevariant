@@ -333,17 +333,26 @@ rules follow:
    `min-height` any variant can exceed buys no CLS at all, and it reads in
    a diff as though it bought something.
 
-`preconnect` to the tag's origin does not fix this: the assignment goes to
-the origin the bundle already came down, so there is no handshake left to
-remove and the fetch-then-parse chain is untouched.
+`preconnect` to the tag's origin cannot remove the serial
+SDK-then-assignment dependency: `/choose` goes to the origin the bundle
+already came down, so there is no second handshake to save and the
+fetch-then-parse chain is untouched. (It can still shorten the first
+cross-origin fetch of `sdk.js` itself, by doing DNS and connection setup
+early — a different and smaller win.)
 
-**The way out is to not decide in the browser.** A redirect serve
-(`/s`, `/c`) assigns during the navigation, so the document that paints is
-already the assigned one: no flicker, no cloak, no failsafe, at the cost of
-one hop before the page starts. Email tests and `data-lv-src` images work
-the same way. Reach for the in-page swap when you are testing a component
-*inside* a page the visitor is already on; reach for a redirect when the
-thing you are testing is the page.
+**The way out is to not decide in the browser.** An `/s` redirect serve
+assigns during the navigation, so the document that paints is already the
+assigned one: no flicker, no cloak, no failsafe, at the cost of one hop
+before the page starts. `/s` is the page-level route — do **not** reach for
+`/c` here. `/c` rewards as well as assigns, so using it as an entry URL
+books a conversion for every visitor who merely arrives; keep it for real
+conversion clicks. Email tests work the same way as `/s`. `data-lv-src`
+images are a partial case and not an equal one: they save the id-less first
+fetch, but the deferred tag still has to run before `src` is set, so a hero
+image behind one can stay blank for exactly the reasons above — reserve its
+box. Reach for the in-page swap when you are testing a component *inside* a
+page the visitor is already on; reach for `/s` when the thing you are
+testing is the page.
 
 ## No image variants yet? Make them
 
