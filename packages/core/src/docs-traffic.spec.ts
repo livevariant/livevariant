@@ -20,12 +20,15 @@
  *     2%/+10% 3750 (44)   2%/+25% 3250 (55)   2%/+50% 1500 (60)
  *     5%/+10% 2250 (46)   5%/+25% 1250 (59)   5%/+50%  750 (60)
  *    10%/+10% 1500 (51)  10%/+25% 1000 (58)  10%/+50%  500 (60)
- *   payoff, adaptive vs fixed 50/50 conversions (200 runs):
- *     5%/+25% n=2000 115.7 vs 111.6; n=10000 594.0 vs 561.6
- *     5%/+50% n=2000 137.2 vs 124.0; n=10000 718.6 vs 624.1
+ *   payoff, adaptive vs fixed 50/50 conversions (200 paired runs):
+ *     5%/+25% n=2000 114.9 vs 111.6; n=10000 595.1 vs 561.6
+ *     5%/+50% n=2000 135.7 vs 124.0; n=10000 718.5 vs 624.1
  * Medians move by a poll step or two between seed sets: an earlier run
- * with different seeds put 2%/+25% at 2250 rather than 3250, and every
- * payoff figure within 0.3 points of the above.
+ * with different seeds put 2%/+25% at 2250 rather than 3250. The payoff
+ * figures above are the COMMON RANDOM NUMBERS version; an earlier
+ * unpaired run of the same grid overstated the small-lift rows by up to
+ * a point (2%/+25% at n=2000 read +2.4% unpaired against +1.2% paired),
+ * which is why the pairing is worth its extra seed stream.
  */
 import { appendFileSync } from "node:fs";
 import { describe, it, vi } from "vitest";
@@ -43,16 +46,26 @@ function fresh(slotSizes: number[]): DerivedState {
   return newDerivedState({ dim: dimForShape(slotSizes), slotSizes });
 }
 
-/** One adaptive assignment: the real chooser, the real update. */
+/**
+ * One adaptive assignment: the real chooser, the real update.
+ *
+ * Assignment randomness and outcome randomness are separate streams so
+ * that two allocation policies can be run over the SAME visitors. The
+ * adaptive policy consumes many draws inside `choose` and a fixed split
+ * consumes none, so one shared stream would hand the two policies
+ * different coin flips and let that noise masquerade as an allocation
+ * effect.
+ */
 function play(
   state: DerivedState,
   rates: readonly number[],
-  rng: Rng
+  assignRng: Rng,
+  outcomeRng: Rng = assignRng
 ): boolean {
-  const { cell, featIdx } = choose(state, [], rng);
+  const { cell, featIdx } = choose(state, [], assignRng);
   state.cells[cell].pulls += 1;
   observe(state.model, featIdx);
-  const converted = rng() < rates[cell];
+  const converted = outcomeRng() < rates[cell];
   if (converted) {
     state.cells[cell].successes += 1;
     reward(state.model, featIdx);
@@ -112,10 +125,15 @@ describe.skipIf(!process.env.LV_SIMS)(
             break;
           }
         }
+        // The quantiles below describe the runs that STOPPED. A run still
+        // unresolved at CAP is censored: counted in the line, absent from
+        // the quantiles, and so a censored row's median understates the
+        // wait. Anything quoting this table must say the censored count.
         at.sort((x, y) => x - y);
         say(
           `base ${(base * 100).toFixed(0)}% lift +${(lift * 100).toFixed(0)}% | ` +
-            `stopped ${stopped}/${RUNS} | correct ${correct}/${RUNS} | ` +
+            `stopped ${stopped}/${RUNS} (censored ${RUNS - stopped}) | ` +
+            `correct ${correct}/${RUNS} | ` +
             `median ${quantile(at, 0.5)} | p25 ${quantile(at, 0.25)} | ` +
             `p75 ${quantile(at, 0.75)}`
         );
@@ -130,24 +148,38 @@ describe.skipIf(!process.env.LV_SIMS)(
         for (const n of [500, 2000, 10_000]) {
           let adaptive = 0;
           let fixed = 0;
+          const diffs: number[] = [];
           for (let s = 0; s < SIMS; s++) {
+            const before = { a: adaptive, f: fixed };
+            // Common random numbers: both policies see the identical
+            // sequence of per-visitor uniforms, so the only difference
+            // between them is which arm each visitor was sent to.
             const stateA = fresh([2]);
-            const rngA = mulberry32(2000 + s * 53);
-            for (let t = 0; t < n; t++)
-              if (play(stateA, rates, rngA)) adaptive++;
-            // The same visitors, split evenly and never reallocated.
-            const rngF = mulberry32(2000 + s * 53);
+            const assignRng = mulberry32(7000 + s * 11);
+            const outcomeA = mulberry32(2000 + s * 53);
             for (let t = 0; t < n; t++) {
-              const cell = t % 2;
-              if (rngF() < rates[cell]) fixed++;
+              if (play(stateA, rates, assignRng, outcomeA)) adaptive++;
             }
+            const outcomeF = mulberry32(2000 + s * 53);
+            for (let t = 0; t < n; t++) {
+              if (outcomeF() < rates[t % 2]) fixed++;
+            }
+            // Paired difference for THIS pair of runs: with common random
+            // numbers the pairing is real, so its spread is the honest
+            // uncertainty on the gain.
+            diffs.push(adaptive - before.a - (fixed - before.f));
           }
           const a = adaptive / SIMS;
           const f = fixed / SIMS;
+          const mean = diffs.reduce((x, y) => x + y, 0) / SIMS;
+          const variance =
+            diffs.reduce((acc, d) => acc + (d - mean) ** 2, 0) / (SIMS - 1);
+          const se = Math.sqrt(variance / SIMS);
           say(
             `base ${(base * 100).toFixed(0)}% lift +${(lift * 100).toFixed(0)}% ` +
               `n=${n}: adaptive ${a.toFixed(1)} vs fixed ${f.toFixed(1)} ` +
-              `(${(((a - f) / f) * 100).toFixed(1)}%, ${(a - f).toFixed(1)} absolute)`
+              `(${(((a - f) / f) * 100).toFixed(1)}%, ${(a - f).toFixed(1)} absolute, ` +
+              `paired mean ${mean.toFixed(2)} +/- ${(2 * se).toFixed(2)})`
           );
         }
       }
