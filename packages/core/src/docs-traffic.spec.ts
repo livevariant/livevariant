@@ -6,7 +6,9 @@
  *      assignments), how many assignments until canStop first turns true,
  *      and how often is the arm it names actually the better one?
  *  (2) PAYOFF: over the SAME traffic, how many conversions does the
- *      adaptive allocation earn versus a frozen 50/50 split?
+ *      adaptive allocation earn versus a frozen 50/50 split? Each
+ *      visitor-count row stands alone — an n=2000 row is 200 runs of
+ *      2,000 visitors, never 2,000 on top of a preceding 500.
  *
  * Nothing here is mocked: choose/observe/reward is the shipped model and
  * analyzeOutcomes is the shipped decision. Results are appended to a file
@@ -145,29 +147,36 @@ describe.skipIf(!process.env.LV_SIMS)(
       say(`--- PAYOFF (sims=${SIMS}) ---`);
       for (const [base, lift] of GRID) {
         const rates = [base, base * (1 + lift)];
+        // Every visitor count is its own independent experiment: the
+        // totals below are declared HERE, inside this loop, so an n=2000
+        // row is 200 runs of 2,000 visitors and nothing else. Read the
+        // scope carefully before quoting a row.
         for (const n of [500, 2000, 10_000]) {
           let adaptive = 0;
           let fixed = 0;
           const diffs: number[] = [];
           for (let s = 0; s < SIMS; s++) {
-            const before = { a: adaptive, f: fixed };
             // Common random numbers: both policies see the identical
             // sequence of per-visitor uniforms, so the only difference
             // between them is which arm each visitor was sent to.
             const stateA = fresh([2]);
             const assignRng = mulberry32(7000 + s * 11);
             const outcomeA = mulberry32(2000 + s * 53);
+            let runAdaptive = 0;
             for (let t = 0; t < n; t++) {
-              if (play(stateA, rates, assignRng, outcomeA)) adaptive++;
+              if (play(stateA, rates, assignRng, outcomeA)) runAdaptive++;
             }
             const outcomeF = mulberry32(2000 + s * 53);
+            let runFixed = 0;
             for (let t = 0; t < n; t++) {
-              if (outcomeF() < rates[t % 2]) fixed++;
+              if (outcomeF() < rates[t % 2]) runFixed++;
             }
+            adaptive += runAdaptive;
+            fixed += runFixed;
             // Paired difference for THIS pair of runs: with common random
             // numbers the pairing is real, so its spread is the honest
             // uncertainty on the gain.
-            diffs.push(adaptive - before.a - (fixed - before.f));
+            diffs.push(runAdaptive - runFixed);
           }
           const a = adaptive / SIMS;
           const f = fixed / SIMS;
