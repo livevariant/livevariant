@@ -367,7 +367,13 @@ export async function fullOrganization(
 export async function inviteMember(input: {
   email: string;
   role: "member" | "admin";
+  organizationId: string;
 }): Promise<void> {
+  // organizationId is passed explicitly: without it Better Auth resolves
+  // the invite against the session's ACTIVE organization, which is null
+  // until a switch happens, so a fresh session's invite fails with
+  // "Organization not found". Every other org call here is already
+  // explicit about which org it acts on; this matches them.
   await json(
     await fetch("/auth/organization/invite-member", {
       method: "POST",

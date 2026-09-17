@@ -489,6 +489,61 @@ describe("the settings page", () => {
     expect(snippets).toContain(`data-publishable-key="${PK}"`);
     expect(snippets).toContain("window.livevariant.sdk.createTest");
   });
+
+  it("invites a teammate against the resolved org, not the null active org", async () => {
+    // Guards the client half of the "Organization not found" fix: the
+    // invite must carry the org the page resolved, or the server falls
+    // back to the (null) session active org and fails.
+    let inviteBody: Record<string, unknown> | null = null;
+    stubServer({
+      "/account/me": () =>
+        Response.json({
+          userId: "u1",
+          activeOrgId: "org-1",
+          orgs: [{ id: "org-1", name: "Personal" }]
+        }),
+      "/auth/organization/get-full-organization": () =>
+        Response.json({
+          id: "org-1",
+          name: "Personal",
+          members: [
+            {
+              id: "m1",
+              role: "owner",
+              user: { name: "Owner", email: "owner@example.com" }
+            }
+          ],
+          invitations: []
+        }),
+      "/auth/organization/invite-member": init => {
+        inviteBody = JSON.parse(String(init?.body ?? "{}"));
+        return Response.json({});
+      }
+    });
+    const container = render("/settings");
+    await until(
+      () => container.querySelector('input[aria-label="Invite email"]') !== null
+    );
+    const email = container.querySelector(
+      'input[aria-label="Invite email"]'
+    ) as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value"
+    )!.set!;
+    setter.call(email, "mate@example.com");
+    email.dispatchEvent(new Event("input", { bubbles: true }));
+    const invite = [...container.querySelectorAll("button")].find(
+      button => button.textContent?.trim() === "Invite"
+    )!;
+    invite.click();
+    await until(() => inviteBody !== null);
+    expect(inviteBody).toEqual({
+      email: "mate@example.com",
+      role: "member",
+      organizationId: "org-1"
+    });
+  });
 });
 
 describe("the org switcher", () => {
