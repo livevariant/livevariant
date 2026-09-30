@@ -76,7 +76,7 @@ shape decides which variant fields you fill and which URLs you hand out.
 | ------------------- | ---------------- | ---------------------------------------------------------------------------- |
 | **Email / image**   | \`image\` (+ optional \`url\` click destination) | The \`serveNoAutoContext\` URL in an \`<img>\`, the \`clickNoAutoContext\` URL around it, the pixel for conversions |
 | **Page redirect**   | \`url\` per variant | ONE serve URL that 302s each visitor to their sticky page; ideal for ads, bio links, QR codes |
-| **Website content** | \`text\` / \`html\` / \`md\` | The encoded config, served on the page through the SDK or the tag (see "Running a test on a website") |
+| **Website content** | \`text\` / \`html\` / \`md\` | The encoded config, served on the page through the SDK or the tag: \`build_test\` returns the install as \`sdkSnippet\` and no serve URL, since a redirect cannot carry inline content (see "Running a test on a website") |
 
 Mixing fields is allowed (a variant with both \`image\` and \`url\` serves the
 image and clicks through to the url), but keep one shape per test unless you
@@ -317,7 +317,8 @@ You are often the same agent that edits the site's code, so run the whole
 loop yourself instead of handing snippets to a human:
 
 1. \`build_test\` with \`text\` (or \`html\`/\`md\`) variants; keep the returned
-   \`config\` (the encoded string).
+   \`config\` (the encoded string). The response's \`sdkSnippet\` has steps
+   2 and 3 pre-filled for this exact test.
 2. Put the tag in \`<head>\` once:
    \`<script defer src="{origin}/sdk.js" data-publishable-key="pk_..."></script>\`
    The tag sets the page config (\`window.livevariant = { config, sdk }\`),
@@ -330,8 +331,12 @@ loop yourself instead of handing snippets to a human:
    included), never a lookalike rebuilt from slots:
 
    \`\`\`js
-   const test = await window.livevariant.sdk.createTest("<encoded>");
-   document.querySelector("#headline").textContent = test.slots.headline.text;
+   try {
+     const test = await window.livevariant.sdk.createTest("<encoded>");
+     document.querySelector("#headline").textContent = test.slots.headline.text;
+   } finally {
+     document.documentElement.classList.remove("lv-pending");
+   }
    \`\`\`
 
    Bundled apps use \`npm i @livevariant/sdk\` and the same call
@@ -339,6 +344,23 @@ loop yourself instead of handing snippets to a human:
    needed, and without it pass \`{ serverUrl }\`. \`createTest\` waits briefly
    for a tag-manager-loaded tag on its own, so load order is not your
    problem.
+
+   Hide the tested elements until then, or every visitor assigned a
+   non-default variant reads the default first and watches it flip
+   (\`createTest\` takes a round trip: measured at ~0.4 s warm, ~1.4 s
+   cold). Before the tag, in \`<head>\`: a style that hides ONLY the
+   tested selectors while \`<html>\` carries \`lv-pending\`, an inline
+   script that adds the class (before first paint) and removes it after
+   2 s regardless (1 s proved too short: the failsafe fired, then the
+   swap flipped the page anyway); the \`finally\` above removes it as soon
+   as the swap has run, or failed. \`sdkSnippet\` carries all of this.
+
+   \`md\` variants come back from \`createTest\` as markdown source: the SDK
+   does not render it, and the page's renderer is not ours to know. A
+   test with markdown variants gets a \`renderMarkdown\` placeholder in
+   \`sdkSnippet\` that shows the source as text; point it at the page's
+   own renderer (\`marked.parse\`, \`markdownit().render\`, ...) before the
+   test goes live, or use \`html\` variants and skip the renderer.
 4. Image tests on a page: prefer
    \`<img data-lv-src="{origin}/s/<config>">\` (the tag fills src with the
    identity attached: one fetch, no flicker); a bare \`src\` also works and is

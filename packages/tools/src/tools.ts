@@ -185,6 +185,103 @@ function serveOriginOf(context: ToolContext, override?: string): string {
   );
 }
 
+/**
+ * How long the tested elements stay hidden if createTest has not
+ * answered: after this the page shows its defaults and the swap, if it
+ * still comes, is visible. One second proved too short in the field
+ * (the failsafe fired, then the variant flipped in late, which is the
+ * bug again); two seconds kept every measured trace clean (#84).
+ */
+const CLOAK_TIMEOUT_MS = 2000;
+
+/**
+ * The on-page install for a test only the SDK can serve, in the shape
+ * the skill teaches: the tag once in <head>, then createTest with the
+ * ENCODED config so the page serves exactly this test. The tag takes
+ * its serverUrl from wherever it was loaded, so the serve origin rides
+ * on the script src and createTest needs no options. Then, per slot,
+ * where the chosen variant's content lands. A slot whose variants all
+ * carry the same inline format gets one line; a slot that mixes them
+ * (one variant text, another html) gets a line per format, guarded on
+ * the property the chosen variant actually has, since the SDK hands
+ * back the variant as built and a line that reads `.text` from an
+ * html-only variant renders nothing.
+ *
+ * Markdown is the one format the SDK hands back unrendered, and the
+ * page's renderer is not ours to know, so a test with markdown
+ * variants gets a `renderMarkdown` placeholder to point at it. The
+ * placeholder shows the source as text: a markdown visitor then sees
+ * their variant, unstyled, rather than the default (a branch that did
+ * nothing left the default in place, the flicker bug without the
+ * flicker).
+ *
+ * The tested elements are cloaked until the swap: without that, every
+ * visitor assigned a non-default variant reads the default first and
+ * then watches it flip (measured at 0.4 s warm, 1.4 s cold in #84).
+ * The class goes on <html> before first paint, the style hides only
+ * the tested selectors so the rest of the page renders, the swap
+ * reveals in `finally` so a failed createTest still shows the page,
+ * and a timer bounds the wait.
+ */
+function sdkSnippet(
+  serveOrigin: string,
+  encoded: string,
+  entries: Array<[string, Variant[]]>,
+  publishableKey?: string
+): string {
+  const key = publishableKey ? ` data-publishable-key="${publishableKey}"` : "";
+  const uncloak = `document.documentElement.classList.remove("lv-pending")`;
+  const cloaked = entries
+    .map(([slot]) => `html.lv-pending #${slot}`)
+    .join(", ");
+  const render = entries.flatMap(([slot, variants]) => {
+    const chosen = /^[a-z_][a-z0-9_]*$/.test(slot)
+      ? `test.slots.${slot}`
+      : `test.slots["${slot}"]`;
+    const target = `document.querySelector("#${slot}")`;
+    const place = (format: "text" | "html" | "md"): string =>
+      format === "html"
+        ? `${target}.innerHTML = ${chosen}.html;`
+        : format === "md"
+          ? `${target}.innerHTML = renderMarkdown(${chosen}.md);`
+          : `${target}.textContent = ${chosen}.text;`;
+    // Richest first: a variant carrying two of these means the earlier
+    // one is the fuller rendering of the same content.
+    const formats = (["html", "md", "text"] as const).filter(f =>
+      variants.some(v => v[f] !== undefined)
+    );
+    if (formats.length <= 1) return [place(formats[0] ?? "text")];
+    // Each branch is one statement, so none swallows the next slot's
+    // line as its body.
+    return formats.map((format, i) => {
+      const guard = `${chosen}.${format} !== undefined`;
+      const prefix = i === 0 ? `if (${guard}) ` : `else if (${guard}) `;
+      return prefix + place(format);
+    });
+  });
+  const markdown = entries.some(([, variants]) =>
+    variants.some(v => v.md !== undefined)
+  )
+    ? [
+        `// Markdown variants render through this: point it at the page's own renderer (marked.parse, markdownit().render, ...). Until then the source shows as text.`,
+        `const renderMarkdown = md => md.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);`
+      ]
+    : [];
+  return [
+    `<style>${cloaked} { visibility: hidden; }</style>`,
+    `<script>document.documentElement.classList.add("lv-pending"); setTimeout(function () { ${uncloak}; }, ${CLOAK_TIMEOUT_MS});</script>`,
+    `<script defer src="${serveOrigin}/sdk.js"${key}></script>`,
+    ``,
+    ...markdown,
+    `try {`,
+    `  const test = await window.livevariant.sdk.createTest("${encoded}");`,
+    ...render.map(line => `  ${line}`),
+    `} finally {`,
+    `  ${uncloak};`,
+    `}`
+  ].join("\n");
+}
+
 // ---------------------------------------------------------------------------
 
 const buildTestInputBase = z.object({
@@ -339,9 +436,28 @@ export const buildTest = defineTool({
         "Where the test's state will live; null means first-request placement."
       ),
     urls: z.object({
-      serve: z.string(),
-      click: z.string(),
-      pixel: z.string(),
+      serve: z
+        .string()
+        .optional()
+        .describe(
+          "Absent for content-only tests (every variant inline text/html/" +
+            "markdown): a redirect can only send a visitor to a url or " +
+            "image, so those tests are served by the SDK (see sdkSnippet) " +
+            "and this link would 400."
+        ),
+      click: z
+        .string()
+        .describe(
+          "Records a conversion for an identified visitor and redirects " +
+            "onward. Independent of how the test is served: needs a " +
+            "redirectUrl (or ?to=), never a url/image."
+        ),
+      pixel: z
+        .string()
+        .describe(
+          "No-JS conversion pixel for thank-you pages, with ?id= per " +
+            "visitor. Independent of how the test is served."
+        ),
       manage: z
         .string()
         .describe(
@@ -350,9 +466,23 @@ export const buildTest = defineTool({
             "dashboard. It contains the stats secret in its #fragment, so " +
             "share it only with people authorized to see results."
         ),
-      serveNoAutoContext: z.string(),
+      serveNoAutoContext: z
+        .string()
+        .optional()
+        .describe("Absent for content-only tests, like serve."),
       clickNoAutoContext: z.string()
     }),
+    sdkSnippet: z
+      .string()
+      .optional()
+      .describe(
+        "Content-only tests only: the on-page install, ready to paste, " +
+          "and the ONLY way such a test serves. The tag once in <head>, " +
+          "then createTest with this exact encoded config, so the page " +
+          "serves the test built here (identity, region and stats key " +
+          "included) rather than a lookalike. Absent when any variant has " +
+          "a url or image."
+      ),
     slotLinks: z
       .record(z.string(), z.object({ serve: z.string(), click: z.string() }))
       .optional()
@@ -362,7 +492,8 @@ export const buildTest = defineTool({
           "say which element it renders. The bare urls.click works when " +
           "the destination is uniform (a config redirectUrl or ?to=); " +
           "per-slot clicks matter as soon as an element carries its own " +
-          "destination, via slotRedirects or a variant redirectUrl."
+          "destination, via slotRedirects or a variant redirectUrl. " +
+          "Absent for content-only tests, which the SDK serves."
       ),
     emailTemplate: z
       .record(
@@ -446,10 +577,18 @@ export const buildTest = defineTool({
 
     const entries = slotEntries(parsed);
     const multiSlot = entries.length > 1;
+    // Content-only: no variant anywhere has a url or image, so nothing
+    // in this test can be served by redirect and the SDK is its one
+    // serving path. Its serve links are left out rather than returned
+    // with a disclaimer (#64); click and pixel stay, because neither
+    // depends on how the visitor was served.
+    const contentOnly = entries.every(([, variants]) =>
+      variants.every(v => !v.url && !v.image)
+    );
     const warnings = [...encoded.warnings];
     for (const [key, variants] of entries) {
       const inlineOnly = variants.filter(v => !v.url && !v.image);
-      if (inlineOnly.length > 0) {
+      if (!contentOnly && inlineOnly.length > 0) {
         warnings.push(
           `Slot "${key}" has ${inlineOnly.length} variant(s) with no url/image, ` +
             "so that slot cannot be served by redirect (email); its serve " +
@@ -507,14 +646,25 @@ export const buildTest = defineTool({
       combinations: cells,
       region: parsed.region ?? null,
       urls: {
-        serve: urls.serve,
+        ...(contentOnly
+          ? {}
+          : { serve: urls.serve, serveNoAutoContext: urls.noAuto.serve }),
         click: urls.click,
         pixel: urls.pixel,
         manage: urls.manage,
-        serveNoAutoContext: urls.noAuto.serve,
         clickNoAutoContext: urls.noAuto.click
       },
-      ...(multiSlot
+      ...(contentOnly
+        ? {
+            sdkSnippet: sdkSnippet(
+              serveOrigin,
+              encoded.encoded,
+              entries,
+              input.publishableKey
+            )
+          }
+        : {}),
+      ...(multiSlot && !contentOnly
         ? {
             slotLinks: Object.fromEntries(
               entries.map(([key]) => [
@@ -703,7 +853,19 @@ export const inspectTest = defineTool({
       }))
     }));
     for (const slot of slots) {
-      if (slot.variants.some(v => !v.servesByRedirect)) {
+      const byRedirect = slot.variants.filter(v => v.servesByRedirect).length;
+      // All inline is a shape, not a mistake: the SDK serves it and no
+      // redirect link was ever going to (#90). The error is for the
+      // slot that mixes the two, which really is broken for redirect.
+      if (byRedirect === 0) {
+        findings.push({
+          level: "note",
+          message:
+            `Slot "${slot.slot}" has only inline content (no url or image), ` +
+            "so it is served by the SDK on the page; redirect serve links " +
+            "and email templates do not apply to it."
+        });
+      } else if (byRedirect < slot.variants.length) {
         findings.push({
           level: "error",
           message:
@@ -715,7 +877,10 @@ export const inspectTest = defineTool({
         });
       }
     }
-    if (entries.length > 1) {
+    if (
+      entries.length > 1 &&
+      slots.some(s => s.variants.some(v => v.servesByRedirect))
+    ) {
       findings.push({
         level: "note",
         message:
