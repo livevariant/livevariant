@@ -220,6 +220,95 @@ lopsided the raw numbers look.
 There is rarely urgency in acting on a result, because the model has already
 been shifting traffic toward the leader the entire time.
 
+## Will this test ever finish?
+
+Ask this before you build the test. On a small site the answer changes what
+is worth testing at all, and "how long until I know?" is the first question
+a human asks once the links are live.
+
+Everything below is simulated against this repository's own model and
+decision code — the real chooser, the real `analyzeOutcomes` — with two
+variants, one genuinely better, results polled every 250 assignments the way
+a dashboard gets refreshed, and each run stopped the first time the analysis
+said the remaining risk was small. The harness is
+`packages/core/src/docs-traffic.spec.ts`, 60 runs per row; re-run it rather
+than take a row on trust.
+
+| Conversion rate | True lift | Median assignments to a call | Middle half | Named the better arm |
+| --------------- | --------- | ---------------------------- | ----------- | -------------------- |
+| 2% | +10% | 3,750 | 1,250–7,750 | 44/60 |
+| 2% | +25% | 3,250 | 1,500–6,000 | 55/60 |
+| 5% | +10% | 2,250 | 1,000–5,000 | 46/60 |
+| 5% | +25% | 1,250 | 750–3,750 | 59/60 |
+| 5% | +50% | 750 | 500–1,250 | 60/60 |
+| 10% | +25% | 1,000 | 500–2,000 | 58/60 |
+
+Assignments, not visits: only identified pulls count (see Limits), so a page
+test counts every browser navigation and an email test counts every recipient
+whose client loads the image. Every run behind this table reached a call
+within its 60,000-assignment cap, so nothing is censored out of the medians.
+
+Three things to take from the table. **Small differences are expensive, and
+the call on one is weak**: at a true +10% the stop arrives after thousands of
+assignments and names the worse variant about a quarter of the time. A stop
+means the expected cost of acting now is small — which, when the two are
+nearly the same, is true of either choice. It is not proof that the leader is
+better. **Large differences are cheap**: +50% on a 5% page is usually settled
+inside a thousand assignments. **Plan against the spread, not the median**: a
+single test can take three times the typical run. What not to take from it is
+the third digit; re-run with a different seed set and a median moves by a poll
+step or two (this table's 2%/+25% row came out at 2,250 in one run of 60 and
+3,250 in another).
+
+**"I do not have that much traffic."** Then do not wait for the verdict — the
+allocation is already paying you, which is the difference between this and a
+frozen split. The same simulated visitors under both policies (identical
+per-visitor outcome draws; only the allocation differs), adaptive versus a
+fixed 50/50 split, mean conversions per test over 200 paired runs:
+
+| Conversion rate | True lift | 2,000 visitors | 10,000 visitors |
+| --------------- | --------- | -------------- | --------------- |
+| 5% | +10% | 104.6 vs 104.1 (+0.4%) | 529.8 vs 524.3 (+1.1%) |
+| 5% | +25% | 114.9 vs 111.6 (+2.9%) | 595.1 vs 561.6 (+6.0%) |
+| 5% | +50% | 135.7 vs 124.0 (+9.4%) | 718.5 vs 624.1 (+15.1%) |
+| 2% | +25% | 44.8 vs 44.3 (+1.2%) | 230.7 vs 223.6 (+3.2%) |
+| 10% | +25% | 235.6 vs 223.7 (+5.3%) | 1,218.1 vs 1,124.3 (+8.3%) |
+
+A 50/50 test sends half of everyone to the loser until a human calls it; this
+one sends less and less there as the evidence arrives, and those extra
+conversions are kept whether or not a verdict ever lands. The gain is small
+when the difference is small — which is the same sentence as "there was not
+much to win there" — and it is largest exactly where a fixed split is most
+expensive.
+
+Two honest edges on that table. Early on, adaptive allocation can cost you a
+little: at 500 visitors with a +10% difference it came out 0.1 conversions
+BEHIND the fixed split, which is exploration being paid for before it has
+anything to exploit. And the small-lift gains are within a whisker of noise
+even paired — the 5%/+10% row at 10,000 visitors is +5.5 conversions with a
+two-standard-error range of ±1.1, while the 5%/+50% row is +94.4 ± 2.3. The
+harness prints that interval for every row.
+
+So on a page with modest traffic:
+
+- **Test differences big enough to be worth finding.** A different offer,
+  headline or image, not a button shade. The table prices small effects
+  honestly: thousands of assignments for a call you should not lean on.
+- **Warm-start with `generate_priors`** when you already believe something
+  about the variants. Priors sit outside the identity hash, so they can be
+  added or tuned mid-test without losing history.
+- **Leave it running.** Nothing requires a stop, and a test that never gets
+  called still allocates traffic toward whatever is winning. A good test is a
+  permanent allocation as much as it is a question.
+- **A test that never says "stop" has not said the variants are equal.**
+  Nothing can be called before an arm reaches 100 assignments, and after that
+  the answer stays "keep running" while the evidence is thin — which on a
+  quiet page is the normal state. Read it as *not known yet*, never as *no
+  difference*: dropping the variant that happens to be behind is exactly the
+  mistake the win probabilities exist to prevent. What it does tell you is
+  that the difference is small relative to your traffic, so the next test
+  should be a bolder one.
+
 ## Running a test in email
 
 Email is where this is most useful and most easily got wrong.
