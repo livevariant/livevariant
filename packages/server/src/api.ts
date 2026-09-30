@@ -19,6 +19,11 @@ import {
 } from "@livevariant/tools";
 import type { AccountsProvider } from "./accounts-port.js";
 import {
+  canonicalOriginOf,
+  canonicalUrlFor,
+  withCanonical
+} from "./canonical.js";
+import {
   TOOLS,
   ToolInputError,
   buildOpenApiDocument,
@@ -107,6 +112,11 @@ export interface ApiOptions {
    */
   spaFetch?: (request: Request) => Promise<Response>;
   /**
+   * The dashboard's canonical origin (LV_APP_URL), for a deployment that
+   * answers on more than one hostname. See AppOptions.appUrl.
+   */
+  appUrl?: string;
+  /**
    * Path prefix this app is mounted under. See AppOptions.basePath: every
    * origin computed from a request URL below has to carry it, or the
    * links and the discovery documents point at a root this deployment
@@ -128,6 +138,14 @@ export function createApi(options: ApiOptions): Hono {
    * instead of pointing at the root of a host it shares.
    */
   const baseOf = (url: string): string => new URL(url).origin + basePath;
+  /**
+   * Where the dashboard's pages live for a crawler: the canonical origin
+   * when one is configured, else this request's own. The pages
+   * themselves are served on every hostname; only their address is one.
+   */
+  const canonicalOrigin = canonicalOriginOf(options.appUrl);
+  const pagesBaseOf = (url: string): string =>
+    canonicalOrigin ? canonicalOrigin + basePath : baseOf(url);
 
   /**
    * Built per request, so every generated URL points at whatever origin
@@ -413,16 +431,17 @@ export function createApi(options: ApiOptions): Hono {
 
   // Crawling is welcome, training included: see renderRobotsTxt. Served
   // by the worker rather than shipped as a static file so the Sitemap
-  // directive names the origin the request arrived on.
+  // directive names the origin the request arrived on, or the canonical
+  // one when the deployment has several.
   app.get("/robots.txt", c =>
-    c.text(renderRobotsTxt(baseOf(c.req.url)), 200, {
+    c.text(renderRobotsTxt(pagesBaseOf(c.req.url)), 200, {
       "content-type": "text/plain; charset=utf-8"
     })
   );
 
   // The dashboard's public pages; app routes behind sign-in stay out.
   app.get("/sitemap.xml", c => {
-    const base = baseOf(c.req.url);
+    const base = pagesBaseOf(c.req.url);
     const pages = ["/", "/builder", "/terms", "/privacy"];
     const xml =
       `<?xml version="1.0" encoding="UTF-8"?>\n` +
@@ -438,7 +457,8 @@ export function createApi(options: ApiOptions): Hono {
   // negotiation (Accept: text/markdown answers with the same document
   // as /llms.txt) and RFC 8288 Link headers on the HTML. Browsers get
   // the SPA shell from the host-injected asset fetcher, untouched
-  // except for the added Link header.
+  // except for the added Link header and, on a multi-hostname
+  // deployment, the canonical link (see canonical.ts).
   const AGENT_LINKS =
     '</.well-known/api-catalog>; rel="api-catalog", ' +
     '</openapi.json>; rel="service-desc", ' +
@@ -455,7 +475,9 @@ export function createApi(options: ApiOptions): Hono {
       return c.notFound();
     }
     const shell = await options.spaFetch(c.req.raw);
-    const page = new Response(shell.body, shell);
+    const page = canonicalOrigin
+      ? await withCanonical(shell, canonicalUrlFor(canonicalOrigin, c.req.url))
+      : new Response(shell.body, shell);
     page.headers.append("link", AGENT_LINKS);
     return page;
   });

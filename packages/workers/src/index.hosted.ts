@@ -23,8 +23,6 @@ export interface HostedEnv extends Env {
   LV_ACCOUNTS_DB?: D1Database;
   /** Session/token signing secret (wrangler secret put LV_AUTH_SECRET). */
   LV_AUTH_SECRET?: string;
-  /** Dashboard origin, e.g. https://livevariant.com. */
-  LV_APP_URL?: string;
   /** Resend API key for magic-link email. */
   LV_RESEND_API_KEY?: string;
   /** From address; defaults to the LiveVariant login sender. */
