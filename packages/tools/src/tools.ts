@@ -1231,9 +1231,8 @@ export const variantBrief = defineTool({
   summary:
     "Channel-specific specs and rules for drafting the variants themselves",
   description:
-    "Returns the constraints to write or generate test variants against, for " +
-    "email or web, plus the rules that decide whether a test can be read at " +
-    "all once it runs.\n\n" +
+    "Returns the constraints and authoring rules to write or generate test " +
+    "variants against, for email or web.\n\n" +
     "The one that matters most: one idea per slot. To vary two elements, " +
     "give the test two slots and let it learn the combination, rather than " +
     "bundling both changes into one variant and never learning which half " +
