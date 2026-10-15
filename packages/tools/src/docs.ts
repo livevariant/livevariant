@@ -186,7 +186,9 @@ empty history. So iteration happens on the PLAN, never on a live test.
    conversion) and let them iterate until it is what they meant. Only
    then build. Running unattended, skip the pause but still put the plan
    in your output.
-4. \`build_test\` to get the URLs and the stats secret. Store the secret.
+4. \`build_test\` to get the URLs and the stats secret. Store the secret —
+   if nothing you have outlives this run, see "Saving a test to an
+   account".
 5. \`generate_priors\`, optionally, to warm-start from what you expect. Add
    \`when\` when the belief is about one segment rather than everybody.
 6. \`get_stats\` to read results.
@@ -398,7 +400,16 @@ without pasting the secret again.
 Either way, when you return a newly built test, include the manage URL and
 say what claiming does; an unregistered test whose manage URL the user never
 saw is effectively lost to them. \`get_test_status\` tells you later whether a
-test ended up claimed and by which organization.`;
+test ended up claimed and by which organization.
+
+**Running unattended, you are the one who will read the results.** With no
+human to hand the secret to, "store it" means writing it somewhere that
+still exists after this process ends. It is unrecoverable by construction:
+only its hash goes into the config, and that hash is part of the test's
+identity, so a replacement secret is a different test with empty history.
+If nothing you have outlives the run, register the test at creation (path
+1) instead — on a deployment with accounts, a registered test's stats stay
+readable to a session in the owning organization with no secret at all.`;
 
 function restSection(apiUrl: string): string {
   return `## If you cannot install the MCP server
